@@ -1,0 +1,39 @@
+{# _empty_state.html
+   Usage: {% from "components/_empty_state.html" import empty_state %}
+          {{ empty_state("No records found", "Try adjusting your filters.", show_retry=true) }} #}
+
+{% macro empty_state(title, message="", show_retry=false, retry_url="", icon="inbox") %}
+<div class="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
+  <div class="w-16 h-16 rounded-2xl bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center mb-4">
+    {% if icon == "inbox" %}
+    <svg class="w-8 h-8 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+        d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+    </svg>
+    {% elif icon == "chart" %}
+    <svg class="w-8 h-8 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+    {% else %}
+    <svg class="w-8 h-8 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+    {% endif %}
+  </div>
+  <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-1">{{ title }}</h3>
+  {% if message %}
+  <p class="text-sm text-neutral-500 dark:text-neutral-400 max-w-xs">{{ message }}</p>
+  {% endif %}
+  {% if show_retry %}
+  <a href="{{ retry_url or '#' }}" onclick="window.location.reload(); return false;"
+     class="mt-4 btn-secondary btn btn-sm">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+    Retry
+  </a>
+  {% endif %}
+</div>
+{% endmacro %}

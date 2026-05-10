@@ -1,0 +1,46 @@
+{# _table.html — DataTable wrapper
+   Usage: {% from "components/_table.html" import data_table %}
+   {% call(cols, rows_block) data_table(id="myTable", caption="Overdue by Team") %}
+     {# cols block #}
+   {% endcall %} #}
+
+{% macro data_table(id, caption="", page_length=10, export=true, search=true) %}
+<div class="overflow-hidden">
+  {% if caption %}
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ caption }}</h3>
+    {% if export %}
+    <div class="flex gap-2">
+      <button onclick="exportTableCSV('{{ id }}')"
+        class="btn btn-secondary btn-sm">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+        CSV
+      </button>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
+    <table id="{{ id }}"
+      class="w-full text-sm border-collapse"
+      data-page-length="{{ page_length }}"
+      data-search="{{ 'true' if search else 'false' }}">
+      {{ caller() if caller is defined }}
+    </table>
+  </div>
+</div>
+{% endmacro %}
+
+{# Reusable table header cell #}
+{% macro th(label, cls="") %}
+<th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide bg-neutral-50 dark:bg-neutral-900 {{ cls }}">
+  {{ label }}
+</th>
+{% endmacro %}
+
+{# Reusable table data cell #}
+{% macro td(content, cls="") %}
+<td class="px-4 py-3 text-neutral-700 dark:text-neutral-300 {{ cls }}">{{ content }}</td>
+{% endmacro %}

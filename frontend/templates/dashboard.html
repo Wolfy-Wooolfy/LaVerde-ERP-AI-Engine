@@ -1,135 +1,455 @@
 {% extends "base.html" %}
+{% from "components/_kpi_card.html" import kpi_card %}
+{% from "components/_badge.html" import badge %}
+{% from "components/_empty_state.html" import empty_state %}
 
-{% block title %}CRM Sales Health Dashboard{% endblock %}
+{% block title %}{{ _t("Dashboard") }} — CRM AI Engine{% endblock %}
+
+{% block page_title %}{{ _t("Dashboard") }}{% endblock %}
 
 {% block content %}
-<h1>CRM Sales Health Dashboard</h1>
-<div class="subtitle">Read-only · Scope: {{ scope }} · Mode: {{ mode }}</div>
-
-<div class="cards">
-    <div class="card">
-        <div class="card-title">Total Leads</div>
-        <div class="card-value">{{ summary.total_leads }}</div>
+<!-- ── Hero ─────────────────────────────────────────────────────────────────── -->
+<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+  <div>
+    <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
+      <span id="greeting">Good day</span>, {{ current_user.split('@')[0] | title }}
+    </h1>
+    <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+      {{ _t("Here's what's happening with your CRM today") }}
+    </p>
+  </div>
+  <div class="flex items-center gap-3 shrink-0">
+    <div class="flex items-center gap-1.5 text-xs text-neutral-400">
+      <span class="w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse"></span>
+      <span id="last-updated-label">{{ _t("Last updated") }}: </span>
+      <span id="last-updated-time" class="font-mono">now</span>
     </div>
-    <div class="card">
-        <div class="card-title">Follow-ups Today</div>
-        <div class="card-value">{{ summary.followups_today }}</div>
-    </div>
-    <div class="card">
-        <div class="card-title">Overdue Follow-ups</div>
-        <div class="card-value badge-danger">{{ summary.overdue_followups }}</div>
-    </div>
-    <div class="card">
-        <div class="card-title">Planned Follow-ups</div>
-        <div class="card-value">{{ summary.planned_followups }}</div>
-    </div>
-    <div class="card">
-        <div class="card-title">No Activity Leads</div>
-        <div class="card-value badge-warning">{{ summary.no_activity_leads }}</div>
-    </div>
-    <div class="card">
-        <div class="card-title">Critical Overdue</div>
-        <div class="card-value badge-danger">{{ summary.critical_overdue }}</div>
-    </div>
-    <div class="card">
-        <div class="card-title">Data Quality Issues</div>
-        <div class="card-value badge-warning">{{ summary.data_quality_issues }}</div>
-    </div>
+    <button onclick="crmRefresh()"
+      class="btn btn-secondary btn-sm"
+      id="hero-refresh-btn">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      {{ _t("Refresh") }}
+    </button>
+    {{ badge(_t("Read-only mode"), "neutral") }}
+  </div>
 </div>
 
-<div class="section">
-    <h2>Overdue by Team</h2>
-    <table>
-        <thead><tr><th>Team</th><th>Overdue Count</th></tr></thead>
-        <tbody>
-            {% for row in followup_risk.overdue_by_team %}
-            <tr>
-                <td>{{ row.team_name }}</td>
-                <td>{{ row.overdue_count }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
+<!-- ── KPI Cards ─────────────────────────────────────────────────────────────── -->
+<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4 mb-8">
+
+  {{ kpi_card(
+    label=_t("Total Leads"),
+    value=summary.total_leads,
+    variant="default",
+    icon="users",
+    sparkline_metric="total_leads"
+  ) }}
+
+  {{ kpi_card(
+    label=_t("Critical Overdue"),
+    value=summary.critical_overdue,
+    variant="danger",
+    icon="alert",
+    sparkline_metric="critical"
+  ) }}
+
+  {{ kpi_card(
+    label=_t("Overdue Follow-ups"),
+    value=summary.overdue_followups,
+    variant="warning",
+    icon="clock",
+    sparkline_metric="overdue"
+  ) }}
+
+  {{ kpi_card(
+    label=_t("Follow-ups Today"),
+    value=summary.followups_today,
+    variant="success",
+    icon="check",
+    sparkline_metric="followups_today"
+  ) }}
+
+  {{ kpi_card(
+    label=_t("Missing Contact Info"),
+    value=data_quality.missing_contact_count,
+    variant="warning",
+    icon="phone",
+    sparkline_metric="missing_contact",
+    href="/data-quality/missing-contact"
+  ) }}
+
+  {{ kpi_card(
+    label=_t("Missing Salesperson"),
+    value=data_quality.missing_salesperson_count,
+    variant="warning",
+    icon="user-x",
+    sparkline_metric="missing_salesperson"
+  ) }}
+
+  {{ kpi_card(
+    label=_t("Data Quality Issues"),
+    value=data_quality.total_data_quality_issues,
+    variant="danger",
+    icon="activity",
+    sparkline_metric="data_quality"
+  ) }}
+
+</div>
+
+<!-- ── Charts Row ─────────────────────────────────────────────────────────────── -->
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
+
+  <!-- Chart 1: Activity Donut -->
+  <div class="chart-panel flex flex-col">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("Activity Distribution") }}</h3>
+    </div>
+    <div class="relative h-56 flex items-center justify-center">
+      <canvas id="activityChart"></canvas>
+      {% if summary.total_leads == 0 %}
+      {{ empty_state(_t("No data"), icon="chart") }}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Chart 2: Top salespeople horizontal bar -->
+  <div class="chart-panel flex flex-col">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("Top 10 Salespeople by Overdue") }}</h3>
+    </div>
+    <div class="relative h-56">
+      <canvas id="salespersonChart"></canvas>
+      {% if not followup_risk.overdue_by_salesperson %}
+      {{ empty_state(_t("No overdue items"), icon="chart") }}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Chart 3: Stage distribution vertical bar -->
+  <div class="chart-panel flex flex-col md:col-span-2 xl:col-span-1">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("Stage Distribution") }}</h3>
+    </div>
+    <div class="relative h-56">
+      <canvas id="stageChart"></canvas>
+      {% if not followup_risk.overdue_by_stage %}
+      {{ empty_state(_t("No overdue items"), icon="chart") }}
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Heatmap ────────────────────────────────────────────────────────────────── -->
+<div class="chart-panel mb-8">
+  <div class="flex items-center justify-between mb-4">
+    <div>
+      <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("Overdue Heatmap") }}</h3>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{{ _t("Salesperson × Stage") }}</p>
+    </div>
+    <div class="flex items-center gap-2 text-xs text-neutral-500">
+      <span>0</span>
+      <div class="flex gap-0.5">
+        {% for opacity in ["20", "40", "60", "80", "100"] %}
+        <div class="w-5 h-4 rounded-sm bg-danger-500 opacity-{{ opacity }}"></div>
+        {% endfor %}
+      </div>
+      <span>High</span>
+    </div>
+  </div>
+
+  {% if followup_risk.overdue_matrix_by_team_salesperson_stage %}
+  <div class="overflow-x-auto">
+    {# Build heatmap matrix in Jinja #}
+    {% set matrix = followup_risk.overdue_matrix_by_team_salesperson_stage %}
+    {% set sp_names = [] %}
+    {% set stage_names = [] %}
+    {% for row in matrix %}
+      {% if row.salesperson_name not in sp_names %}{% set _ = sp_names.append(row.salesperson_name) %}{% endif %}
+      {% if row.stage_name not in stage_names %}{% set _ = stage_names.append(row.stage_name) %}{% endif %}
+    {% endfor %}
+
+    {# Limit to top 10 salespersons by total overdue #}
+    {% set sp_totals = {} %}
+    {% for row in matrix %}
+      {% set cur = sp_totals.get(row.salesperson_name, 0) + row.overdue_count %}
+      {% set _ = sp_totals.update({row.salesperson_name: cur}) %}
+    {% endfor %}
+    {# Sort by value desc, take top 10 #}
+    {% set top_sp = [] %}
+    {% for k, v in sp_totals | dictsort(by='value', reverse=true) %}
+      {% if loop.index0 < 10 %}{% set _ = top_sp.append(k) %}{% endif %}
+    {% endfor %}
+
+    {# Max value for color scaling #}
+    {% set max_val = namespace(v=1) %}
+    {% for row in matrix %}
+      {% if row.overdue_count > max_val.v %}{% set max_val.v = row.overdue_count %}{% endif %}
+    {% endfor %}
+
+    {# Cell lookup #}
+    {% set cells = {} %}
+    {% for row in matrix %}
+      {% set _ = cells.update({(row.salesperson_name, row.stage_name): row.overdue_count}) %}
+    {% endfor %}
+
+    <table class="text-xs min-w-full border-separate border-spacing-1">
+      <thead>
+        <tr>
+          <th class="px-2 py-1.5 text-left text-neutral-500 dark:text-neutral-400 font-medium w-32 sticky left-0 bg-white dark:bg-neutral-800">
+            {{ _t("Salesperson") }}
+          </th>
+          {% for st in stage_names %}
+          <th class="px-1 py-1.5 text-center text-neutral-500 dark:text-neutral-400 font-medium min-w-[80px] max-w-[120px]">
+            <span class="block truncate" title="{{ st }}">{{ st | truncate(12, true, '…') }}</span>
+          </th>
+          {% endfor %}
+          <th class="px-2 py-1.5 text-center text-neutral-500 dark:text-neutral-400 font-medium">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sp in top_sp %}
+        {% set sp_total = sp_totals.get(sp, 0) %}
+        <tr>
+          <td class="px-2 py-1 text-neutral-700 dark:text-neutral-300 font-medium sticky left-0 bg-white dark:bg-neutral-800 z-10 whitespace-nowrap">
+            <span class="block truncate max-w-[120px]" title="{{ sp }}">{{ sp }}</span>
+          </td>
+          {% for st in stage_names %}
+          {% set count = cells.get((sp, st), 0) %}
+          {% set intensity = ((count / max_val.v) * 100) | int if max_val.v > 0 else 0 %}
+          <td class="heatmap-cell"
+            title="{{ sp }} × {{ st }}: {{ count }}"
+            style="background: rgba({{ '239,68,68' if count > 0 else '229,229,229' }}, {{ (count / max_val.v * 0.85 + 0.08) | round(2) if count > 0 else '0.15' }});">
+            {% if count > 0 %}
+            <span class="{% if intensity > 50 %}text-white{% else %}text-danger-800{% endif %}">{{ count }}</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td class="px-2 py-1 text-center font-bold text-danger-600 dark:text-danger-400 tabular">{{ sp_total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
+  </div>
+  {% else %}
+  {{ empty_state(_t("No overdue items"), _t("No data to display in the heatmap."), icon="chart") }}
+  {% endif %}
 </div>
 
-<div class="section">
-    <h2>Overdue by Salesperson</h2>
-    <table>
-        <thead><tr><th>Salesperson</th><th>Overdue Count</th></tr></thead>
-        <tbody>
-            {% for row in followup_risk.overdue_by_salesperson %}
-            <tr>
-                <td>{{ row.salesperson_name }}</td>
-                <td>{{ row.overdue_count }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+<!-- ── Tables Section ─────────────────────────────────────────────────────────── -->
+<div class="chart-panel" x-data="{ tab: 'salesperson' }">
+  <!-- Tabs -->
+  <div class="flex gap-1 border-b border-neutral-200 dark:border-neutral-700 mb-4 -mx-5 px-5 overflow-x-auto scrollbar-hide">
+    {% for tab_id, tab_label in [
+        ("salesperson", _t("By Salesperson")),
+        ("team",        _t("By Team")),
+        ("stage",       _t("By Stage")),
+        ("matrix",      _t("Matrix")),
+    ] %}
+    <button @click="tab = '{{ tab_id }}'"
+      :class="tab === '{{ tab_id }}'
+        ? 'border-b-2 border-primary-600 text-primary-600 dark:text-primary-400 font-semibold'
+        : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border-b-2 border-transparent'"
+      class="px-4 py-3 text-sm whitespace-nowrap transition-colors duration-150">
+      {{ tab_label }}
+    </button>
+    {% endfor %}
+  </div>
 
-<div class="section">
-    <h2>Overdue by Stage</h2>
-    <table>
-        <thead><tr><th>Stage</th><th>Overdue Count</th></tr></thead>
-        <tbody>
-            {% for row in followup_risk.overdue_by_stage %}
-            <tr>
-                <td>{{ row.stage_name }}</td>
-                <td>{{ row.overdue_count }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-<div class="section">
-    <h2>Overdue Matrix: Team → Salesperson → Stage</h2>
-    <table>
+  <!-- By Salesperson -->
+  <div x-show="tab === 'salesperson'" x-cloak>
+    {% if followup_risk.overdue_by_salesperson %}
+    <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
+      <table id="spTable" class="w-full text-sm">
         <thead>
-            <tr>
-                <th>Team</th><th>Salesperson</th><th>Stage</th><th>Overdue Count</th>
-            </tr>
+          <tr class="bg-neutral-50 dark:bg-neutral-900">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Salesperson") }}</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+          </tr>
         </thead>
         <tbody>
-            {% for row in followup_risk.overdue_matrix_by_team_salesperson_stage %}
-            <tr>
-                <td>{{ row.team_name }}</td>
-                <td>{{ row.salesperson_name }}</td>
-                <td>{{ row.stage_name }}</td>
-                <td>{{ row.overdue_count }}</td>
-            </tr>
-            {% endfor %}
+          {% for row in followup_risk.overdue_by_salesperson | sort(attribute='overdue_count', reverse=True) %}
+          <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
+            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.salesperson_name }}</td>
+            <td class="px-4 py-3 text-right">
+              <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
+                {{ row.overdue_count }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
         </tbody>
-    </table>
-</div>
+      </table>
+    </div>
+    {% else %}
+    {{ empty_state(_t("No overdue items")) }}
+    {% endif %}
+  </div>
 
-<div class="section">
-    <h2>Data Quality</h2>
-    <table>
-        <thead><tr><th>Issue</th><th>Count</th></tr></thead>
+  <!-- By Team -->
+  <div x-show="tab === 'team'" x-cloak>
+    {% if followup_risk.overdue_by_team %}
+    <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
+      <table id="teamTable" class="w-full text-sm">
+        <thead>
+          <tr class="bg-neutral-50 dark:bg-neutral-900">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Team") }}</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+          </tr>
+        </thead>
         <tbody>
-            <tr>
-                <td>New X Leads (needs classification)</td>
-                <td>{{ data_quality.new_x_count }}</td>
-            </tr>
-            <tr>
-                <td>Missing Stage</td>
-                <td>{{ data_quality.missing_stage_count }}</td>
-            </tr>
-            <tr>
-                <td>
-                    Missing Phone &amp; Mobile
-                    <a href="/data-quality/missing-contact" style="margin-left:10px;font-size:12px">View Details →</a>
-                </td>
-                <td>{{ data_quality.missing_contact_count }}</td>
-            </tr>
-            <tr>
-                <td>Missing Salesperson</td>
-                <td>{{ data_quality.missing_salesperson_count }}</td>
-            </tr>
+          {% for row in followup_risk.overdue_by_team | sort(attribute='overdue_count', reverse=True) %}
+          <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
+            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.team_name }}</td>
+            <td class="px-4 py-3 text-right">
+              <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
+                {{ row.overdue_count }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
         </tbody>
-    </table>
+      </table>
+    </div>
+    {% else %}
+    {{ empty_state(_t("No overdue items")) }}
+    {% endif %}
+  </div>
+
+  <!-- By Stage -->
+  <div x-show="tab === 'stage'" x-cloak>
+    {% if followup_risk.overdue_by_stage %}
+    <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
+      <table id="stageTable" class="w-full text-sm">
+        <thead>
+          <tr class="bg-neutral-50 dark:bg-neutral-900">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Stage") }}</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in followup_risk.overdue_by_stage | sort(attribute='overdue_count', reverse=True) %}
+          <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
+            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.stage_name }}</td>
+            <td class="px-4 py-3 text-right">
+              <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
+                {{ row.overdue_count }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    {{ empty_state(_t("No overdue items")) }}
+    {% endif %}
+  </div>
+
+  <!-- Matrix -->
+  <div x-show="tab === 'matrix'" x-cloak>
+    {% if followup_risk.overdue_matrix_by_team_salesperson_stage %}
+    <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
+      <table id="matrixTable" class="w-full text-sm">
+        <thead>
+          <tr class="bg-neutral-50 dark:bg-neutral-900">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Team") }}</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Salesperson") }}</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Stage") }}</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in followup_risk.overdue_matrix_by_team_salesperson_stage | sort(attribute='overdue_count', reverse=True) %}
+          <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
+            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.team_name }}</td>
+            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.salesperson_name }}</td>
+            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.stage_name }}</td>
+            <td class="px-4 py-3 text-right">
+              <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
+                {{ row.overdue_count }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    {{ empty_state(_t("No overdue items")) }}
+    {% endif %}
+  </div>
+
 </div>
 
-<div class="footer">Mode: {{ mode }} | Scope: {{ scope }}</div>
+<!-- Data Quality summary card -->
+<div class="mt-4 chart-panel">
+  <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-4">{{ _t("Data Quality") }}</h3>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    {% for label, value, variant in [
+        (_t("New X Leads"),         data_quality.new_x_count,              "warning"),
+        (_t("Missing Stage"),       data_quality.missing_stage_count,       "warning"),
+        (_t("Missing Contact Info"),data_quality.missing_contact_count,     "danger"),
+        (_t("Missing Salesperson"), data_quality.missing_salesperson_count, "warning"),
+    ] %}
+    <div class="flex flex-col gap-1 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+      <p class="text-xs text-neutral-500 dark:text-neutral-400">{{ label }}</p>
+      <p class="text-2xl font-bold tabular {{ 'text-danger-600 dark:text-danger-400' if variant == 'danger' else 'text-warning-600 dark:text-warning-400' }}">
+        {{ value }}
+      </p>
+      {% if label == _t("Missing Contact Info") and value > 0 %}
+      <a href="/data-quality/missing-contact"
+        class="text-xs text-primary-600 dark:text-primary-400 hover:underline mt-0.5">
+        View details →
+      </a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── Pass server data to charts.js ──────────────────────────────────────────
+window.CRM_DATA = {
+  activity: {
+    overdue:  {{ summary.overdue_followups }},
+    today:    {{ summary.followups_today }},
+    planned:  {{ summary.planned_followups }},
+    none:     {{ summary.no_activity_leads }}
+  },
+  bySalesperson: {{ followup_risk.overdue_by_salesperson | map(attribute='salesperson_name') | list | tojson }}.map(function(name, i) {
+    return { name: name, count: [{{ followup_risk.overdue_by_salesperson | map(attribute='overdue_count') | list | join(', ') }}][i] };
+  }),
+  byStage: {{ followup_risk.overdue_by_stage | map(attribute='stage_name') | list | tojson }}.map(function(name, i) {
+    return { name: name, count: [{{ followup_risk.overdue_by_stage | map(attribute='overdue_count') | list | join(', ') }}][i] };
+  })
+};
+
+// Initialize greeting
+document.addEventListener('DOMContentLoaded', function() {
+  var h = new Date().getHours();
+  var greetings = { en: ['Good evening','Good morning','Good afternoon','Good evening'] };
+  var label = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  var el = document.getElementById('greeting');
+  if (el) el.textContent = label;
+
+  // Last updated
+  var lu = document.getElementById('last-updated-time');
+  if (lu) lu.textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+
+  // Init DataTables on visible tables
+  initDataTables();
+
+  // Init charts
+  initDashboardCharts();
+
+  // Load sparklines
+  loadAllSparklines();
+});
+</script>
 {% endblock %}

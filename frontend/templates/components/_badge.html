@@ -1,0 +1,9 @@
+{# _badge.html — Usage: {% from "components/_badge.html" import badge %}
+   {{ badge("Active", "success") }}  — variant: success | warning | danger | info | neutral #}
+
+{% macro badge(text, variant="neutral", dot=false) %}
+<span class="badge badge-{{ variant }}">
+  {%- if dot %}<span class="w-1.5 h-1.5 rounded-full bg-current inline-block"></span>{% endif -%}
+  {{- text -}}
+</span>
+{% endmacro %}

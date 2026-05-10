@@ -1,0 +1,57 @@
+{# _pagination.html
+   Usage: {% from "components/_pagination.html" import pagination %}
+          {{ pagination(pagination_obj, base_url="/data-quality/missing-contact") }} #}
+
+{% macro pagination(p, base_url="#", extra_params="") %}
+{% if p.total_pages > 1 %}
+<nav class="flex items-center justify-between pt-4" aria-label="Pagination">
+  <p class="text-sm text-neutral-500 dark:text-neutral-400">
+    {{ ((p.page - 1) * p.page_size + 1) }} – {{ [p.page * p.page_size, p.total]|min }}
+    of {{ p.total }} results
+  </p>
+  <div class="flex items-center gap-1">
+    <a href="{{ base_url }}?page={{ p.page - 1 }}&page_size={{ p.page_size }}{{ extra_params }}"
+       class="btn btn-secondary btn-sm {{ 'opacity-40 pointer-events-none' if not p.has_prev else '' }}"
+       aria-label="Previous page">
+      <svg class="w-4 h-4 rtl:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </a>
+
+    {# Show up to 7 page links, with ellipsis #}
+    {% set pages_to_show = [] %}
+    {% if p.total_pages <= 7 %}
+      {% for i in range(1, p.total_pages + 1) %}{% set _ = pages_to_show.append(i) %}{% endfor %}
+    {% else %}
+      {% for i in [1, 2] %}{% set _ = pages_to_show.append(i) %}{% endfor %}
+      {% if p.page > 4 %}{% set _ = pages_to_show.append(-1) %}{% endif %}
+      {% for i in range([p.page - 1, 3]|max, [p.page + 2, p.total_pages - 1]|min + 1) %}
+        {% set _ = pages_to_show.append(i) %}
+      {% endfor %}
+      {% if p.page < p.total_pages - 3 %}{% set _ = pages_to_show.append(-1) %}{% endif %}
+      {% for i in [p.total_pages - 1, p.total_pages] %}{% set _ = pages_to_show.append(i) %}{% endfor %}
+    {% endif %}
+
+    {% for pg in pages_to_show %}
+    {% if pg == -1 %}
+    <span class="px-2 py-1 text-sm text-neutral-400">…</span>
+    {% else %}
+    <a href="{{ base_url }}?page={{ pg }}&page_size={{ p.page_size }}{{ extra_params }}"
+       class="btn btn-sm {{ 'btn-primary' if pg == p.page else 'btn-secondary' }}"
+       aria-current="{{ 'page' if pg == p.page else '' }}">
+      {{ pg }}
+    </a>
+    {% endif %}
+    {% endfor %}
+
+    <a href="{{ base_url }}?page={{ p.page + 1 }}&page_size={{ p.page_size }}{{ extra_params }}"
+       class="btn btn-secondary btn-sm {{ 'opacity-40 pointer-events-none' if not p.has_next else '' }}"
+       aria-label="Next page">
+      <svg class="w-4 h-4 rtl:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+    </a>
+  </div>
+</nav>
+{% endif %}
+{% endmacro %}

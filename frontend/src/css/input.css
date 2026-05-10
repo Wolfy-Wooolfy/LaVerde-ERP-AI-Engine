@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base layer overrides ── */
+@layer base {
+  html {
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  body {
+    @apply antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary-500;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-neutral-300 dark:bg-neutral-600 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-neutral-400 dark:bg-neutral-500; }
+}
+
+/* ── Component layer ── */
+@layer components {
+
+  /* Loading bar */
+  .loading-bar {
+    @apply fixed top-0 left-0 right-0 z-50 h-0.5 bg-primary-500 transition-all duration-300;
+  }
+
+  /* Sidebar */
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+           text-neutral-600 dark:text-neutral-400
+           hover:bg-neutral-100 dark:hover:bg-neutral-800
+           hover:text-neutral-900 dark:hover:text-neutral-100
+           transition-colors duration-150 cursor-pointer select-none;
+  }
+
+  .sidebar-link.active {
+    @apply bg-primary-50 dark:bg-primary-950
+           text-primary-700 dark:text-primary-300;
+  }
+
+  .sidebar-link-icon {
+    @apply w-5 h-5 shrink-0;
+  }
+
+  /* KPI card */
+  .kpi-card {
+    @apply bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700
+           p-5 shadow-card hover:shadow-card-hover transition-all duration-200
+           hover:-translate-y-0.5 cursor-pointer animate-slide-in-up;
+  }
+
+  /* Chart container */
+  .chart-panel {
+    @apply bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700
+           p-5 shadow-card;
+  }
+
+  /* Badge variants */
+  .badge { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium; }
+  .badge-success { @apply badge bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400; }
+  .badge-warning { @apply badge bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400; }
+  .badge-danger  { @apply badge bg-danger-100  text-danger-700  dark:bg-danger-900/30  dark:text-danger-400; }
+  .badge-info    { @apply badge bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400; }
+  .badge-neutral { @apply badge bg-neutral-100 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-400; }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
+           transition-all duration-150 active:scale-[0.98] focus-visible:ring-2
+           focus-visible:ring-offset-2 focus-visible:ring-primary-500;
+  }
+  .btn-primary  { @apply btn bg-primary-600 text-white hover:bg-primary-700; }
+  .btn-secondary{ @apply btn bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300
+                         border border-neutral-200 dark:border-neutral-700
+                         hover:bg-neutral-50 dark:hover:bg-neutral-700; }
+  .btn-ghost    { @apply btn text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800; }
+  .btn-danger   { @apply btn bg-danger-600 text-white hover:bg-danger-700; }
+  .btn-sm       { @apply px-3 py-1.5 text-xs; }
+  .btn-icon     { @apply p-2; }
+
+  /* Form inputs */
+  .form-input {
+    @apply block w-full rounded-lg border border-neutral-200 dark:border-neutral-700
+           bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100
+           placeholder-neutral-400 dark:placeholder-neutral-500
+           px-3 py-2 text-sm shadow-sm
+           focus:border-primary-500 focus:ring-1 focus:ring-primary-500
+           transition-colors duration-150;
+  }
+
+  /* Skeleton shimmer */
+  .skeleton {
+    @apply bg-neutral-200 dark:bg-neutral-700 rounded animate-pulse;
+    background: linear-gradient(
+      90deg,
+      theme('colors.neutral.200') 25%,
+      theme('colors.neutral.100') 50%,
+      theme('colors.neutral.200') 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  .dark .skeleton {
+    background: linear-gradient(
+      90deg,
+      theme('colors.neutral.700') 25%,
+      theme('colors.neutral.600') 50%,
+      theme('colors.neutral.700') 75%
+    );
+    background-size: 200% 100%;
+  }
+
+  /* Toast */
+  .toast {
+    @apply flex items-start gap-3 max-w-sm w-full bg-white dark:bg-neutral-800
+           border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-panel
+           p-4 pointer-events-auto animate-slide-in-right;
+  }
+
+  /* DataTable overrides */
+  .dataTables_wrapper .dataTables_filter input {
+    @apply form-input ml-2 w-48;
+  }
+  .dataTables_wrapper .dataTables_length select {
+    @apply form-input w-auto;
+  }
+  .dataTables_wrapper .dataTables_paginate .paginate_button {
+    @apply px-3 py-1 rounded-lg text-sm text-neutral-600 dark:text-neutral-400
+           hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer;
+  }
+  .dataTables_wrapper .dataTables_paginate .paginate_button.current {
+    @apply bg-primary-600 text-white hover:bg-primary-700;
+  }
+  .dataTables_wrapper .dataTables_paginate .paginate_button.disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+  .dataTables_wrapper .dataTables_info {
+    @apply text-sm text-neutral-500 dark:text-neutral-400;
+  }
+}
+
+/* ── Utilities ── */
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+  /* Number font */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* Heatmap cell */
+  .heatmap-cell {
+    @apply rounded text-xs font-mono text-center py-1.5 cursor-default
+           transition-all duration-150 hover:scale-110 hover:z-10 hover:relative;
+  }
+}
+
+/* ── Print styles ── */
+@media print {
+  .sidebar, .topbar, .no-print { display: none !important; }
+  .main-content { margin: 0 !important; padding: 1rem !important; }
+  .kpi-card, .chart-panel { break-inside: avoid; box-shadow: none !important; border: 1px solid #e5e5e5 !important; }
+  h1, h2 { break-after: avoid; }
+}

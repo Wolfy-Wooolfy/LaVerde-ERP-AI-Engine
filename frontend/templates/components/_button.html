@@ -1,0 +1,17 @@
+{# _button.html — Usage: {% from "components/_button.html" import btn %}
+   {{ btn("Save", variant="primary", href="/path") }} #}
+
+{% macro btn(label, variant="secondary", href=none, type="button", size="", icon=none, disabled=false, cls="") %}
+{% set base = "btn btn-" ~ variant ~ (" btn-" ~ size if size else "") ~ (" " ~ cls if cls else "") %}
+{% if href %}
+<a href="{{ href }}" class="{{ base }} {{ 'opacity-50 pointer-events-none' if disabled else '' }}">
+  {%- if icon %}<span class="w-4 h-4">{{ icon|safe }}</span>{% endif -%}
+  {{- label -}}
+</a>
+{% else %}
+<button type="{{ type }}" class="{{ base }}" {{ 'disabled' if disabled else '' }}>
+  {%- if icon %}<span class="w-4 h-4">{{ icon|safe }}</span>{% endif -%}
+  {{- label -}}
+</button>
+{% endif %}
+{% endmacro %}

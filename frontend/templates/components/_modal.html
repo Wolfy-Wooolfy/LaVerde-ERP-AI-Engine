@@ -1,0 +1,64 @@
+{# _modal.html — Accessible modal/drawer using Alpine.js
+   Usage in template: {% from "components/_modal.html" import modal %}
+   {% call modal(id="myModal", title="Details") %}
+     <p>Content here</p>
+   {% endcall %} #}
+
+{% macro modal(id, title="", size="md") %}
+{% set widths = {"sm": "max-w-sm", "md": "max-w-lg", "lg": "max-w-2xl", "xl": "max-w-4xl"} %}
+<div
+  x-data="{ open: false }"
+  x-on:open-modal-{{ id }}.window="open = true"
+  x-on:close-modal-{{ id }}.window="open = false"
+  x-show="open"
+  x-cloak
+  class="fixed inset-0 z-50 overflow-y-auto"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="modal-title-{{ id }}"
+>
+  <!-- Backdrop -->
+  <div
+    x-show="open"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    @click="open = false"
+    class="fixed inset-0 bg-black/50 backdrop-blur-sm"
+  ></div>
+
+  <!-- Panel -->
+  <div class="flex min-h-full items-center justify-center p-4">
+    <div
+      x-show="open"
+      x-transition:enter="transition ease-out duration-200"
+      x-transition:enter-start="opacity-0 scale-95"
+      x-transition:enter-end="opacity-100 scale-100"
+      x-transition:leave="transition ease-in duration-150"
+      x-transition:leave-start="opacity-100 scale-100"
+      x-transition:leave-end="opacity-0 scale-95"
+      class="relative w-full {{ widths.get(size, 'max-w-lg') }} bg-white dark:bg-neutral-800 rounded-2xl shadow-panel border border-neutral-200 dark:border-neutral-700 animate-fade-in"
+      @click.stop
+    >
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-neutral-700">
+        <h2 id="modal-title-{{ id }}" class="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+          {{ title }}
+        </h2>
+        <button @click="open = false" class="btn-ghost btn btn-icon" aria-label="Close">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <!-- Body -->
+      <div class="px-6 py-5">
+        {{ caller() }}
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}

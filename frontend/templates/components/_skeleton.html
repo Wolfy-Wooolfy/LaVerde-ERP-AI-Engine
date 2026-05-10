@@ -1,0 +1,42 @@
+{# _skeleton.html — Loading skeletons
+   Usage: {% include "components/_skeleton.html" %}  (inside a loading block)
+         Or use the macros: {% from "components/_skeleton.html" import kpi_skeleton, table_skeleton %} #}
+
+{% macro kpi_skeleton() %}
+<div class="kpi-card">
+  <div class="flex justify-between mb-3">
+    <div class="skeleton h-4 w-24 rounded"></div>
+    <div class="skeleton h-8 w-8 rounded-lg"></div>
+  </div>
+  <div class="skeleton h-9 w-20 rounded mb-2"></div>
+  <div class="skeleton h-3 w-16 rounded"></div>
+</div>
+{% endmacro %}
+
+{% macro table_skeleton(rows=5, cols=4) %}
+<div class="space-y-3">
+  {% for _ in range(rows) %}
+  <div class="flex gap-4">
+    {% for _ in range(cols) %}
+    <div class="skeleton h-4 flex-1 rounded"></div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro chart_skeleton() %}
+<div class="chart-panel">
+  <div class="skeleton h-4 w-40 rounded mb-4"></div>
+  <div class="skeleton h-48 w-full rounded-lg"></div>
+</div>
+{% endmacro %}
+
+{% macro text_skeleton(lines=3, widths=none) %}
+{% set w = widths or ["w-full", "w-3/4", "w-1/2"] %}
+<div class="space-y-2">
+  {% for i in range(lines) %}
+  <div class="skeleton h-3 {{ w[i % w|length] }} rounded"></div>
+  {% endfor %}
+</div>
+{% endmacro %}

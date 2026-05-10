@@ -1,0 +1,27 @@
+{# _chart_container.html
+   Usage: {% from "components/_chart_container.html" import chart_container %}
+   {% call chart_container("Activity Distribution", "activityChart") %}{% endcall %} #}
+
+{% macro chart_container(title, chart_id, height="h-56", subtitle="") %}
+<div class="chart-panel flex flex-col">
+  <div class="flex items-start justify-between mb-4">
+    <div>
+      <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ title }}</h3>
+      {% if subtitle %}
+      <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{{ subtitle }}</p>
+      {% endif %}
+    </div>
+    <div class="skeleton-chart-{{ chart_id }} hidden">
+      <div class="skeleton h-4 w-24 rounded"></div>
+    </div>
+  </div>
+  <div class="relative flex-1 {{ height }}">
+    <canvas id="{{ chart_id }}" class="w-full h-full"></canvas>
+    <div id="{{ chart_id }}-empty"
+      class="hidden absolute inset-0 flex items-center justify-center text-sm text-neutral-400">
+      No data
+    </div>
+  </div>
+  {% if caller is defined %}{{ caller() }}{% endif %}
+</div>
+{% endmacro %}

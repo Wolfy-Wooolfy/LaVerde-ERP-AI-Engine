@@ -213,7 +213,7 @@ def test_dashboard_html_requires_auth(client: TestClient) -> None:
 def test_dashboard_html_with_auth(client: TestClient) -> None:
     r = client.get("/dashboard", auth=_AUTH)
     assert r.status_code == 200
-    assert "CRM Sales Health Dashboard" in r.text
+    assert "CRM AI Engine" in r.text
 
 
 # ── Security headers ──────────────────────────────────────────────────────────

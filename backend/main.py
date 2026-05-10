@@ -1,17 +1,19 @@
 """
 CRM AI Engine — FastAPI application entry point.
-Phase 2: async, rate limiting, CORS, security headers, structured error responses.
+Phase 3: Enterprise frontend — Tailwind, Alpine.js, i18n, dark mode, RTL.
 """
 
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -198,3 +200,9 @@ def logout() -> Response:
 
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(dashboard_router)
+
+# ── Static files ──────────────────────────────────────────────────────────────
+
+_static_dir = Path("frontend/static")
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")

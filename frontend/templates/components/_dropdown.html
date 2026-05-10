@@ -1,0 +1,46 @@
+{# _dropdown.html — Alpine.js dropdown menu
+   Usage: {% from "components/_dropdown.html" import dropdown %}
+   {% call dropdown(label="Actions", icon="chevron") %}
+     <a href="#" class="dropdown-item">Export</a>
+   {% endcall %} #}
+
+{% macro dropdown(label, icon="chevron", align="right", cls="") %}
+<div class="relative" x-data="{ open: false }" @click.outside="open = false">
+  <button @click="open = !open"
+    class="btn btn-secondary {{ cls }} flex items-center gap-1.5"
+    :aria-expanded="open">
+    {{ label }}
+    {% if icon == "chevron" %}
+    <svg class="w-3.5 h-3.5 transition-transform duration-150" :class="{ 'rotate-180': open }"
+      fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+    </svg>
+    {% endif %}
+  </button>
+
+  <div x-show="open"
+    x-transition:enter="transition ease-out duration-100"
+    x-transition:enter-start="opacity-0 scale-95"
+    x-transition:enter-end="opacity-100 scale-100"
+    x-transition:leave="transition ease-in duration-75"
+    x-transition:leave-start="opacity-100 scale-100"
+    x-transition:leave-end="opacity-0 scale-95"
+    class="absolute {{ 'right-0' if align == 'right' else 'left-0' }} mt-1.5 z-30
+           min-w-[10rem] bg-white dark:bg-neutral-800
+           border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-panel
+           py-1 text-sm"
+    @click="open = false">
+    {{ caller() }}
+  </div>
+</div>
+{% endmacro %}
+
+{# Dropdown item #}
+{% macro dropdown_item(label, href="#", icon=none) %}
+<a href="{{ href }}"
+   class="flex items-center gap-2.5 px-3 py-2 text-neutral-700 dark:text-neutral-300
+          hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors">
+  {% if icon %}<span class="w-4 h-4 text-neutral-400">{{ icon|safe }}</span>{% endif %}
+  {{ label }}
+</a>
+{% endmacro %}
