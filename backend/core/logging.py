@@ -19,7 +19,7 @@ _PRETTY_FMT = (
 )
 
 _ROTATION = "10 MB"
-_RETENTION = "5 files"
+_RETENTION = 5
 
 
 def setup_logging() -> None:
