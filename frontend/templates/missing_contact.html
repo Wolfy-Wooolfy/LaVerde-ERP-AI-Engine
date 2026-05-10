@@ -36,16 +36,16 @@
       </svg>
       {{ _t("Export CSV") }}
     </button>
-    {{ badge(pagination.total ~ " " ~ _t("results"), "neutral") }}
+    {{ badge(pag.total ~ " " ~ _t("results"), "neutral") }}
   </div>
 </div>
 
 <!-- ── Stats cards ─────────────────────────────────────────────────────────── -->
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
   {% set stats = [
-    (_t("Total Missing"), pagination.total, "danger"),
-    (_t("Page"), pagination.page ~ " / " ~ pagination.total_pages, "neutral"),
-    (_t("Showing"), [pagination.page_size, pagination.total] | min, "info"),
+    (_t("Total Missing"), pag.total, "danger"),
+    (_t("Page"), pag.page ~ " / " ~ pag.total_pages, "neutral"),
+    (_t("Showing"), [pag.page_size, pag.total] | min, "info"),
     (_t("Data Quality Issue"), "No Phone/Mobile", "warning"),
   ] %}
   {% for label, val, variant in stats %}
@@ -89,7 +89,7 @@
       <select name="page_size" onchange="this.form.submit()"
         class="form-input w-24">
         {% for size in [25, 50, 100, 200] %}
-        <option value="{{ size }}" {{ 'selected' if pagination.page_size == size }}>{{ size }}</option>
+        <option value="{{ size }}" {{ 'selected' if pag.page_size == size }}>{{ size }}</option>
         {% endfor %}
       </select>
     </div>
@@ -195,7 +195,7 @@
 
   <!-- Pagination -->
   <div class="px-4 py-3 border-t border-neutral-100 dark:border-neutral-700">
-    {{ pagination(pagination, base_url="/data-quality/missing-contact",
+    {{ pagination(pag, base_url="/data-quality/missing-contact",
         extra_params=("&sort=" ~ filters.sort) if filters.sort else "") }}
   </div>
 

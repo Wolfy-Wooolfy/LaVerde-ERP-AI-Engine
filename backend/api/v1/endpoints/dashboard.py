@@ -72,7 +72,7 @@ async def missing_contact_page(
     )
     from math import ceil
 
-    pagination = {
+    pag = {
         "page": page,
         "page_size": page_size,
         "total": total,
@@ -85,7 +85,7 @@ async def missing_contact_page(
         {
             "page": "missing_contact",
             "rows": rows,
-            "pagination": pagination,
+            "pag": pag,
             "filters": {
                 "team_id": team_id,
                 "salesperson_id": salesperson_id,

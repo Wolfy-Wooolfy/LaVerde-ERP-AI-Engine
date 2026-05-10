@@ -46,7 +46,14 @@ class Settings(BaseSettings):
     RATE_LIMIT_HEALTH: str = "600/minute"
 
     # ── Security headers ──────────────────────────────────────────────────────
-    CSP_POLICY: str = "default-src 'self'; style-src 'self' 'unsafe-inline'"
+    CSP_POLICY: str = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
+        "img-src 'self' data:; "
+        "connect-src 'self';"
+    )
 
     # ── CRM Stage IDs (stored as comma-separated strings for .env compat) ────
     CRM_CRITICAL_STAGE_IDS: str = "28,34,35,37,41"

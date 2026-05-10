@@ -12,7 +12,11 @@
 <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
   <div>
     <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
-      <span id="greeting">Good day</span>, {{ current_user.split('@')[0] | title }}
+      <span id="greeting"
+            data-morning="{{ _t('Good morning') }}"
+            data-afternoon="{{ _t('Good afternoon') }}"
+            data-evening="{{ _t('Good evening') }}">{{ _t('Good morning') }}</span>,
+      {{ current_user.split('@')[0].split('.')[0] | title }}
     </h1>
     <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
       {{ _t("Here's what's happening with your CRM today") }}
@@ -32,7 +36,6 @@
       </svg>
       {{ _t("Refresh") }}
     </button>
-    {{ badge(_t("Read-only mode"), "neutral") }}
   </div>
 </div>
 
@@ -433,10 +436,11 @@ window.CRM_DATA = {
 // Initialize greeting
 document.addEventListener('DOMContentLoaded', function() {
   var h = new Date().getHours();
-  var greetings = { en: ['Good evening','Good morning','Good afternoon','Good evening'] };
-  var label = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
   var el = document.getElementById('greeting');
-  if (el) el.textContent = label;
+  if (el) {
+    var label = h < 12 ? el.dataset.morning : h < 17 ? el.dataset.afternoon : el.dataset.evening;
+    if (label) el.textContent = label;
+  }
 
   // Last updated
   var lu = document.getElementById('last-updated-time');
