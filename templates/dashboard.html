@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CRM Sales Health Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f6f8;
+            margin: 0;
+            padding: 24px;
+            color: #1f2937;
+        }
+
+        h1 {
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            margin-bottom: 24px;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        .card-title {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .card-value {
+            font-size: 30px;
+            font-weight: bold;
+        }
+
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 14px;
+        }
+
+        th {
+            background: #f9fafb;
+            color: #374151;
+        }
+
+        .badge-danger {
+            color: #991b1b;
+            font-weight: bold;
+        }
+
+        .badge-warning {
+            color: #92400e;
+            font-weight: bold;
+        }
+
+        .footer {
+            color: #6b7280;
+            font-size: 12px;
+            margin-top: 24px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>CRM Sales Health Dashboard</h1>
+<div class="subtitle">Read-only dashboard connected to Odoo CRM API</div>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-title">Total Leads</div>
+        <div class="card-value">{{ summary.total_leads }}</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Follow-ups Today</div>
+        <div class="card-value">{{ summary.followups_today }}</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Overdue Follow-ups</div>
+        <div class="card-value badge-danger">{{ summary.overdue_followups }}</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Planned Follow-ups</div>
+        <div class="card-value">{{ summary.planned_followups }}</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">No Activity Leads</div>
+        <div class="card-value badge-warning">{{ summary.no_activity_leads }}</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Critical Overdue</div>
+        <div class="card-value badge-danger">{{ summary.critical_overdue }}</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Data Quality Issues</div>
+        <div class="card-value badge-warning">{{ summary.data_quality_issues }}</div>
+    </div>
+</div>
+
+<div class="section">
+    <h2>Overdue by Team</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Team</th>
+                <th>Overdue Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in followup_risk.overdue_by_team %}
+            <tr>
+                <td>{{ row.team_name }}</td>
+                <td>{{ row.overdue_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="section">
+    <h2>Overdue by Salesperson</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Salesperson</th>
+                <th>Overdue Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in followup_risk.overdue_by_salesperson %}
+            <tr>
+                <td>{{ row.salesperson_name }}</td>
+                <td>{{ row.overdue_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="section">
+    <h2>Overdue by Stage</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Stage</th>
+                <th>Overdue Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in followup_risk.overdue_by_stage %}
+            <tr>
+                <td>{{ row.stage_name }}</td>
+                <td>{{ row.overdue_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="section">
+    <h2>Overdue Matrix: Team → Salesperson → Stage</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Team</th>
+                <th>Salesperson</th>
+                <th>Stage</th>
+                <th>Overdue Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in followup_risk.overdue_matrix_by_team_salesperson_stage %}
+            <tr>
+                <td>{{ row.team_name }}</td>
+                <td>{{ row.salesperson_name }}</td>
+                <td>{{ row.stage_name }}</td>
+                <td>{{ row.overdue_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="section">
+    <h2>Data Quality</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Issue</th>
+                <th>Count</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>New X Leads</td>
+                <td>{{ data_quality.new_x_count }}</td>
+            </tr>
+            <tr>
+                <td>Missing Stage</td>
+                <td>{{ data_quality.missing_stage_count }}</td>
+            </tr>
+            <tr>
+                <td>
+                    Missing Phone & Mobile
+                    <a href="/data-quality/missing-contact" style="margin-left: 10px; font-size: 12px;">
+                        View Details
+                    </a>
+                </td>
+                <td>{{ data_quality.missing_contact_count }}</td>
+            </tr>
+            <tr>
+                <td>Missing Salesperson</td>
+                <td>{{ data_quality.missing_salesperson_count }}</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="footer">
+    Mode: {{ mode }} | Scope: {{ scope }}
+</div>
+
+</body>
+</html>
