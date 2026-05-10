@@ -1,10 +1,15 @@
 """
 Mock Odoo JSON-RPC server for development and testing.
 Handles authenticate, search_read, read_group, search_count on crm.lead and crm.stage.
-Run standalone: python -m tests.mock_odoo.server
+
+Run standalone:
+    python -m tests.mock_odoo.server
+    python -m tests.mock_odoo.server --scenario timeout
+    python -m tests.mock_odoo.server --scenario auth_fail
+    python -m tests.mock_odoo.server --scenario empty
 """
 
-import sys
+import asyncio
 from typing import Any
 
 from fastapi import FastAPI
@@ -12,6 +17,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from tests.mock_odoo.fixtures import LEADS, STAGES
+
+# Active scenario (set at startup via CLI --scenario flag)
+ACTIVE_SCENARIO: str = "default"
 
 # ── Domain evaluator ──────────────────────────────────────────────────────────
 
@@ -63,6 +71,8 @@ def filter_domain(records: list[dict], domain: list) -> list[dict]:
 
 
 def _get_dataset(model: str) -> list[dict]:
+    if ACTIVE_SCENARIO == "empty":
+        return []
     if model == "crm.lead":
         return LEADS
     if model == "crm.stage":
@@ -70,11 +80,21 @@ def _get_dataset(model: str) -> list[dict]:
     return []
 
 
-def _search_read(model: str, domain: list, fields: list, limit: int, order: str) -> list[dict]:
+def _search_read(
+    model: str,
+    domain: list,
+    fields: list,
+    limit: int,
+    offset: int,
+    order: str,
+) -> list[dict]:
     records = filter_domain(_get_dataset(model), domain)
-    if order and "desc" in order.lower():
+    if order:
         field_name = order.split()[0]
-        records = sorted(records, key=lambda r: r.get(field_name) or "", reverse=True)
+        reverse = "desc" in order.lower()
+        records = sorted(records, key=lambda r: r.get(field_name) or "", reverse=reverse)
+    if offset:
+        records = records[offset:]
     if limit:
         records = records[:limit]
     if fields:
@@ -83,15 +103,17 @@ def _search_read(model: str, domain: list, fields: list, limit: int, order: str)
 
 
 def _read_group(
-    model: str, domain: list, fields: list, groupby: list, lazy: bool = True
+    model: str,
+    domain: list,
+    fields: list,
+    groupby: list,
+    lazy: bool = True,
 ) -> list[dict]:
     records = filter_domain(_get_dataset(model), domain)
 
     if not groupby:
-        # Return single count row
         return [{"__count": len(records)}]
 
-    # Group records
     groups: dict[tuple, list] = {}
     for rec in records:
         key = tuple(
@@ -110,7 +132,6 @@ def _read_group(
         sample = group_records[0]
         for _i, gb in enumerate(groupby):
             row[gb] = sample.get(gb)
-            # single-field groupby: also add {field}_count
             if len(groupby) == 1:
                 row[f"{gb}_count"] = len(group_records)
         result.append(row)
@@ -132,11 +153,18 @@ class RpcRequest(BaseModel):
     id: Any = 1
 
 
-def create_app() -> FastAPI:
+def create_app(scenario: str = "default") -> FastAPI:
+    global ACTIVE_SCENARIO
+    ACTIVE_SCENARIO = scenario
+
     mock = FastAPI(title="Mock Odoo JSON-RPC", docs_url=None, redoc_url=None)
 
     @mock.post("/jsonrpc")
-    def jsonrpc_handler(body: RpcRequest) -> JSONResponse:
+    async def jsonrpc_handler(body: RpcRequest) -> JSONResponse:
+        # Scenario: simulate network timeout
+        if ACTIVE_SCENARIO == "timeout":
+            await asyncio.sleep(35)  # longer than ODOO_TIMEOUT_SECONDS
+
         params = body.params
         service = params.get("service", "")
         method = params.get("method", "")
@@ -150,6 +178,8 @@ def create_app() -> FastAPI:
 
         # ── common.authenticate ───────────────────────────────────────────────
         if service == "common" and method == "authenticate":
+            if ACTIVE_SCENARIO == "auth_fail":
+                return ok(False)
             db, username, api_key, _ = args
             if api_key == "invalid-key":
                 return ok(False)
@@ -157,7 +187,6 @@ def create_app() -> FastAPI:
 
         # ── object.execute_kw ─────────────────────────────────────────────────
         if service == "object" and method == "execute_kw":
-            # args: [db, uid, api_key, model, method, args, kwargs]
             if len(args) < 6:
                 return err("Invalid execute_kw args")
             _db, uid, api_key, model, orm_method, orm_args, *rest = args
@@ -167,8 +196,9 @@ def create_app() -> FastAPI:
                 domain = orm_args[0] if orm_args else []
                 fields = kwargs.get("fields", [])
                 limit = kwargs.get("limit", 0)
+                offset = kwargs.get("offset", 0)
                 order = kwargs.get("order", "")
-                return ok(_search_read(model, domain, fields, limit, order))
+                return ok(_search_read(model, domain, fields, limit, offset, order))
 
             if orm_method == "read_group":
                 domain = orm_args[0] if len(orm_args) > 0 else []
@@ -190,8 +220,27 @@ def create_app() -> FastAPI:
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import argparse
+
     import uvicorn
 
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 18069
-    print(f"Starting Mock Odoo server on http://127.0.0.1:{port}/jsonrpc")
-    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
+    parser = argparse.ArgumentParser(description="Mock Odoo JSON-RPC server")
+    parser.add_argument("--port", type=int, default=8069, help="Port to listen on")
+    parser.add_argument(
+        "--scenario",
+        choices=["default", "timeout", "auth_fail", "empty"],
+        default="default",
+        help="Test scenario to simulate",
+    )
+    parsed = parser.parse_args()
+
+    print(
+        f"Mock Odoo on http://127.0.0.1:{parsed.port}/jsonrpc"
+        f"  [scenario={parsed.scenario}]  ({len(LEADS)} leads)"
+    )
+    uvicorn.run(
+        create_app(scenario=parsed.scenario),
+        host="127.0.0.1",
+        port=parsed.port,
+        log_level="info",
+    )

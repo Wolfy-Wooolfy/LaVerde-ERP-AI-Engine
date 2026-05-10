@@ -10,12 +10,12 @@ templates = Jinja2Templates(directory="frontend/templates")
 
 
 @router.get("/dashboard", response_class=HTMLResponse, summary="CRM dashboard (HTML)")
-def dashboard(
+async def dashboard(
     request: Request,
     user: str = Depends(get_current_user),
     service: CrmService = Depends(get_crm_service),
 ) -> HTMLResponse:
-    data = service.summary()
+    data = await service.summary()
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -35,19 +35,18 @@ def dashboard(
     response_class=HTMLResponse,
     summary="Missing contact details page (HTML)",
 )
-def missing_contact_page(
+async def missing_contact_page(
     request: Request,
     user: str = Depends(get_current_user),
     service: CrmService = Depends(get_crm_service),
 ) -> HTMLResponse:
-    data = service.missing_contact_response()
+    data = await service.missing_contact_response()
     return templates.TemplateResponse(
         request,
         "missing_contact.html",
         {
             "current_user": user,
-            "mode": data.mode,
-            "scope": data.scope,
-            "rows": data.missing_contact_details,
+            "rows": data.data,
+            "pagination": data.pagination,
         },
     )

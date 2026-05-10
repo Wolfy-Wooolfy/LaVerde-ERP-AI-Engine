@@ -1,9 +1,9 @@
 """
-Unit tests for CrmService — OdooClient is fully mocked.
-Verifies that business logic maps Odoo responses to correct Pydantic models.
+Unit tests for CrmService — async, OdooClient fully mocked.
+Verifies business logic, Pydantic model mapping, and caching.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -19,13 +19,15 @@ def fresh_cache() -> None:
 
 @pytest.fixture
 def mock_client() -> MagicMock:
-    return MagicMock()
+    client = MagicMock()
+    client.execute_kw = AsyncMock()
+    return client
 
 
 # ── activity_summary ─────────────────────────────────────────────────────────
 
 
-def test_activity_summary_maps_states(mock_client: MagicMock) -> None:
+async def test_activity_summary_maps_states(mock_client: MagicMock) -> None:
     mock_client.execute_kw.return_value = [
         {"activity_state": "overdue", "activity_state_count": 7},
         {"activity_state": "planned", "activity_state_count": 12},
@@ -33,46 +35,46 @@ def test_activity_summary_maps_states(mock_client: MagicMock) -> None:
         {"activity_state": False, "activity_state_count": 20},
     ]
     svc = CrmService(client=mock_client)
-    result = svc.activity_summary()
+    result = await svc.activity_summary()
     assert result["overdue_followups"] == 7
     assert result["planned_followups"] == 12
     assert result["followups_today"] == 3
     assert result["no_activity_leads"] == 20
 
 
-def test_activity_summary_empty_response(mock_client: MagicMock) -> None:
+async def test_activity_summary_empty_response(mock_client: MagicMock) -> None:
     mock_client.execute_kw.return_value = []
     svc = CrmService(client=mock_client)
-    result = svc.activity_summary()
+    result = await svc.activity_summary()
     assert result["overdue_followups"] == 0
 
 
 # ── total_leads ───────────────────────────────────────────────────────────────
 
 
-def test_total_leads(mock_client: MagicMock) -> None:
+async def test_total_leads(mock_client: MagicMock) -> None:
     mock_client.execute_kw.return_value = [{"__count": 42}]
     svc = CrmService(client=mock_client)
-    assert svc.total_leads() == 42
+    assert await svc.total_leads() == 42
 
 
-def test_total_leads_empty(mock_client: MagicMock) -> None:
+async def test_total_leads_empty(mock_client: MagicMock) -> None:
     mock_client.execute_kw.return_value = []
     svc = CrmService(client=mock_client)
-    assert svc.total_leads() == 0
+    assert await svc.total_leads() == 0
 
 
 # ── overdue_by_salesperson ────────────────────────────────────────────────────
 
 
-def test_overdue_by_salesperson_sorted_descending(mock_client: MagicMock) -> None:
+async def test_overdue_by_salesperson_sorted_descending(mock_client: MagicMock) -> None:
     mock_client.execute_kw.return_value = [
         {"user_id": [10, "Ahmed"], "user_id_count": 3},
         {"user_id": [11, "Sara"], "user_id_count": 8},
         {"user_id": False, "user_id_count": 1},
     ]
     svc = CrmService(client=mock_client)
-    result = svc.overdue_by_salesperson()
+    result = await svc.overdue_by_salesperson()
     assert result[0].overdue_count == 8
     assert result[0].salesperson_name == "Sara"
     assert result[-1].salesperson_name == "Unassigned"
@@ -81,22 +83,28 @@ def test_overdue_by_salesperson_sorted_descending(mock_client: MagicMock) -> Non
 # ── missing_contact_details ───────────────────────────────────────────────────
 
 
-def test_missing_contact_details_maps_fields(mock_client: MagicMock) -> None:
-    mock_client.execute_kw.return_value = [
-        {
-            "id": 99,
-            "name": "Test Opp",
-            "contact_name": "John",
-            "user_id": [10, "Ahmed"],
-            "team_id": [1, "Alpha"],
-            "stage_id": [28, "New Lead"],
-            "source_id": False,
-            "create_date": "2025-01-01 00:00:00",
-        }
+async def test_missing_contact_details_maps_fields(mock_client: MagicMock) -> None:
+    mock_client.execute_kw.side_effect = [
+        # search_read result
+        [
+            {
+                "id": 99,
+                "name": "Test Opp",
+                "contact_name": "John",
+                "user_id": [10, "Ahmed"],
+                "team_id": [1, "Alpha"],
+                "stage_id": [28, "New Lead"],
+                "source_id": False,
+                "create_date": "2025-01-01 00:00:00",
+            }
+        ],
+        # read_group count
+        [{"__count": 1}],
     ]
     svc = CrmService(client=mock_client)
-    rows = svc.missing_contact_details()
+    rows, total = await svc.missing_contact_details()
     assert len(rows) == 1
+    assert total == 1
     row = rows[0]
     assert row.lead_id == 99
     assert row.salesperson_name == "Ahmed"
@@ -107,15 +115,24 @@ def test_missing_contact_details_maps_fields(mock_client: MagicMock) -> None:
 # ── summary caching ───────────────────────────────────────────────────────────
 
 
-def test_summary_is_cached_on_second_call(mock_client: MagicMock) -> None:
-    """Second call to summary() should not re-query Odoo."""
+async def test_summary_is_cached_on_second_call(mock_client: MagicMock) -> None:
+    """Second call to summary() must not re-query Odoo."""
     mock_client.execute_kw.return_value = [{"__count": 0}]
     svc = CrmService(client=mock_client)
 
-    first = svc.summary()
+    first = await svc.summary()
     call_count_after_first = mock_client.execute_kw.call_count
 
-    second = svc.summary()
-    # execute_kw should NOT have been called again
+    second = await svc.summary()
     assert mock_client.execute_kw.call_count == call_count_after_first
-    assert first is second  # same object from cache
+    assert first is second
+
+
+async def test_summary_fires_parallel_odoo_calls(mock_client: MagicMock) -> None:
+    """Verify summary makes multiple Odoo calls (parallel gather)."""
+    mock_client.execute_kw.return_value = [{"__count": 0}]
+    svc = CrmService(client=mock_client)
+
+    await svc.summary()
+    # summary fires activity + dq(4) + total + critical + 3 overdue + matrix = 11 calls
+    assert mock_client.execute_kw.call_count >= 8

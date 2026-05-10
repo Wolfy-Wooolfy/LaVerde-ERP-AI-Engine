@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     # ── CORS ──────────────────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = []
 
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    RATE_LIMIT_DEFAULT: str = "100/minute"
+    RATE_LIMIT_SUMMARY: str = "30/minute"
+    RATE_LIMIT_FOLLOWUP: str = "30/minute"
+    RATE_LIMIT_HTML: str = "60/minute"
+    RATE_LIMIT_HEALTH: str = "600/minute"
+
+    # ── Security headers ──────────────────────────────────────────────────────
+    CSP_POLICY: str = "default-src 'self'; style-src 'self' 'unsafe-inline'"
+
     # ── CRM Stage IDs (stored as comma-separated strings for .env compat) ────
     CRM_CRITICAL_STAGE_IDS: str = "28,34,35,37,41"
     CRM_CLOSED_EXCLUDED_STAGE_IDS: str = "26,30,31,32,38,42,46"

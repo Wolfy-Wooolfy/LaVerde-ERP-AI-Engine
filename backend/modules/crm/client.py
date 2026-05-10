@@ -1,7 +1,7 @@
 """
 Read-only Odoo JSON-RPC client.
-Uses httpx for connection pooling and tenacity for retry on transient failures.
-Write operations are blocked at the method-validation layer.
+Uses httpx.AsyncClient for connection pooling and tenacity AsyncRetrying for retry
+on transient failures. Write operations are blocked at the method-validation layer.
 """
 
 import time
@@ -11,7 +11,7 @@ from typing import Any, Optional
 import httpx
 from loguru import logger
 from tenacity import (
-    Retrying,
+    AsyncRetrying,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -50,7 +50,7 @@ def _ensure_read_only(method: str) -> None:
 
 
 class OdooClient:
-    """Synchronous JSON-RPC client for Odoo with read-only enforcement."""
+    """Async JSON-RPC client for Odoo with read-only enforcement."""
 
     def __init__(self) -> None:
         self._url = settings.ODOO_URL.rstrip("/") + "/jsonrpc"
@@ -58,25 +58,25 @@ class OdooClient:
         self._username = settings.ODOO_USERNAME
         self._api_key = settings.ODOO_API_KEY
         self._uid: Optional[int] = None
-        self._http = httpx.Client(
+        self._http = httpx.AsyncClient(
             timeout=settings.ODOO_TIMEOUT_SECONDS,
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
 
     # ── Context manager ───────────────────────────────────────────────────────
 
-    def close(self) -> None:
-        self._http.close()
+    async def close(self) -> None:
+        await self._http.aclose()
 
-    def __enter__(self) -> "OdooClient":
+    async def __aenter__(self) -> "OdooClient":
         return self
 
-    def __exit__(self, *args: Any) -> None:
-        self.close()
+    async def __aexit__(self, *args: Any) -> None:
+        await self.close()
 
-    # ── Internal RPC call (with retry) ───────────────────────────────────────
+    # ── Internal RPC call (with async retry) ─────────────────────────────────
 
-    def _call(self, service: str, method: str, args: list) -> Any:
+    async def _call(self, service: str, method: str, args: list) -> Any:
         payload = {
             "jsonrpc": "2.0",
             "method": "call",
@@ -85,7 +85,7 @@ class OdooClient:
         }
 
         start = time.monotonic()
-        for attempt in Retrying(
+        async for attempt in AsyncRetrying(
             stop=stop_after_attempt(settings.ODOO_MAX_RETRIES),
             wait=wait_exponential(multiplier=1, min=1, max=4),
             retry=retry_if_exception_type((httpx.NetworkError, httpx.TimeoutException)),
@@ -93,7 +93,7 @@ class OdooClient:
         ):
             with attempt:
                 try:
-                    response = self._http.post(self._url, json=payload)
+                    response = await self._http.post(self._url, json=payload)
                     response.raise_for_status()
                 except httpx.NetworkError as exc:
                     logger.warning(f"Odoo network error (will retry): {exc}")
@@ -119,12 +119,12 @@ class OdooClient:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def authenticate(self) -> int:
+    async def authenticate(self) -> int:
         """Authenticate once and cache the UID for the lifetime of this client."""
         if self._uid:
             return self._uid
 
-        uid: Any = self._call(
+        uid: Any = await self._call(
             "common",
             "authenticate",
             [self._db, self._username, self._api_key, {}],
@@ -139,7 +139,7 @@ class OdooClient:
         logger.info(f"Authenticated with Odoo (uid={self._uid})")
         return self._uid
 
-    def execute_kw(
+    async def execute_kw(
         self,
         model: str,
         method: str,
@@ -149,8 +149,8 @@ class OdooClient:
         """Execute an Odoo ORM method. Write methods are rejected immediately."""
         _ensure_read_only(method)
 
-        uid = self.authenticate()
-        return self._call(
+        uid = await self.authenticate()
+        return await self._call(
             "object",
             "execute_kw",
             [self._db, uid, self._api_key, model, method, args or [], kwargs or {}],

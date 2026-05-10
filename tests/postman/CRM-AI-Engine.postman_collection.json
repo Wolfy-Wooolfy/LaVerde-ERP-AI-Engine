@@ -1,0 +1,353 @@
+{
+  "info": {
+    "name": "CRM AI Engine v2.0",
+    "description": "Read-only CRM intelligence dashboard — Phase 2 (async, paginated, metrics).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "crm-ai-engine-v2"
+  },
+  "variable": [
+    {"key": "base_url", "value": "http://localhost:8000", "type": "string"},
+    {"key": "username", "value": "admin", "type": "string"},
+    {"key": "password", "value": "password", "type": "string"}
+  ],
+  "auth": {
+    "type": "basic",
+    "basic": [
+      {"key": "username", "value": "{{username}}", "type": "string"},
+      {"key": "password", "value": "{{password}}", "type": "string"}
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness (no auth)",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": "{{base_url}}/health",
+            "description": "Public liveness probe — no authentication required."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.test('status is ok', () => pm.expect(pm.response.json().status).to.eql('ok'));",
+                  "pm.test('uptime_seconds present', () => pm.expect(pm.response.json()).to.have.property('uptime_seconds'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Authenticated health",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.test('Has components', () => pm.expect(pm.response.json()).to.have.property('components'));",
+                  "pm.test('Cache ok', () => pm.expect(pm.response.json().components.cache.status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Odoo health",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/health/odoo"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.test('auth_valid present', () => pm.expect(pm.response.json()).to.have.property('auth_valid'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deep health check",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/health/deep"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 or 503', () => pm.expect([200, 503]).to.include(pm.response.code));",
+                  "pm.test('Has checks', () => pm.expect(pm.response.json()).to.have.property('checks'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CRM",
+      "item": [
+        {
+          "name": "Summary",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/summary",
+            "description": "Full pipeline summary — 11 concurrent Odoo calls, 60s cache."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "const b = pm.response.json();",
+                  "pm.test('mode is read_only', () => pm.expect(b.mode).to.eql('read_only'));",
+                  "pm.test('summary.total_leads is number', () => pm.expect(b.summary.total_leads).to.be.a('number'));",
+                  "pm.test('followup_risk present', () => pm.expect(b).to.have.property('followup_risk'));",
+                  "pm.test('data_quality present', () => pm.expect(b).to.have.property('data_quality'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Follow-up Risk",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/followup-risk"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "pm.test('followup_risk array exists', () => pm.expect(pm.response.json().followup_risk).to.be.an('object'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing Contact (default pagination)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/data-quality/missing-contact"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response time < 2000ms', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+                  "const b = pm.response.json();",
+                  "pm.test('data array', () => pm.expect(b.data).to.be.an('array'));",
+                  "pm.test('pagination present', () => pm.expect(b).to.have.property('pagination'));",
+                  "pm.test('page=1', () => pm.expect(b.pagination.page).to.eql(1));",
+                  "pm.test('page_size=50', () => pm.expect(b.pagination.page_size).to.eql(50));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing Contact (page 2, size 25)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/data-quality/missing-contact?page=2&page_size=25",
+              "query": [
+                {"key": "page", "value": "2"},
+                {"key": "page_size", "value": "25"}
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('page=2', () => pm.expect(pm.response.json().pagination.page).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing Contact (filter by team)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/data-quality/missing-contact?team_id=1",
+              "query": [{"key": "team_id", "value": "1"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Observability",
+      "item": [
+        {
+          "name": "Metrics",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/metrics"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('odoo metrics', () => pm.expect(b.odoo).to.have.property('total_calls'));",
+                  "pm.test('cache metrics', () => pm.expect(b.cache).to.have.property('hit_rate'));",
+                  "pm.test('api metrics', () => pm.expect(b.api).to.have.property('total_requests'));",
+                  "pm.test('uptime_seconds', () => pm.expect(b.uptime_seconds).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Security",
+      "item": [
+        {
+          "name": "Reject unauthenticated request",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/summary"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject wrong password",
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {"key": "username", "value": "{{username}}", "type": "string"},
+                {"key": "password", "value": "WRONG_PASSWORD", "type": "string"}
+              ]
+            },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/summary"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Security headers present",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": "{{base_url}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('X-Content-Type-Options', () => pm.expect(pm.response.headers.get('x-content-type-options')).to.eql('nosniff'));",
+                  "pm.test('X-Frame-Options', () => pm.expect(pm.response.headers.get('x-frame-options')).to.eql('DENY'));",
+                  "pm.test('X-Request-ID present', () => pm.expect(pm.response.headers.get('x-request-id')).to.not.be.undefined);",
+                  "pm.test('Referrer-Policy present', () => pm.expect(pm.response.headers.get('referrer-policy')).to.not.be.undefined);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Legacy Redirects",
+      "item": [
+        {
+          "name": "Legacy summary → 301",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": "{{base_url}}/crm/summary"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 301', () => pm.response.to.have.status(301));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

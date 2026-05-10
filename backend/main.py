@@ -1,14 +1,19 @@
 """
 CRM AI Engine — FastAPI application entry point.
+Phase 2: async, rate limiting, CORS, security headers, structured error responses.
 """
 
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from backend.api.deps import get_current_user  # noqa: F401 — re-exported for tests
 from backend.api.v1.endpoints.dashboard import router as dashboard_router
@@ -21,7 +26,9 @@ from backend.core.exceptions import (
     OdooConnectionError,
     ReadOnlyViolationError,
 )
+from backend.core.limiter import limiter
 from backend.core.logging import setup_logging
+from backend.core.metrics import get_uptime, metrics, set_start_time
 from backend.modules.crm.service import CrmService
 
 # ── Application lifespan ──────────────────────────────────────────────────────
@@ -32,8 +39,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     init_cache(settings.CACHE_TTL_SECONDS)
     app.state.crm_service = CrmService()
+    app.state.limiter = limiter
+    set_start_time()
     yield
-    app.state.crm_service.client.close()
+    await app.state.crm_service.client.close()
 
 
 # ── App instance ──────────────────────────────────────────────────────────────
@@ -45,8 +54,38 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Rate limiter exception handler ────────────────────────────────────────────
 
-# ── Request ID middleware ─────────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+
+_origins = settings.CORS_ORIGINS if settings.CORS_ORIGINS else ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
+
+# ── Security headers middleware ───────────────────────────────────────────────
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: object) -> Response:
+    response: Response = await call_next(request)  # type: ignore[operator]
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = settings.CSP_POLICY
+    if settings.ENVIRONMENT == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+# ── Request ID + metrics middleware ──────────────────────────────────────────
 
 
 @app.middleware("http")
@@ -58,7 +97,34 @@ async def request_id_middleware(request: Request, call_next: object) -> Response
     duration_ms = int((time.monotonic() - start) * 1000)
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time"] = f"{duration_ms}ms"
+    metrics.record_api_request(duration_ms, response.status_code)
     return response
+
+
+# ── Error response builder ────────────────────────────────────────────────────
+
+
+def _error_response(
+    request: Request,
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict | None = None,
+) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None)
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "ok": False,
+            "error": {
+                "code": code,
+                "message": message,
+                "details": details or {},
+                "request_id": request_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        },
+    )
 
 
 # ── Global exception handlers ─────────────────────────────────────────────────
@@ -66,42 +132,22 @@ async def request_id_middleware(request: Request, call_next: object) -> Response
 
 @app.exception_handler(ReadOnlyViolationError)
 async def readonly_violation_handler(request: Request, exc: ReadOnlyViolationError) -> JSONResponse:
-    return JSONResponse(
-        status_code=403,
-        content={"ok": False, "error": str(exc), "error_code": "READ_ONLY_VIOLATION"},
-    )
+    return _error_response(request, 403, "READ_ONLY_VIOLATION", str(exc))
 
 
 @app.exception_handler(OdooAuthenticationError)
 async def odoo_auth_handler(request: Request, exc: OdooAuthenticationError) -> JSONResponse:
-    return JSONResponse(
-        status_code=502,
-        content={
-            "ok": False,
-            "error": "Odoo authentication failed",
-            "error_code": "ODOO_AUTH_ERROR",
-        },  # noqa: E501
-    )
+    return _error_response(request, 502, "ODOO_AUTH_ERROR", "Odoo authentication failed")
 
 
 @app.exception_handler(OdooConnectionError)
 async def odoo_connection_handler(request: Request, exc: OdooConnectionError) -> JSONResponse:
-    return JSONResponse(
-        status_code=503,
-        content={
-            "ok": False,
-            "error": "Odoo is unreachable",
-            "error_code": "ODOO_CONNECTION_ERROR",
-        },  # noqa: E501
-    )
+    return _error_response(request, 503, "ODOO_CONNECTION_ERROR", "Odoo is unreachable")
 
 
 @app.exception_handler(CRMAIEngineError)
 async def crm_engine_handler(request: Request, exc: CRMAIEngineError) -> JSONResponse:
-    return JSONResponse(
-        status_code=500,
-        content={"ok": False, "error": "Internal service error", "error_code": "INTERNAL_ERROR"},
-    )
+    return _error_response(request, 500, "INTERNAL_ERROR", "Internal service error")
 
 
 # ── Public health check (no auth) ─────────────────────────────────────────────
@@ -109,7 +155,12 @@ async def crm_engine_handler(request: Request, exc: CRMAIEngineError) -> JSONRes
 
 @app.get("/health", tags=["health"], summary="Basic liveness probe (no auth)")
 def liveness() -> dict:
-    return {"status": "ok", "service": settings.APP_NAME, "version": settings.APP_VERSION}
+    return {
+        "status": "ok",
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "uptime_seconds": get_uptime(),
+    }
 
 
 # ── Legacy redirect shims (301 Permanent) ─────────────────────────────────────
@@ -130,7 +181,7 @@ def legacy_missing_contact() -> RedirectResponse:
     return RedirectResponse(url="/api/v1/data-quality/missing-contact", status_code=301)
 
 
-# ── Logout (clears Basic Auth credentials in the browser) ─────────────────────
+# ── Logout ─────────────────────────────────────────────────────────────────────
 
 
 @app.get("/logout", include_in_schema=False)

@@ -1,9 +1,9 @@
 """
-CRM Service — business logic layer.
-Wraps OdooClient queries with caching and returns typed Pydantic models.
-Business logic is identical to the original CrmEngine; only structure changed.
+CRM Service — async business logic layer.
+All Odoo calls are async; summary() fires 8 concurrent requests via asyncio.gather.
 """
 
+import asyncio
 from typing import Optional, cast
 
 from loguru import logger
@@ -20,7 +20,6 @@ from backend.modules.crm.domain import (
 from backend.modules.crm.schemas import (
     ActivitySummary,
     DataQuality,
-    DataQualityMissingContactResponse,
     FollowupRisk,
     FollowupRiskResponse,
     MissingContactRow,
@@ -28,6 +27,8 @@ from backend.modules.crm.schemas import (
     OverdueByStage,
     OverdueByTeam,
     OverdueMatrixRow,
+    PaginatedMissingContactResponse,
+    Pagination,
     SummaryResponse,
 )
 
@@ -39,10 +40,10 @@ class CrmService:
     def __init__(self, client: Optional[OdooClient] = None) -> None:
         self.client = client if client is not None else OdooClient()
 
-    # ── Activity summary ──────────────────────────────────────────────────────
+    # ── Leaf-level Odoo calls (each = 1 await) ────────────────────────────────
 
-    def activity_summary(self) -> dict:
-        rows = self.client.execute_kw(
+    async def activity_summary(self) -> dict:
+        rows = await self.client.execute_kw(
             "crm.lead",
             "read_group",
             args=[BASE_DOMAIN, ["activity_state"], ["activity_state"]],
@@ -70,10 +71,8 @@ class CrmService:
 
         return result
 
-    # ── Counts ────────────────────────────────────────────────────────────────
-
-    def total_leads(self) -> int:
-        rows = self.client.execute_kw(
+    async def total_leads(self) -> int:
+        rows = await self.client.execute_kw(
             "crm.lead",
             "read_group",
             args=[BASE_DOMAIN, ["__count"], []],
@@ -81,99 +80,32 @@ class CrmService:
         )
         return rows[0].get("__count", 0) if rows else 0
 
-    def critical_overdue_count(self) -> int:
+    async def critical_overdue_count(self) -> int:
         domain = BASE_DOMAIN + [
             ["activity_state", "=", "overdue"],
             ["stage_id", "in", get_critical_stage_ids()],
         ]
-        rows = self.client.execute_kw(
+        rows = await self.client.execute_kw(
             "crm.lead", "read_group", args=[domain, ["__count"], []], kwargs={}
         )
         return rows[0].get("__count", 0) if rows else 0
 
-    # ── Data quality ──────────────────────────────────────────────────────────
-
-    def data_quality_summary(self) -> DataQuality:
-        def _count(extra: list) -> int:
-            rows = self.client.execute_kw(
-                "crm.lead",
-                "read_group",
-                args=[BASE_DOMAIN + extra, ["__count"], []],
-                kwargs={},
-            )
-            return rows[0].get("__count", 0) if rows else 0
-
-        new_x = _count([["stage_id", "in", get_data_quality_stage_ids()]])
-        missing_stage = _count([["stage_id", "=", False]])
-        missing_contact = _count(self._missing_contact_extra())
-        missing_salesperson = _count([["user_id", "=", False]])
-
-        return DataQuality(
-            new_x_count=new_x,
-            missing_stage_count=missing_stage,
-            missing_contact_count=missing_contact,
-            missing_salesperson_count=missing_salesperson,
-            total_data_quality_issues=new_x + missing_stage + missing_contact + missing_salesperson,
-        )
-
-    def _missing_contact_extra(self) -> list:
-        """Return the phone-field conditions without the BASE_DOMAIN prefix."""
-        full = build_missing_contact_domain()
-        return full[len(BASE_DOMAIN) :]
-
-    def missing_contact_details(self) -> list[MissingContactRow]:
-        rows = self.client.execute_kw(
+    async def _count_domain(self, extra: list) -> int:
+        """Count leads matching BASE_DOMAIN + extra conditions."""
+        rows = await self.client.execute_kw(
             "crm.lead",
-            "search_read",
-            args=[build_missing_contact_domain()],
-            kwargs={
-                "fields": [
-                    "id",
-                    "name",
-                    "contact_name",
-                    "user_id",
-                    "team_id",
-                    "stage_id",
-                    "source_id",
-                    "create_date",
-                ],
-                "limit": 500,
-                "order": "create_date desc",
-            },
+            "read_group",
+            args=[BASE_DOMAIN + extra, ["__count"], []],
+            kwargs={},
         )
+        return rows[0].get("__count", 0) if rows else 0
 
-        result = []
-        for row in rows:
-            user = row.get("user_id")
-            team = row.get("team_id")
-            stage = row.get("stage_id")
-            source = row.get("source_id")
-            result.append(
-                MissingContactRow(
-                    lead_id=row["id"],
-                    opportunity_name=row.get("name") or "",
-                    contact_name=row.get("contact_name") or "",
-                    salesperson_id=user[0] if user else None,
-                    salesperson_name=user[1] if user else "Unassigned",
-                    team_id=team[0] if team else None,
-                    team_name=team[1] if team else "Unassigned Team",
-                    stage_id=stage[0] if stage else None,
-                    stage_name=stage[1] if stage else "No Stage",
-                    source_id=source[0] if source else None,
-                    source_name=source[1] if source else "No Source",
-                    create_date=row.get("create_date") or "",
-                )
-            )
-        return result
-
-    # ── Overdue breakdowns ────────────────────────────────────────────────────
-
-    def overdue_by_salesperson(self) -> list[OverdueBySalesperson]:
+    async def overdue_by_salesperson(self) -> list[OverdueBySalesperson]:
         domain = BASE_DOMAIN + [
             ["activity_state", "=", "overdue"],
             ["stage_id", "not in", get_closed_excluded_stage_ids()],
         ]
-        rows = self.client.execute_kw(
+        rows = await self.client.execute_kw(
             "crm.lead",
             "read_group",
             args=[domain, ["user_id"], ["user_id"]],
@@ -192,12 +124,12 @@ class CrmService:
         result.sort(key=lambda r: r.overdue_count, reverse=True)
         return result
 
-    def overdue_by_team(self) -> list[OverdueByTeam]:
+    async def overdue_by_team(self) -> list[OverdueByTeam]:
         domain = BASE_DOMAIN + [
             ["activity_state", "=", "overdue"],
             ["stage_id", "not in", get_closed_excluded_stage_ids()],
         ]
-        rows = self.client.execute_kw(
+        rows = await self.client.execute_kw(
             "crm.lead",
             "read_group",
             args=[domain, ["team_id"], ["team_id"]],
@@ -216,12 +148,12 @@ class CrmService:
         result.sort(key=lambda r: r.overdue_count, reverse=True)
         return result
 
-    def overdue_by_stage(self) -> list[OverdueByStage]:
+    async def overdue_by_stage(self) -> list[OverdueByStage]:
         domain = BASE_DOMAIN + [
             ["activity_state", "=", "overdue"],
             ["stage_id", "not in", get_closed_excluded_stage_ids()],
         ]
-        rows = self.client.execute_kw(
+        rows = await self.client.execute_kw(
             "crm.lead",
             "read_group",
             args=[domain, ["stage_id"], ["stage_id"]],
@@ -240,12 +172,12 @@ class CrmService:
         result.sort(key=lambda r: r.overdue_count, reverse=True)
         return result
 
-    def overdue_matrix(self) -> list[OverdueMatrixRow]:
+    async def overdue_matrix(self) -> list[OverdueMatrixRow]:
         domain = BASE_DOMAIN + [
             ["activity_state", "=", "overdue"],
             ["stage_id", "not in", get_closed_excluded_stage_ids()],
         ]
-        rows = self.client.execute_kw(
+        rows = await self.client.execute_kw(
             "crm.lead",
             "read_group",
             args=[domain, ["__count"], ["team_id", "user_id", "stage_id"]],
@@ -270,69 +202,205 @@ class CrmService:
         result.sort(key=lambda r: r.overdue_count, reverse=True)
         return result
 
-    # ── Composite responses (with caching) ───────────────────────────────────
+    # ── Composite methods (internally parallel) ────────────────────────────────
 
-    def summary(self) -> SummaryResponse:
+    async def data_quality_summary(self) -> DataQuality:
+        """Run 4 Odoo count queries in parallel."""
+        new_x, missing_stage, missing_contact, missing_sp = await asyncio.gather(
+            self._count_domain([["stage_id", "in", get_data_quality_stage_ids()]]),
+            self._count_domain([["stage_id", "=", False]]),
+            self._count_domain(self._missing_contact_extra()),
+            self._count_domain([["user_id", "=", False]]),
+        )
+        return DataQuality(
+            new_x_count=new_x,
+            missing_stage_count=missing_stage,
+            missing_contact_count=missing_contact,
+            missing_salesperson_count=missing_sp,
+            total_data_quality_issues=new_x + missing_stage + missing_contact + missing_sp,
+        )
+
+    def _missing_contact_extra(self) -> list:
+        """Return the phone-field conditions without the BASE_DOMAIN prefix."""
+        full = build_missing_contact_domain()
+        return full[len(BASE_DOMAIN) :]
+
+    async def missing_contact_details(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> tuple[list[MissingContactRow], int]:
+        """Return paginated missing-contact rows and the total count."""
+        domain = build_missing_contact_domain()
+        if team_id is not None:
+            domain = domain + [["team_id", "=", team_id]]
+        if salesperson_id is not None:
+            domain = domain + [["user_id", "=", salesperson_id]]
+
+        offset = (page - 1) * page_size
+
+        rows_raw, count_rows = await asyncio.gather(
+            self.client.execute_kw(
+                "crm.lead",
+                "search_read",
+                args=[domain],
+                kwargs={
+                    "fields": [
+                        "id",
+                        "name",
+                        "contact_name",
+                        "user_id",
+                        "team_id",
+                        "stage_id",
+                        "source_id",
+                        "create_date",
+                    ],
+                    "limit": page_size,
+                    "offset": offset,
+                    "order": sort,
+                },
+            ),
+            self.client.execute_kw(
+                "crm.lead",
+                "read_group",
+                args=[domain, ["__count"], []],
+                kwargs={},
+            ),
+        )
+
+        total = count_rows[0].get("__count", 0) if count_rows else 0
+
+        result = []
+        for row in rows_raw:
+            user = row.get("user_id")
+            team = row.get("team_id")
+            stage = row.get("stage_id")
+            source = row.get("source_id")
+            result.append(
+                MissingContactRow(
+                    lead_id=row["id"],
+                    opportunity_name=row.get("name") or "",
+                    contact_name=row.get("contact_name") or "",
+                    salesperson_id=user[0] if user else None,
+                    salesperson_name=user[1] if user else "Unassigned",
+                    team_id=team[0] if team else None,
+                    team_name=team[1] if team else "Unassigned Team",
+                    stage_id=stage[0] if stage else None,
+                    stage_name=stage[1] if stage else "No Stage",
+                    source_id=source[0] if source else None,
+                    source_name=source[1] if source else "No Source",
+                    create_date=row.get("create_date") or "",
+                )
+            )
+        return result, total
+
+    # ── Composite responses (with caching, parallel gather) ───────────────────
+
+    async def summary(self) -> SummaryResponse:
         cached = get_cached("crm:summary")
         if cached is not None:
             logger.debug("Cache hit: crm:summary")
             return cast(SummaryResponse, cached)
 
-        activity = self.activity_summary()
-        dq = self.data_quality_summary()
+        # Fire 8 coroutines concurrently (data_quality runs 4 in parallel internally)
+        _results = await asyncio.gather(
+            self.activity_summary(),
+            self.data_quality_summary(),
+            self.total_leads(),
+            self.critical_overdue_count(),
+            self.overdue_by_salesperson(),
+            self.overdue_by_team(),
+            self.overdue_by_stage(),
+            self.overdue_matrix(),
+        )
+        activity: dict = _results[0]  # type: ignore[assignment]
+        dq: DataQuality = _results[1]  # type: ignore[assignment]
+        total: int = _results[2]  # type: ignore[assignment]
+        critical: int = _results[3]  # type: ignore[assignment]
+        overdue_sp: list = _results[4]  # type: ignore[assignment]
+        overdue_team: list = _results[5]  # type: ignore[assignment]
+        overdue_stage: list = _results[6]  # type: ignore[assignment]
+        matrix: list = _results[7]  # type: ignore[assignment]
 
         result = SummaryResponse(
             mode=_MODE,
             scope=_SCOPE,
             summary=ActivitySummary(
-                total_leads=self.total_leads(),
+                total_leads=total,
                 followups_today=activity["followups_today"],
                 overdue_followups=activity["overdue_followups"],
                 planned_followups=activity["planned_followups"],
                 no_activity_leads=activity["no_activity_leads"],
-                critical_overdue=self.critical_overdue_count(),
+                critical_overdue=critical,
                 data_quality_issues=dq.total_data_quality_issues,
             ),
             data_quality=dq,
             followup_risk=FollowupRisk(
-                overdue_by_salesperson=self.overdue_by_salesperson(),
-                overdue_by_team=self.overdue_by_team(),
-                overdue_by_stage=self.overdue_by_stage(),
-                overdue_matrix_by_team_salesperson_stage=self.overdue_matrix(),
+                overdue_by_salesperson=overdue_sp,
+                overdue_by_team=overdue_team,
+                overdue_by_stage=overdue_stage,
+                overdue_matrix_by_team_salesperson_stage=matrix,
             ),
         )
         set_cached("crm:summary", result)
         return result
 
-    def followup_risk_response(self) -> FollowupRiskResponse:
+    async def followup_risk_response(self) -> FollowupRiskResponse:
         cached = get_cached("crm:followup_risk")
         if cached is not None:
             logger.debug("Cache hit: crm:followup_risk")
             return cast(FollowupRiskResponse, cached)
 
+        overdue_sp, overdue_team, overdue_stage, matrix = await asyncio.gather(
+            self.overdue_by_salesperson(),
+            self.overdue_by_team(),
+            self.overdue_by_stage(),
+            self.overdue_matrix(),
+        )
+
         result = FollowupRiskResponse(
             mode=_MODE,
             scope=_SCOPE,
             followup_risk=FollowupRisk(
-                overdue_by_salesperson=self.overdue_by_salesperson(),
-                overdue_by_team=self.overdue_by_team(),
-                overdue_by_stage=self.overdue_by_stage(),
-                overdue_matrix_by_team_salesperson_stage=self.overdue_matrix(),
+                overdue_by_salesperson=overdue_sp,
+                overdue_by_team=overdue_team,
+                overdue_by_stage=overdue_stage,
+                overdue_matrix_by_team_salesperson_stage=matrix,
             ),
         )
         set_cached("crm:followup_risk", result)
         return result
 
-    def missing_contact_response(self) -> DataQualityMissingContactResponse:
-        cached = get_cached("crm:missing_contact")
-        if cached is not None:
-            logger.debug("Cache hit: crm:missing_contact")
-            return cast(DataQualityMissingContactResponse, cached)
-
-        result = DataQualityMissingContactResponse(
-            mode=_MODE,
-            scope=_SCOPE,
-            missing_contact_details=self.missing_contact_details(),
+    async def missing_contact_response(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> PaginatedMissingContactResponse:
+        rows, total = await self.missing_contact_details(
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
         )
-        set_cached("crm:missing_contact", result)
-        return result
+        import math
+
+        total_pages = math.ceil(total / page_size) if page_size > 0 else 1
+        return PaginatedMissingContactResponse(
+            ok=True,
+            data=rows,
+            pagination=Pagination(
+                page=page,
+                page_size=page_size,
+                total=total,
+                total_pages=total_pages,
+                has_next=page < total_pages,
+                has_prev=page > 1,
+            ),
+        )

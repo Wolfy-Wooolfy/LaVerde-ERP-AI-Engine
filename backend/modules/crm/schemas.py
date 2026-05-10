@@ -99,10 +99,35 @@ class DataQualityMissingContactResponse(BaseModel):
     missing_contact_details: list[MissingContactRow]
 
 
-# ── Error response ────────────────────────────────────────────────────────────
+# ── Pagination ────────────────────────────────────────────────────────────────
+
+
+class Pagination(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
+
+
+class PaginatedMissingContactResponse(BaseModel):
+    ok: bool = True
+    data: list[MissingContactRow]
+    pagination: Pagination
+
+
+# ── Error response (v2 structured format) ─────────────────────────────────────
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: dict = {}
+    request_id: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):
     ok: bool = False
-    error: str
-    error_code: Optional[str] = None
+    error: ErrorDetail
