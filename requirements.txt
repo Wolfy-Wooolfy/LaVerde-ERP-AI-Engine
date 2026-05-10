@@ -1,5 +1,11 @@
-fastapi
-uvicorn
-requests
-python-dotenv
-jinja2
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+httpx==0.27.2
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+jinja2==3.1.4
+cachetools==5.5.0
+tenacity==9.0.0
+loguru==0.7.2
+python-multipart==0.0.12

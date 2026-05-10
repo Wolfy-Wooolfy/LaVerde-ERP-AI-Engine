@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CRM AI Engine{% endblock %}</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f6f8;
+            margin: 0;
+            padding: 0;
+            color: #1f2937;
+        }
+
+        /* ── Nav ── */
+        .nav {
+            background: #1e293b;
+            color: #f1f5f9;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 14px;
+        }
+        .nav-brand { font-weight: bold; font-size: 16px; color: #f8fafc; text-decoration: none; }
+        .nav-links { display: flex; gap: 16px; align-items: center; }
+        .nav-links a { color: #94a3b8; text-decoration: none; }
+        .nav-links a:hover { color: #f1f5f9; }
+        .nav-user { color: #64748b; font-size: 13px; }
+        .btn-logout {
+            background: #ef4444; color: white; border: none;
+            padding: 5px 12px; border-radius: 6px; cursor: pointer;
+            font-size: 13px; text-decoration: none;
+        }
+        .btn-logout:hover { background: #dc2626; }
+
+        /* ── Page layout ── */
+        .page { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+        h1 { margin-bottom: 4px; font-size: 24px; }
+        .subtitle { color: #6b7280; margin-bottom: 24px; font-size: 14px; }
+
+        /* ── Cards ── */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .card-title { color: #6b7280; font-size: 13px; margin-bottom: 8px; }
+        .card-value { font-size: 30px; font-weight: bold; }
+
+        /* ── Sections ── */
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .section h2 { margin-top: 0; font-size: 17px; }
+
+        /* ── Tables ── */
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+        th { background: #f9fafb; color: #374151; font-weight: 600; }
+        tr:last-child td { border-bottom: none; }
+
+        /* ── Badges ── */
+        .badge-danger { color: #991b1b; font-weight: bold; }
+        .badge-warning { color: #92400e; font-weight: bold; }
+
+        /* ── Actions ── */
+        .actions { margin-bottom: 20px; }
+        .actions a { color: #2563eb; text-decoration: none; font-weight: bold; font-size: 14px; }
+
+        /* ── Footer ── */
+        .footer { color: #9ca3af; font-size: 12px; margin-top: 24px; padding-bottom: 16px; }
+
+        {% block extra_style %}{% endblock %}
+    </style>
+</head>
+<body>
+
+<nav class="nav">
+    <a class="nav-brand" href="/dashboard">CRM AI Engine</a>
+    <div class="nav-links">
+        <a href="/dashboard">Dashboard</a>
+        <a href="/data-quality/missing-contact">Missing Contacts</a>
+        {% if current_user %}
+        <span class="nav-user">{{ current_user }}</span>
+        <a class="btn-logout" href="/logout">Logout</a>
+        {% endif %}
+    </div>
+</nav>
+
+<div class="page">
+    {% block content %}{% endblock %}
+</div>
+
+</body>
+</html>
