@@ -78,5 +78,6 @@ def test_lead_cache_key_different_for_different_inputs():
 
 
 def test_overdue_list_cache_key():
-    assert overdue_list_cache_key(10) == "overdue_priority_top_10"
-    assert overdue_list_cache_key(50) == "overdue_priority_top_50"
+    assert overdue_list_cache_key(10) == "overdue_priority_top_10_en"
+    assert overdue_list_cache_key(50) == "overdue_priority_top_50_en"
+    assert overdue_list_cache_key(10, "ar") == "overdue_priority_top_10_ar"

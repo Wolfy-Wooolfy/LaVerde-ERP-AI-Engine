@@ -16,7 +16,7 @@ from backend.modules.ai.cache import AICache, lead_cache_key, overdue_list_cache
 from backend.modules.ai.chatter import clean_chatter_body, detect_signals
 from backend.modules.ai.client import OpenAIClient
 from backend.modules.ai.exceptions import AIFeatureDisabledError, AIInvalidResponseError, BudgetExceededError
-from backend.modules.ai.prompts import LEAD_PRIORITIZATION_SYSTEM_PROMPT, build_lead_prioritization_prompt
+from backend.modules.ai.prompts import build_lead_prioritization_prompt, get_system_prompt
 from backend.modules.ai.schemas import ChatterMessage, LeadContext, LeadPriority
 from backend.modules.crm.client import OdooClient
 from backend.modules.crm.domain import BASE_DOMAIN, get_critical_stage_ids
@@ -101,7 +101,7 @@ class LeadPrioritizer:
         self._overdue_cache_raw = _oc
         self._overdue_cache_lock = _lock
 
-    async def prioritize_single(self, lead: LeadContext) -> LeadPriority:
+    async def prioritize_single(self, lead: LeadContext, locale: str = "en") -> LeadPriority:
         """Score one lead. Uses per-lead cache. Enforces budget."""
         if not settings.AI_FEATURE_LEAD_PRIORITIZATION:
             raise AIFeatureDisabledError("Lead prioritization feature is disabled")
@@ -116,6 +116,7 @@ class LeadPrioritizer:
             lead.last_activity_date,
             completeness,
             chatter_hash,
+            locale,
         )
 
         cached_result = self._cache.get(cache_key)
@@ -135,8 +136,8 @@ class LeadPrioritizer:
             )
 
         messages = [
-            {"role": "system", "content": LEAD_PRIORITIZATION_SYSTEM_PROMPT},
-            {"role": "user", "content": build_lead_prioritization_prompt(lead)},
+            {"role": "system", "content": get_system_prompt(locale)},
+            {"role": "user", "content": build_lead_prioritization_prompt(lead, locale)},
         ]
 
         model = settings.AI_MODEL
@@ -169,6 +170,7 @@ class LeadPrioritizer:
         self,
         leads: list[LeadContext],
         max_concurrent: int = 5,
+        locale: str = "en",
     ) -> list[LeadPriority]:
         """Score multiple leads concurrently. Stops if budget is hit."""
         semaphore = asyncio.Semaphore(max_concurrent)
@@ -177,7 +179,7 @@ class LeadPrioritizer:
         async def score_one(lead: LeadContext) -> Optional[LeadPriority]:
             async with semaphore:
                 try:
-                    return await self.prioritize_single(lead)
+                    return await self.prioritize_single(lead, locale)
                 except BudgetExceededError:
                     logger.warning(f"Budget exceeded — skipping lead {lead.lead_id} and remaining")
                     return None
@@ -201,20 +203,20 @@ class LeadPrioritizer:
         results.sort(key=lambda r: r.score, reverse=True)
         return results
 
-    async def prioritize_overdue(self, limit: int = 50) -> list[LeadPriority]:
+    async def prioritize_overdue(self, limit: int = 50, locale: str = "en") -> list[LeadPriority]:
         """Fetch overdue leads from Odoo and prioritize them."""
-        list_key = overdue_list_cache_key(limit)
+        list_key = overdue_list_cache_key(limit, locale)
         with self._overdue_cache_lock:
             cached_list = self._overdue_cache_raw.get(list_key)
         if cached_list is not None:
-            logger.debug(f"Overdue priority list cache hit (limit={limit})")
+            logger.debug(f"Overdue priority list cache hit (limit={limit}, locale={locale})")
             return cached_list  # type: ignore[return-value]
 
         leads = await self._fetch_overdue_leads(limit)
         if not leads:
             return []
 
-        prioritized = await self.prioritize_batch(leads)
+        prioritized = await self.prioritize_batch(leads, locale=locale)
         with self._overdue_cache_lock:
             self._overdue_cache_raw[list_key] = prioritized
         return prioritized

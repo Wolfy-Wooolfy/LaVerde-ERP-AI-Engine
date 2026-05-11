@@ -117,10 +117,11 @@ def lead_cache_key(
     last_activity_date: Any,
     completeness_score: int,
     chatter_hash: str = "",
+    locale: str = "en",
 ) -> str:
-    raw = f"{lead_id}:{stage_id}:{last_activity_date}:{completeness_score}:{chatter_hash}"
+    raw = f"{lead_id}:{stage_id}:{last_activity_date}:{completeness_score}:{chatter_hash}:{locale}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
-def overdue_list_cache_key(limit: int) -> str:
-    return f"overdue_priority_top_{limit}"
+def overdue_list_cache_key(limit: int, locale: str = "en") -> str:
+    return f"overdue_priority_top_{limit}_{locale}"

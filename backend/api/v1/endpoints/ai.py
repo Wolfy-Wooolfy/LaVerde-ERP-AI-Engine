@@ -102,8 +102,12 @@ async def prioritize_lead(
     else:
         lead = lead_context
 
+    lang = request.cookies.get("lang", "en")
+    if lang not in ("en", "ar"):
+        lang = "en"
+
     try:
-        result = await prioritizer.prioritize_single(lead)
+        result = await prioritizer.prioritize_single(lead, locale=lang)
         return result
     except BudgetExceededError as exc:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=_budget_error_response(exc))
@@ -132,8 +136,12 @@ async def prioritize_overdue(
     if not settings.AI_ENABLED:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_ai_disabled_response())
 
+    lang = request.cookies.get("lang", "en")
+    if lang not in ("en", "ar"):
+        lang = "en"
+
     try:
-        leads = await prioritizer.prioritize_overdue(limit=body.limit)
+        leads = await prioritizer.prioritize_overdue(limit=body.limit, locale=lang)
         total_cost = sum(l.cost_usd for l in leads)
         cached_count = sum(1 for l in leads if l.cached)
         return PrioritizeOverdueResponse(
