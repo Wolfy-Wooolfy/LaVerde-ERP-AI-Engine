@@ -259,8 +259,21 @@
         </button>
 
         <!-- Theme toggle -->
-        <div class="relative" x-data="{ open: false }" @click.outside="open = false">
-          <button @click="open = !open"
+        <div class="relative" x-data="{
+          open: false,
+          dropStyle: '',
+          toggle() {
+            if (!this.open) {
+              const r = this.$refs.btn.getBoundingClientRect();
+              const rtl = document.documentElement.dir === 'rtl';
+              this.dropStyle = rtl
+                ? 'top:' + (r.bottom + 4) + 'px;left:' + r.left + 'px;'
+                : 'top:' + (r.bottom + 4) + 'px;right:' + (window.innerWidth - r.right) + 'px;';
+            }
+            this.open = !this.open;
+          }
+        }" @click.outside="open = false">
+          <button x-ref="btn" @click="toggle()"
             class="btn-ghost btn btn-icon"
             :aria-label="'Theme: ' + theme"
             title="{{ _t('Theme') }}">
@@ -277,9 +290,9 @@
             x-transition:enter="transition ease-out duration-100"
             x-transition:enter-start="opacity-0 scale-95"
             x-transition:enter-end="opacity-100 scale-100"
-            class="absolute top-full right-0 rtl:right-auto rtl:left-0 mt-1 w-36
-                   bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700
-                   rounded-xl shadow-panel py-1 text-sm z-50">
+            :style="'position:fixed;z-index:9999;' + dropStyle"
+            class="w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700
+                   rounded-xl shadow-panel py-1 text-sm">
             {% for t_val, t_label in [("light", _t("Light")), ("dark", _t("Dark")), ("system", _t("System"))] %}
             <button @click="setTheme('{{ t_val }}'); open = false"
               class="flex items-center gap-2.5 w-full px-3 py-2 text-left
@@ -296,8 +309,21 @@
         </div>
 
         <!-- Language toggle -->
-        <div class="relative" x-data="{ open: false }" @click.outside="open = false">
-          <button @click="open = !open"
+        <div class="relative" x-data="{
+          open: false,
+          dropStyle: '',
+          toggle() {
+            if (!this.open) {
+              const r = this.$refs.btn.getBoundingClientRect();
+              const rtl = document.documentElement.dir === 'rtl';
+              this.dropStyle = rtl
+                ? 'top:' + (r.bottom + 4) + 'px;left:' + r.left + 'px;'
+                : 'top:' + (r.bottom + 4) + 'px;right:' + (window.innerWidth - r.right) + 'px;';
+            }
+            this.open = !this.open;
+          }
+        }" @click.outside="open = false">
+          <button x-ref="btn" @click="toggle()"
             class="btn-ghost btn px-2.5 py-1.5 text-xs font-mono font-semibold uppercase"
             title="{{ _t('Language') }}">
             <span x-text="lang.toUpperCase()">{{ lang | upper }}</span>
@@ -306,9 +332,9 @@
             x-transition:enter="transition ease-out duration-100"
             x-transition:enter-start="opacity-0 scale-95"
             x-transition:enter-end="opacity-100 scale-100"
-            class="absolute top-full right-0 rtl:right-auto rtl:left-0 mt-1 w-32
-                   bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700
-                   rounded-xl shadow-panel py-1 text-sm z-50">
+            :style="'position:fixed;z-index:9999;' + dropStyle"
+            class="w-32 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700
+                   rounded-xl shadow-panel py-1 text-sm">
             <button @click="setLang('en'); open = false"
               class="flex items-center gap-2 w-full px-3 py-2 text-left text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700">
               <span class="text-base">🇺🇸</span> English
