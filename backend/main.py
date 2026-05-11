@@ -31,6 +31,7 @@ from backend.core.exceptions import (
 from backend.core.limiter import limiter
 from backend.core.logging import setup_logging
 from backend.core.metrics import get_uptime, metrics, set_start_time
+from backend.modules.ai.exceptions import AIServiceError, BudgetExceededError
 from backend.modules.crm.service import CrmService
 
 # ── Application lifespan ──────────────────────────────────────────────────────
@@ -38,13 +39,50 @@ from backend.modules.crm.service import CrmService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from loguru import logger
+
     setup_logging()
     init_cache(settings.CACHE_TTL_SECONDS)
     app.state.crm_service = CrmService()
     app.state.limiter = limiter
     set_start_time()
+
+    # ── AI service initialization ─────────────────────────────────────────────
+    if settings.AI_ENABLED:
+        from backend.modules.ai.budget_tracker import BudgetTracker
+        from backend.modules.ai.cache import AICache
+        from backend.modules.ai.client import OpenAIClient
+        from backend.modules.ai.prioritizer import LeadPrioritizer
+
+        budget_tracker = BudgetTracker(
+            monthly_budget_usd=settings.AI_MONTHLY_BUDGET_USD,
+            warning_threshold=settings.AI_BUDGET_WARNING_THRESHOLD,
+            hard_stop=settings.AI_BUDGET_HARD_STOP,
+        )
+        ai_client = OpenAIClient(budget_tracker=budget_tracker)
+        ai_cache = AICache(ttl_seconds=settings.AI_CACHE_TTL_SECONDS)
+        ai_prioritizer = LeadPrioritizer(
+            odoo_client=app.state.crm_service.client,
+            ai_client=ai_client,
+            budget_tracker=budget_tracker,
+            cache=ai_cache,
+        )
+        app.state.ai_budget_tracker = budget_tracker
+        app.state.ai_client = ai_client
+        app.state.ai_cache = ai_cache
+        app.state.ai_prioritizer = ai_prioritizer
+        logger.info(f"AI service initialized | model={settings.AI_MODEL} budget=${settings.AI_MONTHLY_BUDGET_USD}")
+    else:
+        app.state.ai_budget_tracker = None
+        app.state.ai_client = None
+        app.state.ai_cache = None
+        app.state.ai_prioritizer = None
+        logger.info("AI service disabled (AI_ENABLED=false)")
+
     yield
     await app.state.crm_service.client.close()
+    if settings.AI_ENABLED and hasattr(app.state, "ai_client") and app.state.ai_client:
+        await app.state.ai_client.close()
 
 
 # ── App instance ──────────────────────────────────────────────────────────────
@@ -150,6 +188,22 @@ async def odoo_connection_handler(request: Request, exc: OdooConnectionError) ->
 @app.exception_handler(CRMAIEngineError)
 async def crm_engine_handler(request: Request, exc: CRMAIEngineError) -> JSONResponse:
     return _error_response(request, 500, "INTERNAL_ERROR", "Internal service error")
+
+
+@app.exception_handler(BudgetExceededError)
+async def budget_exceeded_handler(request: Request, exc: BudgetExceededError) -> JSONResponse:
+    return _error_response(
+        request,
+        402,
+        "AI_BUDGET_EXCEEDED",
+        "Monthly AI budget exhausted. Resets next month.",
+        {"spent": exc.spent, "budget": exc.budget},
+    )
+
+
+@app.exception_handler(AIServiceError)
+async def ai_service_handler(request: Request, exc: AIServiceError) -> JSONResponse:
+    return _error_response(request, 502, "AI_SERVICE_ERROR", "AI service error")
 
 
 # ── Public health check (no auth) ─────────────────────────────────────────────
