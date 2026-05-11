@@ -155,3 +155,24 @@ class OdooClient:
             "execute_kw",
             [self._db, uid, self._api_key, model, method, args or [], kwargs or {}],
         )
+
+    async def fetch_recent_messages(
+        self,
+        lead_id: int,
+        limit: int = 3,
+    ) -> list[dict]:
+        """Fetch the most recent chatter messages for a lead (newest first)."""
+        return await self.execute_kw(
+            "mail.message",
+            "search_read",
+            args=[[
+                ["model", "=", "crm.lead"],
+                ["res_id", "=", lead_id],
+                ["message_type", "in", ["comment", "email", "notification"]],
+            ]],
+            kwargs={
+                "fields": ["date", "author_id", "body", "message_type", "subject"],
+                "limit": limit,
+                "order": "date desc",
+            },
+        )

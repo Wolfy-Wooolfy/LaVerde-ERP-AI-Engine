@@ -4,6 +4,13 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ChatterMessage(BaseModel):
+    date: datetime
+    author: str
+    body_text: str  # HTML stripped, max 300 chars
+    message_type: str  # comment / email / notification
+
+
 class LeadContext(BaseModel):
     """Input to AI: everything needed to score a lead."""
 
@@ -21,6 +28,11 @@ class LeadContext(BaseModel):
     has_mobile: bool = False
     has_email: bool = False
     activity_state: str = "none"  # overdue/today/planned/none
+    recent_messages: list[ChatterMessage] = Field(default_factory=list)
+    has_site_visit: bool = False
+    has_phone_attempt: bool = False
+    last_message_date: Optional[datetime] = None
+    days_since_last_message: Optional[int] = None
 
 
 class LeadPriority(BaseModel):
@@ -33,6 +45,7 @@ class LeadPriority(BaseModel):
     tier: Literal["critical", "high", "medium", "low", "dead"]
     reasoning: str
     recommended_action: str
+    key_signal: str = ""
     cached: bool = False
     cost_usd: float = 0.0
     generated_at: datetime

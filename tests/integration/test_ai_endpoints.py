@@ -21,7 +21,8 @@ def _make_mock_prioritizer(tmp_path):
             score=80,
             tier="high",
             reasoning="Near closing stage with contact info.",
-            recommended_action="Call immediately",
+            recommended_action="Call via WhatsApp",
+            key_signal="معاينة mentioned 5 days ago",
             cached=False,
             cost_usd=0.00012,
             generated_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
@@ -97,6 +98,7 @@ def test_prioritize_overdue_lead_fields(client_with_ai):
     assert "tier" in lead
     assert "reasoning" in lead
     assert "recommended_action" in lead
+    assert "key_signal" in lead
     assert "model_used" in lead
 
 

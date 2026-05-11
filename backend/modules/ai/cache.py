@@ -111,8 +111,14 @@ class AICache:
 # ── Cache key builders ────────────────────────────────────────────────────────
 
 
-def lead_cache_key(lead_id: int, stage_id: int, last_activity_date: Any, completeness_score: int) -> str:
-    raw = f"{lead_id}:{stage_id}:{last_activity_date}:{completeness_score}"
+def lead_cache_key(
+    lead_id: int,
+    stage_id: int,
+    last_activity_date: Any,
+    completeness_score: int,
+    chatter_hash: str = "",
+) -> str:
+    raw = f"{lead_id}:{stage_id}:{last_activity_date}:{completeness_score}:{chatter_hash}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 

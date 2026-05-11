@@ -62,10 +62,10 @@ def test_build_prompt_contains_salesperson():
     assert "Khaled" in prompt
 
 
-def test_build_prompt_no_last_activity_shows_never():
+def test_build_prompt_no_last_activity_shows_na():
     lead = _make_lead(last_activity_date=None)
     prompt = build_lead_prioritization_prompt(lead)
-    assert "Never" in prompt
+    assert "N/A" in prompt
 
 
 def test_build_prompt_contact_info_listed():

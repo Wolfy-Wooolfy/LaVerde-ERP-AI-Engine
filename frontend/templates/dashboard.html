@@ -656,6 +656,7 @@ function renderLeadCard(lead) {
     + '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">'
     + escapeHtml(lead.reasoning || '')
     + '</p>'
+    + (lead.key_signal ? '<p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">&#9889; ' + escapeHtml(lead.key_signal) + '</p>' : '')
     + '<p class="text-xs font-medium text-primary-600 dark:text-primary-400 mt-1">Action: ' + escapeHtml(lead.recommended_action || '') + '</p>'
     + (viewLink ? '<div class="mt-1">' + viewLink + '</div>' : '')
     + '</div>'

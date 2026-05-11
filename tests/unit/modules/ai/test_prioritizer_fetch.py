@@ -24,6 +24,8 @@ def _good_ai_response() -> ChatCompletionResponse:
 @pytest.fixture
 def prioritizer(tmp_path):
     odoo = MagicMock()
+    odoo.execute_kw = AsyncMock(return_value=[])
+    odoo.fetch_recent_messages = AsyncMock(return_value=[])
     ai = MagicMock()
     ai.chat_completion = AsyncMock(return_value=_good_ai_response())
     budget = MagicMock()
