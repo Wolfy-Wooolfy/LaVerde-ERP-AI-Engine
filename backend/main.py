@@ -3,6 +3,7 @@ CRM AI Engine — FastAPI application entry point.
 Phase 3: Enterprise frontend — Tailwind, Alpine.js, i18n, dark mode, RTL.
 """
 
+import asyncio
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -37,6 +38,13 @@ from backend.modules.crm.service import CrmService
 # ── Application lifespan ──────────────────────────────────────────────────────
 
 
+async def _session_cleanup_loop(session_manager: object) -> None:
+    """Background task: purge expired chat sessions every hour."""
+    while True:
+        await asyncio.sleep(3600)
+        await session_manager.cleanup_expired()  # type: ignore[attr-defined]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from loguru import logger
@@ -46,6 +54,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.crm_service = CrmService()
     app.state.limiter = limiter
     set_start_time()
+
+    # ── Chat session manager (always initialized) ─────────────────────────────
+    from backend.modules.ai.cache import IntentCache
+    from backend.modules.ai.chat.session_manager import SessionManager
+
+    session_manager = SessionManager()
+    app.state.chat_session_manager = session_manager
+    app.state.chat_intent_cache = IntentCache()
+    cleanup_task = asyncio.create_task(_session_cleanup_loop(session_manager))
 
     # ── AI service initialization ─────────────────────────────────────────────
     if settings.AI_ENABLED:
@@ -80,6 +97,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("AI service disabled (AI_ENABLED=false)")
 
     yield
+
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
     await app.state.crm_service.client.close()
     if settings.AI_ENABLED and hasattr(app.state, "ai_client") and app.state.ai_client:
         await app.state.ai_client.close()

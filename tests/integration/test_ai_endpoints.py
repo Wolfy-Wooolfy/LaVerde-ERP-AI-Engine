@@ -140,3 +140,19 @@ def test_metrics_includes_ai_section(client_with_ai):
     assert resp.status_code == 200
     data = resp.json()
     assert "ai" in data
+
+
+def test_endpoint_returns_503_not_500_on_service_error(client_with_ai):
+    """Any unexpected exception from the AI layer must become 503, never 500."""
+    client_with_ai.app.state.ai_prioritizer.prioritize_overdue = AsyncMock(
+        side_effect=RuntimeError("unexpected internal failure")
+    )
+    resp = client_with_ai.post(
+        "/api/v1/ai/prioritize-overdue",
+        json={"limit": 10},
+        auth=AUTH,
+    )
+    assert resp.status_code == 503
+    detail = resp.json().get("detail", {})
+    error = detail.get("error", {}) if isinstance(detail, dict) else {}
+    assert error.get("code") in ("AI_INTERNAL_ERROR", "AI_SERVICE_UNAVAILABLE")

@@ -15,6 +15,8 @@ from loguru import logger
 _CACHE_FILE = Path("logs/ai_cache.json")
 _METRICS_FILE = Path("logs/ai_cache_metrics.json")
 
+CACHE_SCHEMA_VERSION = 2  # bump whenever key format or value structure changes
+
 
 class AICache:
     """Thread-safe TTL cache with JSON persistence across restarts."""
@@ -31,33 +33,68 @@ class AICache:
     # ── Persistence ────────────────────────────────────────────────────────────
 
     def _load(self) -> None:
+        if not self._cache_file.exists():
+            return
+
         try:
-            if self._cache_file.exists():
-                raw = json.loads(self._cache_file.read_text(encoding="utf-8"))
-                now = datetime.now(timezone.utc).timestamp()
-                loaded = 0
-                for key, entry in raw.items():
-                    expires_at = entry.get("expires_at", 0)
-                    if expires_at > now:
-                        with self._lock:
-                            self._cache[key] = entry["value"]
-                        loaded += 1
-                logger.debug(f"AI cache loaded {loaded} entries from disk")
-        except Exception as exc:
-            logger.warning(f"Could not load AI cache: {exc}")
+            data = json.loads(self._cache_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning(f"AI cache file corrupted, starting fresh: {exc}")
+            self._cache_file.unlink(missing_ok=True)
+            return
+
+        if not isinstance(data, dict) or "schema_version" not in data:
+            logger.info("AI cache schema is outdated (no version), clearing.")
+            self._cache_file.unlink(missing_ok=True)
+            return
+
+        if data["schema_version"] != CACHE_SCHEMA_VERSION:
+            logger.info(
+                f"AI cache schema mismatch "
+                f"(found v{data['schema_version']}, want v{CACHE_SCHEMA_VERSION}), "
+                f"clearing."
+            )
+            self._cache_file.unlink(missing_ok=True)
+            return
+
+        # Lazy import avoids circular dependency at module level
+        from backend.modules.ai.schemas import LeadPriority  # noqa: PLC0415
+
+        now = datetime.now(timezone.utc).timestamp()
+        loaded = 0
+        for key, entry in data.get("entries", {}).items():
+            try:
+                if entry.get("expires_at", 0) <= now:
+                    continue
+                value = LeadPriority.model_validate(entry["payload"])
+                with self._lock:
+                    self._cache[key] = value
+                loaded += 1
+            except Exception as exc:
+                logger.warning(f"Skipping invalid cache entry {key}: {exc}")
+
+        logger.debug(f"AI cache loaded {loaded} entries from disk")
 
     def _save(self) -> None:
         try:
             self._cache_file.parent.mkdir(parents=True, exist_ok=True)
             now = datetime.now(timezone.utc).timestamp()
-            snapshot: dict[str, Any] = {}
+            entries: dict[str, Any] = {}
             with self._lock:
                 for key, value in self._cache.items():
-                    snapshot[key] = {
-                        "value": value,
+                    payload = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+                    entries[key] = {
                         "expires_at": now + self._ttl,
+                        "payload": payload,
                     }
-            self._cache_file.write_text(json.dumps(snapshot, default=str, indent=2), encoding="utf-8")
+            self._cache_file.write_text(
+                json.dumps(
+                    {"schema_version": CACHE_SCHEMA_VERSION, "entries": entries},
+                    default=str,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
         except Exception as exc:
             logger.error(f"Could not persist AI cache: {exc}")
 
@@ -125,3 +162,29 @@ def lead_cache_key(
 
 def overdue_list_cache_key(limit: int, locale: str = "en") -> str:
     return f"overdue_priority_top_{limit}_{locale}"
+
+
+# ── Intent cache for chat Stage 1 ─────────────────────────────────────────────
+
+
+class IntentCache:
+    """Cache parsed chat intents (Stage 1) — 1 hour TTL, in-memory only."""
+
+    def __init__(self) -> None:
+        self._cache: TTLCache = TTLCache(maxsize=500, ttl=3600)
+        self._lock = threading.Lock()
+
+    def get(self, question: str, locale: str) -> Optional[Any]:
+        key = self._make_key(question, locale)
+        with self._lock:
+            return self._cache.get(key)
+
+    def set(self, question: str, locale: str, intent: Any) -> None:
+        key = self._make_key(question, locale)
+        with self._lock:
+            self._cache[key] = intent
+
+    @staticmethod
+    def _make_key(question: str, locale: str) -> str:
+        raw = f"{locale}:{question.strip().lower()}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]

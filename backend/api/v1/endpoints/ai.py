@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from loguru import logger
+from pydantic import ValidationError
 
 from backend.api.deps import get_current_user
 from backend.core.config import settings
@@ -155,11 +156,17 @@ async def prioritize_overdue(
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=_budget_error_response(exc))
     except AIFeatureDisabledError:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_ai_disabled_response())
-    except AIServiceError as exc:
-        logger.error(f"AI service error during batch prioritization: {exc}")
+    except (AIServiceError, ValidationError) as exc:
+        logger.exception("AI service error in prioritize-overdue")
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"ok": False, "error": {"code": "AI_SERVICE_ERROR", "message": str(exc)}},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ok": False, "error": {"code": "AI_SERVICE_UNAVAILABLE", "message": "AI service temporarily unavailable"}},
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in prioritize-overdue")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ok": False, "error": {"code": "AI_INTERNAL_ERROR", "message": "AI service encountered an error"}},
         )
 
 

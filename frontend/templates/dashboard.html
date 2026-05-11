@@ -250,9 +250,9 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
         </svg>
-        {{ _t("AI Priority Queue") }}
+        {{ _t("ai_priority_queue") }}
       </h3>
-      <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{{ _t("Top overdue leads requiring immediate attention") }}</p>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{{ _t("ai_priority_subtitle") }}</p>
     </div>
     <div class="flex items-center gap-2">
       <button id="ai-refresh-btn"
@@ -263,7 +263,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
         </svg>
-        {{ _t("Refresh") }}
+        {{ _t("ai_refresh") }}
       </button>
       <button onclick="window._openBudgetModal && window._openBudgetModal()"
               class="btn btn-secondary btn-sm"
@@ -272,7 +272,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
-        {{ _t("Budget") }}
+        {{ _t("ai_budget") }}
       </button>
     </div>
   </div>
@@ -304,7 +304,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
               d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
       </svg>
-      <p id="ai-error-message" class="text-sm">AI unavailable</p>
+      <p id="ai-error-message" class="text-sm">{{ _t("ai_unavailable") }}</p>
     </div>
   </div>
 </div>
@@ -316,7 +316,7 @@
   <div class="bg-white dark:bg-neutral-900 rounded-2xl shadow-panel border border-neutral-200 dark:border-neutral-800
               w-full max-w-sm mx-4 p-6">
     <div class="flex items-center justify-between mb-5">
-      <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("AI Budget") }}</h3>
+      <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("ai_budget_modal_title") }}</h3>
       <button onclick="document.getElementById('budget-modal').classList.add('hidden'), document.getElementById('budget-modal').classList.remove('flex')"
               class="btn-ghost btn btn-icon">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -330,7 +330,7 @@
         <div class="h-4 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2"></div>
       </div>
     </div>
-    <p class="text-xs text-neutral-400 mt-4">Resets on the 1st of every month.</p>
+    <p class="text-xs text-neutral-400 mt-4">{{ _t("ai_budget_reset_note") }}</p>
   </div>
 </div>
 
@@ -526,6 +526,19 @@ window.CRM_DATA = {
   })
 };
 
+// AI section translated strings injected server-side
+window.AI_STRINGS = {
+  action_label:    {{ _t("ai_action_label")    | tojson }},
+  view_in_odoo:    {{ _t("ai_view_in_odoo")    | tojson }},
+  no_leads:        {{ _t("ai_no_leads")        | tojson }},
+  budget_exceeded: {{ _t("ai_budget_exceeded") | tojson }},
+  unavailable:     {{ _t("ai_unavailable")     | tojson }},
+  budget_spent:    {{ _t("ai_budget_spent")    | tojson }},
+  budget_monthly:  {{ _t("ai_budget_monthly")  | tojson }},
+  budget_remaining:{{ _t("ai_budget_remaining")| tojson }},
+  budget_usage:    {{ _t("ai_budget_usage")    | tojson }},
+};
+
 // Initialize greeting
 document.addEventListener('DOMContentLoaded', function() {
   var h = new Date().getHours();
@@ -592,14 +605,14 @@ function loadAIPriority(forceRefresh) {
     if (!res.ok || !res.data.ok) {
       var msg = (res.data.error && res.data.error.message) || 'AI unavailable';
       var code = (res.data.error && res.data.error.code) || '';
-      showAIError(code === 'AI_BUDGET_EXCEEDED' ? 'Budget exhausted — AI unavailable until next month.' : msg);
+      showAIError(code === 'AI_BUDGET_EXCEEDED' ? window.AI_STRINGS.budget_exceeded : msg);
       updateBudgetPill(null);
       return;
     }
 
     var leads = res.data.leads || [];
     if (leads.length === 0) {
-      showAIError('No overdue leads to prioritize.');
+      showAIError(window.AI_STRINGS.no_leads);
       return;
     }
 
@@ -613,7 +626,7 @@ function loadAIPriority(forceRefresh) {
   .catch(function(err) {
     if (skeleton) skeleton.classList.add('hidden');
     if (refreshBtn) refreshBtn.disabled = false;
-    showAIError('Could not reach AI service.');
+    showAIError(window.AI_STRINGS.unavailable);
     console.error('AI fetch error:', err);
   });
 }
@@ -638,7 +651,7 @@ function renderLeadCard(lead) {
 
   var odooUrl = '{{ odoo_url | default("") }}';
   var viewLink = odooUrl
-    ? '<a href="' + odooUrl + '/odoo/crm/' + lead.lead_id + '" target="_blank" rel="noopener noreferrer" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">View in Odoo →</a>'
+    ? '<a href="' + odooUrl + '/odoo/crm/' + lead.lead_id + '" target="_blank" rel="noopener noreferrer" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">' + window.AI_STRINGS.view_in_odoo + '</a>'
     : '';
 
   var cachedBadge = lead.cached
@@ -657,7 +670,7 @@ function renderLeadCard(lead) {
     + escapeHtml(lead.reasoning || '')
     + '</p>'
     + (lead.key_signal ? '<p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">&#9889; ' + escapeHtml(lead.key_signal) + '</p>' : '')
-    + '<p class="text-xs font-medium text-primary-600 dark:text-primary-400 mt-1">Action: ' + escapeHtml(lead.recommended_action || '') + '</p>'
+    + '<p class="text-xs font-medium text-primary-600 dark:text-primary-400 mt-1">' + window.AI_STRINGS.action_label + ': ' + escapeHtml(lead.recommended_action || '') + '</p>'
     + (viewLink ? '<div class="mt-1">' + viewLink + '</div>' : '')
     + '</div>'
     + '</div>'
@@ -718,19 +731,19 @@ window._openBudgetModal = function() {
     var barColor = data.is_over_budget ? 'bg-danger-500' : data.is_near_budget ? 'bg-warning-500' : 'bg-success-500';
     content.innerHTML = '<div class="space-y-3">'
       + '<div class="flex justify-between text-sm">'
-      + '<span class="text-neutral-600 dark:text-neutral-400">Spent this month</span>'
+      + '<span class="text-neutral-600 dark:text-neutral-400">' + window.AI_STRINGS.budget_spent + '</span>'
       + '<span class="font-semibold text-neutral-900 dark:text-neutral-100">$' + (data.current_month_spend_usd||0).toFixed(4) + '</span>'
       + '</div>'
       + '<div class="flex justify-between text-sm">'
-      + '<span class="text-neutral-600 dark:text-neutral-400">Monthly budget</span>'
+      + '<span class="text-neutral-600 dark:text-neutral-400">' + window.AI_STRINGS.budget_monthly + '</span>'
       + '<span class="font-semibold text-neutral-900 dark:text-neutral-100">$' + (data.monthly_budget_usd||10).toFixed(2) + '</span>'
       + '</div>'
       + '<div class="flex justify-between text-sm">'
-      + '<span class="text-neutral-600 dark:text-neutral-400">Remaining</span>'
+      + '<span class="text-neutral-600 dark:text-neutral-400">' + window.AI_STRINGS.budget_remaining + '</span>'
       + '<span class="font-semibold ' + (data.is_over_budget ? 'text-danger-600' : 'text-success-600') + '">$' + (data.remaining_budget_usd||0).toFixed(4) + '</span>'
       + '</div>'
       + '<div>'
-      + '<div class="flex justify-between text-xs text-neutral-400 mb-1"><span>Usage</span><span>' + pct + '%</span></div>'
+      + '<div class="flex justify-between text-xs text-neutral-400 mb-1"><span>' + window.AI_STRINGS.budget_usage + '</span><span>' + pct + '%</span></div>'
       + '<div class="w-full h-2 bg-neutral-200 dark:bg-neutral-700 rounded-full overflow-hidden">'
       + '<div class="h-2 rounded-full ' + barColor + '" style="width:' + Math.min(100, pct) + '%"></div>'
       + '</div>'

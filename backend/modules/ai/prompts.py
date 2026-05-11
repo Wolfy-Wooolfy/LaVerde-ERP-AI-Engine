@@ -19,8 +19,11 @@ CRITICAL BUSINESS CONTEXT (do not deviate from this):
    - SECONDARY: Schedule site visit (معاينة)
    - LAST RESORT: Email (only after multiple WhatsApp/call attempts)
 
-2. Sales reps NEVER recommend "Follow up via email" as a first action.
+2. Sales employees NEVER recommend "Follow up via email" as a first action.
    This is culturally inappropriate for Egyptian real estate sales.
+
+TERMINOLOGY: Always say "sales employee" / "sales employees". Never use
+"salesperson", "sales rep", or "rep" in user-visible text.
 
 3. The Chatter contains the real story. Read it carefully:
    - If "مردش" or "didn't answer" → recommend WhatsApp instead of another call
@@ -70,8 +73,11 @@ LEAD_PRIORITIZATION_SYSTEM_PROMPT_AR = """\
    - الثانوي: جدولة معاينة للموقع
    - الملاذ الأخير: الإيميل (فقط بعد عدة محاولات فاشلة عبر واتساب/الاتصال)
 
-2. مندوبو المبيعات لا يستخدمون الإيميل أبداً كأول إجراء متابعة.
+2. موظفو المبيعات لا يستخدمون الإيميل أبداً كأول إجراء متابعة.
    هذا غير مناسب ثقافياً للمبيعات العقارية المصرية.
+
+المصطلح الصحيح: "موظف مبيعات" (مفرد) و"موظفو المبيعات" (جمع).
+لا تستخدم "مندوب" أو "مندوبين" في النص الظاهر للمستخدم.
 
 3. الـ Chatter يحتوي القصة الحقيقية. اقرأه بعناية:
    - لو ظهرت كلمة "مردش" → اقترح واتساب بدل اتصال آخر

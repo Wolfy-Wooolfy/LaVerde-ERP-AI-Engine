@@ -161,3 +161,42 @@ def test_csp_no_external_domains(client: TestClient) -> None:
     # The CSP must NOT allow external CDN domains
     assert "cdn.jsdelivr.net" not in csp
     assert "fonts.googleapis.com" not in csp
+
+
+# ── Bug 2: DISPLAY_NAME greeting fallback chain ───────────────────────────────
+
+
+def test_extract_first_name_display_name_takes_precedence(monkeypatch):
+    """DISPLAY_NAME must override username-derived name everywhere."""
+    from backend.api.v1.endpoints.dashboard import _extract_first_name
+    from backend.core.config import settings
+
+    monkeypatch.setattr(settings, "DISPLAY_NAME", "La Verde")
+    assert _extract_first_name("khaled@laverde-eg.com") == "La Verde"
+    assert _extract_first_name("admin") == "La Verde"
+
+
+def test_extract_first_name_email_fallback(monkeypatch):
+    from backend.api.v1.endpoints.dashboard import _extract_first_name
+    from backend.core.config import settings
+
+    monkeypatch.setattr(settings, "DISPLAY_NAME", "")
+    assert _extract_first_name("khaled.elmasry@laverde-eg.com") == "Khaled"
+
+
+def test_extract_first_name_plain_username_fallback(monkeypatch):
+    from backend.api.v1.endpoints.dashboard import _extract_first_name
+    from backend.core.config import settings
+
+    monkeypatch.setattr(settings, "DISPLAY_NAME", "")
+    assert _extract_first_name("admin") == "Admin"
+
+
+def test_dashboard_renders_display_name(client: TestClient, monkeypatch) -> None:
+    """When DISPLAY_NAME is set, the rendered dashboard must include it."""
+    from backend.core.config import settings
+
+    monkeypatch.setattr(settings, "DISPLAY_NAME", "La Verde")
+    r = client.get("/dashboard", auth=_AUTH)
+    assert r.status_code == 200
+    assert b"La Verde" in r.content
