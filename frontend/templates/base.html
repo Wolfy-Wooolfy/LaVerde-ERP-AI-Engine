@@ -279,6 +279,7 @@
         @click.outside="open = false"
         @crm-close-dropdowns.window="open = false">
           <button x-ref="btn" @click="toggle()"
+            data-dropdown-trigger="theme"
             class="btn-ghost btn btn-icon"
             :aria-label="'Theme: ' + theme"
             title="{{ _t('Theme') }}">
@@ -292,6 +293,7 @@
             </svg>
           </button>
           <div x-ref="panel" x-show="open"
+            data-dropdown="theme"
             x-transition:enter="transition ease-out duration-100"
             x-transition:enter-start="opacity-0 scale-95"
             x-transition:enter-end="opacity-100 scale-100"
@@ -333,11 +335,13 @@
         @click.outside="open = false"
         @crm-close-dropdowns.window="open = false">
           <button x-ref="btn" @click="toggle()"
+            data-dropdown-trigger="lang"
             class="btn-ghost btn px-2.5 py-1.5 text-xs font-mono font-semibold uppercase"
             title="{{ _t('Language') }}">
             <span x-text="lang.toUpperCase()">{{ lang | upper }}</span>
           </button>
           <div x-ref="panel" x-show="open"
+            data-dropdown="lang"
             x-transition:enter="transition ease-out duration-100"
             x-transition:enter-start="opacity-0 scale-95"
             x-transition:enter-end="opacity-100 scale-100"
