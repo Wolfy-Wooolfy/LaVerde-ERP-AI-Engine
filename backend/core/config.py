@@ -1,6 +1,7 @@
 from functools import lru_cache
 
-from pydantic import field_validator
+from loguru import logger
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -55,6 +56,24 @@ class Settings(BaseSettings):
         "connect-src 'self';"
     )
 
+    # ── AI Configuration ──────────────────────────────────────────────────────
+    AI_ENABLED: bool = True
+    AI_PROVIDER: str = "openai"
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    AI_MODEL: str = "gpt-4o-mini"
+    AI_FALLBACK_MODEL: str = "gpt-4o-mini"
+    AI_REQUEST_TIMEOUT_SECONDS: int = 30
+    AI_MAX_RETRIES: int = 2
+    AI_CACHE_TTL_SECONDS: int = 21600  # 6 hours
+    AI_RATE_LIMIT_PER_HOUR: int = 100
+    AI_MONTHLY_BUDGET_USD: float = 10.00
+    AI_BUDGET_WARNING_THRESHOLD: float = 0.80
+    AI_BUDGET_HARD_STOP: bool = True
+    AI_FEATURE_LEAD_PRIORITIZATION: bool = True
+    AI_FEATURE_DAILY_BRIEFING: bool = False
+    AI_FEATURE_NATURAL_QUERY: bool = False
+
     # ── CRM Stage IDs (stored as comma-separated strings for .env compat) ────
     CRM_CRITICAL_STAGE_IDS: str = "28,34,35,37,41"
     CRM_CLOSED_EXCLUDED_STAGE_IDS: str = "26,30,31,32,38,42,46"
@@ -90,6 +109,16 @@ class Settings(BaseSettings):
         if lower not in allowed:
             raise ValueError(f"ENVIRONMENT must be one of {allowed}")
         return lower
+
+    @model_validator(mode="after")
+    def validate_ai_config(self) -> "Settings":
+        if self.AI_ENABLED and not self.OPENAI_API_KEY:
+            raise ValueError("AI_ENABLED=true but OPENAI_API_KEY is empty")
+        if self.AI_MONTHLY_BUDGET_USD < 1.0:
+            logger.warning(
+                f"AI_MONTHLY_BUDGET_USD={self.AI_MONTHLY_BUDGET_USD} is less than $1 — very tight budget"
+            )
+        return self
 
 
 @lru_cache
