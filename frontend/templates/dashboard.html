@@ -241,6 +241,99 @@
   {% endif %}
 </div>
 
+<!-- ── AI Priority Queue ──────────────────────────────────────────────────────── -->
+<div class="chart-panel mb-8" id="ai-priority-section">
+  <div class="flex items-center justify-between mb-4">
+    <div>
+      <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+        <svg class="w-4 h-4 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+        </svg>
+        {{ _t("AI Priority Queue") }}
+      </h3>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{{ _t("Top overdue leads requiring immediate attention") }}</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="ai-refresh-btn"
+              onclick="loadAIPriority(true)"
+              class="btn btn-secondary btn-sm"
+              title="Re-run AI prioritization">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        {{ _t("Refresh") }}
+      </button>
+      <button onclick="window._openBudgetModal && window._openBudgetModal()"
+              class="btn btn-secondary btn-sm"
+              title="View AI budget status">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        {{ _t("Budget") }}
+      </button>
+    </div>
+  </div>
+
+  <!-- AI leads container -->
+  <div id="ai-leads-container">
+    <!-- Skeleton shown while loading -->
+    <div id="ai-skeleton" class="space-y-3">
+      {% for _ in range(3) %}
+      <div class="animate-pulse rounded-xl border border-neutral-200 dark:border-neutral-700 p-4">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-lg bg-neutral-200 dark:bg-neutral-700 shrink-0"></div>
+          <div class="flex-1 space-y-2">
+            <div class="h-4 bg-neutral-200 dark:bg-neutral-700 rounded w-2/3"></div>
+            <div class="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2"></div>
+            <div class="h-3 bg-neutral-200 dark:bg-neutral-700 rounded w-3/4"></div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Populated by JS -->
+    <div id="ai-leads-list" class="space-y-3 hidden"></div>
+
+    <!-- Error / disabled state -->
+    <div id="ai-error-state" class="hidden text-center py-8 text-neutral-400 dark:text-neutral-600">
+      <svg class="w-10 h-10 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+      </svg>
+      <p id="ai-error-message" class="text-sm">AI unavailable</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── Budget Modal ────────────────────────────────────────────────────────────── -->
+<div id="budget-modal"
+     class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 backdrop-blur-sm"
+     onclick="if(event.target===this) this.classList.add('hidden'), this.classList.remove('flex')">
+  <div class="bg-white dark:bg-neutral-900 rounded-2xl shadow-panel border border-neutral-200 dark:border-neutral-800
+              w-full max-w-sm mx-4 p-6">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("AI Budget") }}</h3>
+      <button onclick="document.getElementById('budget-modal').classList.add('hidden'), document.getElementById('budget-modal').classList.remove('flex')"
+              class="btn-ghost btn btn-icon">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <div id="budget-modal-content" class="space-y-4">
+      <div class="animate-pulse space-y-3">
+        <div class="h-4 bg-neutral-200 dark:bg-neutral-700 rounded w-3/4"></div>
+        <div class="h-4 bg-neutral-200 dark:bg-neutral-700 rounded w-1/2"></div>
+      </div>
+    </div>
+    <p class="text-xs text-neutral-400 mt-4">Resets on the 1st of every month.</p>
+  </div>
+</div>
+
 <!-- ── Tables Section ─────────────────────────────────────────────────────────── -->
 <div class="chart-panel" x-data="{ tab: 'salesperson' }">
   <!-- Tabs -->
@@ -454,6 +547,196 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Load sparklines
   loadAllSparklines();
+
+  // Load AI priority queue asynchronously (does not block initial render)
+  loadAIPriority(false);
+
+  // Load AI budget pill
+  loadAIBudgetPill();
 });
+
+// ── AI Priority Queue ───────────────────────────────────────────────────────
+
+var _aiRefreshCooldown = false;
+
+function loadAIPriority(forceRefresh) {
+  if (forceRefresh && _aiRefreshCooldown) {
+    showToast('Please wait before refreshing AI again.', 'warning');
+    return;
+  }
+  if (forceRefresh) {
+    _aiRefreshCooldown = true;
+    setTimeout(function() { _aiRefreshCooldown = false; }, 15000);
+  }
+
+  var skeleton = document.getElementById('ai-skeleton');
+  var list = document.getElementById('ai-leads-list');
+  var errorState = document.getElementById('ai-error-state');
+  var refreshBtn = document.getElementById('ai-refresh-btn');
+
+  if (skeleton) skeleton.classList.remove('hidden');
+  if (list) { list.classList.add('hidden'); list.innerHTML = ''; }
+  if (errorState) errorState.classList.add('hidden');
+  if (refreshBtn) refreshBtn.disabled = true;
+
+  fetch('/api/v1/ai/prioritize-overdue', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+    body: JSON.stringify({ limit: 10 })
+  })
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+  .then(function(res) {
+    if (skeleton) skeleton.classList.add('hidden');
+    if (refreshBtn) refreshBtn.disabled = false;
+
+    if (!res.ok || !res.data.ok) {
+      var msg = (res.data.error && res.data.error.message) || 'AI unavailable';
+      var code = (res.data.error && res.data.error.code) || '';
+      showAIError(code === 'AI_BUDGET_EXCEEDED' ? 'Budget exhausted — AI unavailable until next month.' : msg);
+      updateBudgetPill(null);
+      return;
+    }
+
+    var leads = res.data.leads || [];
+    if (leads.length === 0) {
+      showAIError('No overdue leads to prioritize.');
+      return;
+    }
+
+    if (list) {
+      list.innerHTML = leads.map(renderLeadCard).join('');
+      list.classList.remove('hidden');
+    }
+
+    loadAIBudgetPill();
+  })
+  .catch(function(err) {
+    if (skeleton) skeleton.classList.add('hidden');
+    if (refreshBtn) refreshBtn.disabled = false;
+    showAIError('Could not reach AI service.');
+    console.error('AI fetch error:', err);
+  });
+}
+
+function showAIError(msg) {
+  var el = document.getElementById('ai-error-message');
+  var state = document.getElementById('ai-error-state');
+  if (el) el.textContent = msg;
+  if (state) state.classList.remove('hidden');
+}
+
+function renderLeadCard(lead) {
+  var scoreColor = lead.score >= 90 ? 'bg-danger-500 text-white'
+    : lead.score >= 70 ? 'bg-orange-500 text-white'
+    : lead.score >= 50 ? 'bg-warning-500 text-white'
+    : 'bg-neutral-300 dark:bg-neutral-600 text-neutral-700 dark:text-neutral-300';
+
+  var tierDot = lead.score >= 90 ? '🔴'
+    : lead.score >= 70 ? '🟠'
+    : lead.score >= 50 ? '🟡'
+    : '⚪';
+
+  var odooUrl = '{{ odoo_url | default("") }}';
+  var viewLink = odooUrl
+    ? '<a href="' + odooUrl + '/odoo/crm/' + lead.lead_id + '" target="_blank" rel="noopener noreferrer" class="text-xs text-primary-600 dark:text-primary-400 hover:underline">View in Odoo →</a>'
+    : '';
+
+  var cachedBadge = lead.cached
+    ? '<span class="text-[10px] text-neutral-400 ml-1">(cached)</span>'
+    : '';
+
+  return '<div class="rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">'
+    + '<div class="flex items-start gap-3">'
+    + '<div class="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold ' + scoreColor + '">' + lead.score + '</div>'
+    + '<div class="flex-1 min-w-0">'
+    + '<div class="flex items-center gap-2 flex-wrap">'
+    + '<span class="font-semibold text-sm text-neutral-900 dark:text-neutral-100 truncate">' + tierDot + ' ' + escapeHtml(lead.name || 'Lead #' + lead.lead_id) + '</span>'
+    + cachedBadge
+    + '</div>'
+    + '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">'
+    + escapeHtml(lead.reasoning || '')
+    + '</p>'
+    + '<p class="text-xs font-medium text-primary-600 dark:text-primary-400 mt-1">Action: ' + escapeHtml(lead.recommended_action || '') + '</p>'
+    + (viewLink ? '<div class="mt-1">' + viewLink + '</div>' : '')
+    + '</div>'
+    + '</div>'
+    + '</div>';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── AI Budget Pill ──────────────────────────────────────────────────────────
+
+function loadAIBudgetPill() {
+  fetch('/api/v1/ai/budget', { headers: { 'Accept': 'application/json' } })
+  .then(function(r) { return r.ok ? r.json() : null; })
+  .then(function(data) { if (data) updateBudgetPill(data); })
+  .catch(function() {});
+}
+
+function updateBudgetPill(data) {
+  var dot = document.getElementById('ai-budget-dot');
+  var label = document.getElementById('ai-budget-label');
+  if (!dot || !label) return;
+  if (!data) {
+    label.textContent = 'AI: N/A';
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-neutral-300';
+    return;
+  }
+  var spent = (data.current_month_spend_usd || 0).toFixed(2);
+  var budget = (data.monthly_budget_usd || 10).toFixed(0);
+  if (data.is_over_budget) {
+    label.textContent = 'AI: Budget exhausted';
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-danger-500';
+    label.className = 'text-danger-600 dark:text-danger-400';
+  } else if (data.is_near_budget) {
+    label.textContent = 'AI: $' + spent + ' / $' + budget + ' (near limit)';
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-warning-500';
+    label.className = 'text-warning-600 dark:text-warning-400';
+  } else {
+    label.textContent = 'AI: $' + spent + ' / $' + budget;
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-success-500';
+    label.className = 'text-neutral-500 dark:text-neutral-400';
+  }
+}
+
+window._openBudgetModal = function() {
+  var modal = document.getElementById('budget-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  fetch('/api/v1/ai/budget', { headers: { 'Accept': 'application/json' } })
+  .then(function(r) { return r.ok ? r.json() : null; })
+  .then(function(data) {
+    var content = document.getElementById('budget-modal-content');
+    if (!content || !data) return;
+    var pct = (data.percentage_used || 0).toFixed(1);
+    var barColor = data.is_over_budget ? 'bg-danger-500' : data.is_near_budget ? 'bg-warning-500' : 'bg-success-500';
+    content.innerHTML = '<div class="space-y-3">'
+      + '<div class="flex justify-between text-sm">'
+      + '<span class="text-neutral-600 dark:text-neutral-400">Spent this month</span>'
+      + '<span class="font-semibold text-neutral-900 dark:text-neutral-100">$' + (data.current_month_spend_usd||0).toFixed(4) + '</span>'
+      + '</div>'
+      + '<div class="flex justify-between text-sm">'
+      + '<span class="text-neutral-600 dark:text-neutral-400">Monthly budget</span>'
+      + '<span class="font-semibold text-neutral-900 dark:text-neutral-100">$' + (data.monthly_budget_usd||10).toFixed(2) + '</span>'
+      + '</div>'
+      + '<div class="flex justify-between text-sm">'
+      + '<span class="text-neutral-600 dark:text-neutral-400">Remaining</span>'
+      + '<span class="font-semibold ' + (data.is_over_budget ? 'text-danger-600' : 'text-success-600') + '">$' + (data.remaining_budget_usd||0).toFixed(4) + '</span>'
+      + '</div>'
+      + '<div>'
+      + '<div class="flex justify-between text-xs text-neutral-400 mb-1"><span>Usage</span><span>' + pct + '%</span></div>'
+      + '<div class="w-full h-2 bg-neutral-200 dark:bg-neutral-700 rounded-full overflow-hidden">'
+      + '<div class="h-2 rounded-full ' + barColor + '" style="width:' + Math.min(100, pct) + '%"></div>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+  })
+  .catch(function() {});
+};
 </script>
 {% endblock %}

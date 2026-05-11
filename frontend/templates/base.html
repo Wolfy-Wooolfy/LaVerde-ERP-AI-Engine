@@ -368,6 +368,16 @@
           {{ _t("Read-only mode") }}
         </span>
 
+        <!-- AI Budget pill -->
+        <span id="ai-budget-pill"
+              class="hidden sm:inline-flex items-center gap-1 ml-2 pl-3 border-l border-neutral-200 dark:border-neutral-700
+                     text-[10px] font-medium whitespace-nowrap select-none cursor-pointer"
+              title="AI monthly budget. Resets on the 1st of every month."
+              onclick="window._openBudgetModal && window._openBudgetModal()">
+          <span id="ai-budget-dot" class="w-1.5 h-1.5 rounded-full bg-neutral-300"></span>
+          <span id="ai-budget-label" class="text-neutral-400 dark:text-neutral-500">AI: loading…</span>
+        </span>
+
       </div>
     </header>
 

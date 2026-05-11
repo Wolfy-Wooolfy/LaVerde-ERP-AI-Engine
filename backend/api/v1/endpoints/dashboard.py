@@ -51,6 +51,7 @@ async def dashboard(
             "summary": data.summary,
             "data_quality": data.data_quality,
             "followup_risk": data.followup_risk,
+            "odoo_url": settings.ODOO_URL.rstrip("/"),
         }
     )
     return templates.TemplateResponse(request, "dashboard.html", ctx)
