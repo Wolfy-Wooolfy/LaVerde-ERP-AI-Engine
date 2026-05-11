@@ -15,12 +15,19 @@ templates = Jinja2Templates(directory="frontend/templates")
 load_translations()
 
 
+def _extract_first_name(username: str) -> str:
+    """khaled.elmasry@laverde-eg.com → 'Khaled',  admin → 'Admin'."""
+    local = username.split("@")[0]
+    return local.split(".")[0].capitalize()
+
+
 def _base_ctx(request: Request, user: str) -> dict:
     """Common context injected into every page."""
     lang = detect_lang(dict(request.cookies), request.headers.get("accept-language", ""))
     return {
         "request": request,
         "current_user": user,
+        "user_display_name": _extract_first_name(user),
         "lang": lang,
         "is_rtl": lang == "ar",
         "_t": make_translator(lang),

@@ -16,7 +16,7 @@
             data-morning="{{ _t('Good morning') }}"
             data-afternoon="{{ _t('Good afternoon') }}"
             data-evening="{{ _t('Good evening') }}">{{ _t('Good morning') }}</span>,
-      {{ current_user.split('@')[0].split('.')[0] | title }}
+      {{ user_display_name }}
     </h1>
     <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
       {{ _t("Here's what's happening with your CRM today") }}
