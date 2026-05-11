@@ -142,3 +142,21 @@ def test_language_switch_sets_cookie(auth_page: Page) -> None:
     lang_cookie = next((c for c in cookies if c["name"] == "lang"), None)
     assert lang_cookie is not None, "lang cookie was not set"
     assert lang_cookie["value"] == "en", f"expected lang=en, got lang={lang_cookie['value']}"
+
+
+def test_view_in_odoo_link_correct(auth_page: Page) -> None:
+    """Every row's 'View in Odoo' link must point to the real Odoo deep-link."""
+    auth_page.goto(f"{BASE_URL}/data-quality/missing-contact")
+    auth_page.wait_for_timeout(1000)
+
+    link = auth_page.locator('a[title="View in Odoo"], a[title="عرض في Odoo"]').first
+    if link.count() == 0:
+        # no rows in this environment — skip structural check
+        pytest.skip("no rows returned; cannot verify link href")
+
+    href = link.get_attribute("href") or ""
+    assert "/web#id=" in href, f"expected /web#id= in href, got: {href}"
+    assert "model=crm.lead" in href, f"expected model=crm.lead in href, got: {href}"
+    assert "view_type=form" in href, f"expected view_type=form in href, got: {href}"
+    assert link.get_attribute("target") == "_blank", "expected target=_blank"
+    assert link.get_attribute("rel") == "noopener noreferrer", "expected rel=noopener noreferrer"

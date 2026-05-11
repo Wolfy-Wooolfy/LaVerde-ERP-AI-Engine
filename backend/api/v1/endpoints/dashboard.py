@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from backend.api.deps import get_crm_service, get_current_user
+from backend.core.config import settings
 from backend.core.i18n import detect_lang, load_translations, make_translator
 from backend.modules.crm.service import CrmService
 
@@ -93,6 +94,7 @@ async def missing_contact_page(
             "page": "missing_contact",
             "rows": rows,
             "pag": pag,
+            "odoo_url": settings.ODOO_URL.rstrip("/"),
             "filters": {
                 "team_id": team_id,
                 "salesperson_id": salesperson_id,
