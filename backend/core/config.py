@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "2.0.0"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
+    DISPLAY_NAME: str = ""
 
     # ── Odoo ─────────────────────────────────────────────────────────────────
     ODOO_URL: str

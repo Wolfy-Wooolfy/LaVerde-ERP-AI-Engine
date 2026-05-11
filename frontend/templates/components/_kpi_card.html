@@ -34,7 +34,7 @@
 
 {% set tag = "a" if href else "div" %}
 <{{ tag }} {% if href %}href="{{ href }}"{% endif %}
-  class="kpi-card border {{ border_colors.get(variant, border_colors.default) }} group flex flex-col"
+  class="kpi-card border {{ border_colors.get(variant, border_colors.default) }} group flex flex-col overflow-hidden"
   {% if sparkline_metric %}data-sparkline-metric="{{ sparkline_metric }}"{% endif %}
 >
   <div class="flex items-start justify-between mb-3">

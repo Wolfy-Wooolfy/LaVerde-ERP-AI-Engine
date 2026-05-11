@@ -291,7 +291,8 @@ function drawSparkline(canvas, values, metric) {
       }],
     },
     options: {
-      responsive: false,
+      responsive: true,
+      maintainAspectRatio: false,
       animation: false,
       plugins: { legend: { display: false }, tooltip: { enabled: false } },
       scales: {

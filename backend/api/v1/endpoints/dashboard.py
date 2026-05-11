@@ -18,6 +18,8 @@ load_translations()
 
 def _extract_first_name(username: str) -> str:
     """khaled.elmasry@laverde-eg.com → 'Khaled',  admin → 'Admin'."""
+    if settings.DISPLAY_NAME:
+        return settings.DISPLAY_NAME
     local = username.split("@")[0]
     return local.split(".")[0].capitalize()
 

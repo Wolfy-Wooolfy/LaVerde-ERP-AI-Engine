@@ -236,11 +236,10 @@ class LeadPrioritizer:
                         "activity_state",
                     ],
                     "limit": limit,
-                    "order": "activity_date_deadline asc",
                 },
             )
         except Exception as exc:
-            logger.error(f"Failed to fetch overdue leads from Odoo: {exc}")
+            logger.error(f"Failed to fetch overdue leads from Odoo: {exc!r}")
             return []
 
         leads = []
@@ -273,6 +272,8 @@ class LeadPrioritizer:
                     activity_state=row.get("activity_state") or "none",
                 )
             )
+        # Critical stages first, then oldest (most overdue) first
+        leads.sort(key=lambda l: (not l.is_critical_stage, -l.days_in_stage))
         return leads
 
 
