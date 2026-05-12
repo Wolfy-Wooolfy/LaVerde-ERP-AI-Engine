@@ -107,7 +107,10 @@ def is_data_empty(data: dict) -> bool:
     if rows or items or leads:
         return False
     if count is not None:
-        return False  # 0 overdue leads is a real answer, not missing data
+        return False  # 0 leads is a real answer, not missing data
+    # stage_count always has a count key — never empty
+    if dtype == "stage_count":
+        return False
     # data_quality types always have content
     if dtype in ("data_quality", "data_quality_full", "team_performance", "salesperson_performance"):
         return False
@@ -156,6 +159,22 @@ async def build_response(
     if intent.intent == "unknown" or data.get("type") == "clarification_needed":
         clarification = _CLARIFICATION_AR if locale == "ar" else _CLARIFICATION_EN
         return clarification, _get_fallback_followups("free_form_analysis", locale), 0.0
+
+    # ── Short-circuit: stage not found (no AI call needed) ────────────────────
+    if data.get("type") == "stage_not_found":
+        stage = data.get("requested_stage", "")
+        valid = "New, No Answer, Follow up, Interested, Contact in the Future, Re-Distribution, Reservation, Down Payment Confirm & Contracted"
+        if locale == "ar":
+            msg = (
+                f"لم أجد مرحلة باسم '{stage}' بشكل دقيق. "
+                f"الأسماء الصحيحة للمراحل: {valid}."
+            )
+        else:
+            msg = (
+                f"I couldn't find a stage named exactly '{stage}'. "
+                f"Valid stage names: {valid}."
+            )
+        return msg, _get_fallback_followups("count_by_stage", locale), 0.0
 
     # ── Empty-data guardrail ──────────────────────────────────────────────────
     if is_data_empty(data):

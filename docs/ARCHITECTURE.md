@@ -156,23 +156,30 @@ CRM_DATA_QUALITY_STAGE_IDS=44
 
 The `Settings` model parses these into `list[int]` via `@property`.
 
-**Known stage names for the current instance:**
+**Known stage names for the current instance (validated against live Odoo — run `python scripts/diag_stages.py` to re-verify):**
 
-| ID | Name | Group |
-|----|------|-------|
-| 26 | Closed Won | CLOSED_EXCLUDED |
-| 28 | New Lead | CRITICAL |
-| 30 | Closed Lost | CLOSED_EXCLUDED |
-| 31 | Closed Duplicate | CLOSED_EXCLUDED |
-| 32 | Closed Invalid | CLOSED_EXCLUDED |
-| 34 | Qualified | CRITICAL |
-| 35 | Proposal Sent | CRITICAL |
-| 37 | Negotiation | CRITICAL |
-| 38 | Closed No Answer | CLOSED_EXCLUDED |
-| 41 | Contract Sent | CRITICAL |
-| 42 | Closed Cancelled | CLOSED_EXCLUDED |
-| 44 | New X | DATA_QUALITY |
-| 46 | Closed Transferred | CLOSED_EXCLUDED |
+| ID | Name | Team | Group |
+|----|------|------|-------|
+| 24 | New | global | Pipeline entry |
+| 25 | No Answer | global | Pipeline early |
+| 26 | Wrong Number | global | CLOSED_EXCLUDED |
+| 27 | Follow up | global | Pipeline mid |
+| 28 | Interested | global | CRITICAL |
+| 29 | Contact in the Future | global | Pipeline mid |
+| 30 | Unqualified | Managers team | CLOSED_EXCLUDED |
+| 31 | Unavailable Request | Managers team | CLOSED_EXCLUDED |
+| 32 | Bought Out | Managers team | CLOSED_EXCLUDED |
+| 33 | Re-Distribution | global | Pipeline mid |
+| 34 | Draft Reservation | Managers team | CRITICAL |
+| 35 | Initial Reservation | Managers team | CRITICAL |
+| 37 | Reservation | Managers team | CRITICAL |
+| 38 | Cancel Reservation | global | CLOSED_EXCLUDED |
+| 41 | Down Payment Confirm & Contracted | Managers team | CRITICAL |
+| 42 | Cancel Contract | global | CLOSED_EXCLUDED |
+| 44 | New X | global | DATA_QUALITY |
+| 46 | Lost | global | CLOSED_EXCLUDED (fold=YES) |
+
+> Source: `python scripts/diag_stages.py` run on 2026-05-12 against the production Odoo instance.
 
 ---
 

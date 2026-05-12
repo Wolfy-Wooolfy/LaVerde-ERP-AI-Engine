@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -115,6 +115,16 @@ class PaginatedMissingContactResponse(BaseModel):
     ok: bool = True
     data: list[MissingContactRow]
     pagination: Pagination
+
+
+# ── Stage count result (used by count_leads_by_stage) ─────────────────────────
+
+
+class StageCountResult(BaseModel):
+    stage_name: str
+    matched_stages: list[dict[str, Any]]
+    count: int
+    overdue_only: bool
 
 
 # ── Error response (v2 structured format) ─────────────────────────────────────

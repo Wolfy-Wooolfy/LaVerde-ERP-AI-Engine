@@ -29,6 +29,7 @@ from backend.modules.crm.schemas import (
     OverdueMatrixRow,
     PaginatedMissingContactResponse,
     Pagination,
+    StageCountResult,
     SummaryResponse,
 )
 
@@ -171,6 +172,55 @@ class CrmService:
             )
         result.sort(key=lambda r: r.overdue_count, reverse=True)
         return result
+
+    async def count_leads_by_stage(
+        self,
+        stage_name: str,
+        overdue_only: bool = False,
+    ) -> StageCountResult:
+        """
+        Count resolved opportunities in a stage by EXACT name match (case-insensitive).
+
+        "New" matches "New" only — never "New X". If overdue_only=True, only leads
+        with activity_state=overdue are counted.
+        """
+        stages = await self.client.execute_kw(
+            "crm.stage",
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["id", "name"], "limit": 200},
+        )
+
+        target = stage_name.strip().lower()
+        matched = [s for s in stages if s["name"].strip().lower() == target]
+
+        if not matched:
+            return StageCountResult(
+                stage_name=stage_name,
+                matched_stages=[],
+                count=0,
+                overdue_only=overdue_only,
+            )
+
+        matched_ids = [s["id"] for s in matched]
+        domain = list(BASE_DOMAIN) + [["stage_id", "in", matched_ids]]
+        if overdue_only:
+            domain.append(["activity_state", "=", "overdue"])
+
+        rows = await self.client.execute_kw(
+            "crm.lead",
+            "read_group",
+            args=[domain, ["__count"], []],
+            kwargs={},
+        )
+        count = rows[0].get("__count", 0) if rows else 0
+
+        return StageCountResult(
+            stage_name=matched[0]["name"],
+            matched_stages=[{"id": s["id"], "name": s["name"]} for s in matched],
+            count=count,
+            overdue_only=overdue_only,
+        )
 
     async def overdue_matrix(self) -> list[OverdueMatrixRow]:
         domain = BASE_DOMAIN + [

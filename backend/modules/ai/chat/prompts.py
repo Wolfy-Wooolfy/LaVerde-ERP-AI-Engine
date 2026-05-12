@@ -19,6 +19,7 @@ ALLOWED_INTENTS: set[str] = {
     "list_overdue_by_team",
     "list_overdue_by_stage",
     "count_by_stage",
+    "count_overdue_by_stage",
     "count_by_team",
     "count_by_salesperson",
     "lead_details_by_id",
@@ -88,10 +89,20 @@ FALLBACK_FOLLOWUPS: dict[str, dict[str, list[str]]] = {
     "count_by_stage": {
         "ar": [
             "كم عدد العملاء في مرحلة Reservation؟",
-            "إيه أعلى 5 موظفي مبيعات عندهم تأخر؟",
+            "كم lead متأخر في مرحلة Follow up؟",
         ],
         "en": [
             "How many leads are in the Reservation stage?",
+            "How many overdue leads are in Follow up stage?",
+        ],
+    },
+    "count_overdue_by_stage": {
+        "ar": [
+            "كم إجمالي العملاء في نفس المرحلة؟",
+            "إيه أعلى 5 موظفي مبيعات عندهم تأخر؟",
+        ],
+        "en": [
+            "How many total leads are in that stage?",
             "Which 5 sales employees have the most overdue leads?",
         ],
     },
@@ -191,7 +202,8 @@ DATA INTENTS (require CRM query):
 - list_overdue_by_salesperson  : ranked list of overdue leads per sales employee
 - list_overdue_by_team         : ranked list of overdue leads per team
 - list_overdue_by_stage        : ranked list of overdue leads per stage
-- count_by_stage               : how many leads in a given stage
+- count_by_stage               : TOTAL leads in a stage (default — no overdue mention)
+- count_overdue_by_stage       : OVERDUE leads in a stage (user explicitly says متأخر/overdue/late)
 - count_by_team                : how many leads in a given team
 - count_by_salesperson         : how many leads for a given sales employee
 - lead_details_by_id           : details for a specific lead by ID
@@ -230,9 +242,27 @@ EGYPTIAN REAL ESTATE CONTEXT:
 MIXED-LANGUAGE HANDLING (Arabic sentence + English stage/name — very common):
 You MUST correctly parse questions that mix Arabic structure with English terms.
 
+CRITICAL RULE — total vs overdue stage count:
+- "كم lead في مرحلة X؟" / "How many leads in X?" → count_by_stage (TOTAL)
+- "كم lead متأخر في مرحلة X؟" / "How many overdue leads in X?" → count_overdue_by_stage
+- Keywords that signal overdue: متأخر، تأخر، overdue، late، محتاج متابعة عاجلة
+- When ambiguous (no overdue keyword), DEFAULT to count_by_stage (total)
+
 EXAMPLES:
 Input:  "كم lead في مرحلة Negotiation؟"
 Output: {{"intent":"count_by_stage","filters":{{"stage":"Negotiation"}},"response_format":"number","confidence":0.95}}
+
+Input:  "كم lead متأخر في مرحلة New؟"
+Output: {{"intent":"count_overdue_by_stage","filters":{{"stage":"New"}},"response_format":"number","confidence":0.95}}
+
+Input:  "كم lead في مرحلة New محتاج متابعة عاجلة؟"
+Output: {{"intent":"count_overdue_by_stage","filters":{{"stage":"New"}},"response_format":"number","confidence":0.92}}
+
+Input:  "How many overdue leads are in Reservation?"
+Output: {{"intent":"count_overdue_by_stage","filters":{{"stage":"Reservation"}},"response_format":"number","confidence":0.95}}
+
+Input:  "How many leads are in Reservation?"
+Output: {{"intent":"count_by_stage","filters":{{"stage":"Reservation"}},"response_format":"number","confidence":0.95}}
 
 Input:  "كم lead في مرحلة Reservation؟"
 Output: {{"intent":"count_by_stage","filters":{{"stage":"Reservation"}},"response_format":"number","confidence":0.95}}

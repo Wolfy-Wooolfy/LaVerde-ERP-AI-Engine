@@ -113,22 +113,32 @@ async def _handle_list_overdue_by_stage(
 
 async def _handle_count_by_stage(crm: CrmService, filters: dict, _p: Any) -> dict:
     raw_filter = (filters.get("stage") or "").strip()
-    normalised = _normalise_stage(raw_filter) if raw_filter else ""
-    stage_filter = normalised.lower()
-    rows = await crm.overdue_by_stage()
-    if stage_filter:
-        matching = [r for r in rows if stage_filter in r.stage_name.lower()]
-        count = sum(r.overdue_count for r in matching)
-        label = normalised or filters.get("stage", "matching stage")
-    else:
-        count = sum(r.overdue_count for r in rows)
-        label = "all stages"
+    if not raw_filter:
+        return {"type": "clarification_needed", "message": "Stage name required"}
+
+    normalised = _normalise_stage(raw_filter)
+    overdue_only = bool(filters.get("overdue_only", False))
+
+    result = await crm.count_leads_by_stage(stage_name=normalised, overdue_only=overdue_only)
+
+    if not result.matched_stages:
+        return {
+            "type": "stage_not_found",
+            "requested_stage": raw_filter,
+        }
+
     return {
-        "type": "count",
-        "count": count,
-        "label": label,
-        "breakdown": [r.model_dump() for r in rows],
+        "type": "stage_count",
+        "stage_name": result.stage_name,
+        "count": result.count,
+        "overdue_only": overdue_only,
+        "matched_count": len(result.matched_stages),
     }
+
+
+async def _handle_count_overdue_by_stage(crm: CrmService, filters: dict, _p: Any) -> dict:
+    """Explicit overdue-only stage count — user asked about متأخر/overdue leads."""
+    return await _handle_count_by_stage(crm, {**filters, "overdue_only": True}, _p)
 
 
 async def _handle_count_by_team(crm: CrmService, filters: dict, _p: Any) -> dict:
@@ -372,6 +382,7 @@ _INTENT_HANDLERS: dict[str, Any] = {
     "list_overdue_by_team": _handle_list_overdue_by_team,
     "list_overdue_by_stage": _handle_list_overdue_by_stage,
     "count_by_stage": _handle_count_by_stage,
+    "count_overdue_by_stage": _handle_count_overdue_by_stage,
     "count_by_team": _handle_count_by_team,
     "count_by_salesperson": _handle_count_by_salesperson,
     "lead_details_by_id": _handle_lead_details_by_id,

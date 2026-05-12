@@ -20,12 +20,14 @@ import base64
 import io
 import os
 import re
-import signal
 import subprocess
 import sys
-import time
+import uuid
 
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=".env")
 
 # Force UTF-8 stdout so Arabic text doesn't crash on Windows cp1252 consoles
 if hasattr(sys.stdout, "buffer"):
@@ -129,6 +131,52 @@ def assert_no_mandup(content: str, context: str) -> None:
     log(f"No forbidden terminology ({context})", "PASS")
 
 
+# ── Odoo ground-truth helpers (read-only, zero OpenAI) ───────────────────────
+
+_ODOO_URL = os.environ.get("ODOO_URL", "").rstrip("/") + "/jsonrpc"
+_ODOO_DB = os.environ.get("ODOO_DB", "")
+_ODOO_USER = os.environ.get("ODOO_USERNAME", "")
+_ODOO_KEY = os.environ.get("ODOO_API_KEY", "")
+
+_BASE_DOMAIN = [
+    ["type", "=", "opportunity"],
+    ["opportunity_status", "=", "resolved"],
+]
+
+
+def _rpc_sync(service, method, args):
+    import urllib.request
+    import json as _json
+    payload = _json.dumps({
+        "jsonrpc": "2.0", "method": "call", "id": str(uuid.uuid4()),
+        "params": {"service": service, "method": method, "args": args},
+    }).encode()
+    req = urllib.request.Request(_ODOO_URL, data=payload,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        data = _json.loads(r.read())
+    if "error" in data:
+        raise RuntimeError(f"Odoo RPC error: {data['error']}")
+    return data["result"]
+
+
+def _get_odoo_stage_count(stage_name: str) -> int:
+    """Exact case-insensitive match — same logic as CrmService.count_leads_by_stage."""
+    uid = _rpc_sync("common", "authenticate", [_ODOO_DB, _ODOO_USER, _ODOO_KEY, {}])
+    stages = _rpc_sync("object", "execute_kw",
+                       [_ODOO_DB, uid, _ODOO_KEY, "crm.stage", "search_read",
+                        [[]], {"fields": ["id", "name"], "limit": 200}])
+    target = stage_name.strip().lower()
+    matched_ids = [s["id"] for s in stages if s["name"].strip().lower() == target]
+    if not matched_ids:
+        return 0
+    domain = _BASE_DOMAIN + [["stage_id", "in", matched_ids]]
+    rows = _rpc_sync("object", "execute_kw",
+                     [_ODOO_DB, uid, _ODOO_KEY, "crm.lead", "read_group",
+                      [domain, ["__count"], []], {}])
+    return rows[0].get("__count", 0) if rows else 0
+
+
 # ── Scenarios ─────────────────────────────────────────────────────────────────
 
 
@@ -136,28 +184,28 @@ async def run_scenarios() -> int:
     failures = 0
     async with httpx.AsyncClient() as client:
 
-        # ── S1: Negotiation count question ────────────────────────────────────
+        # ── S1: Stage count question (Reservation — real stage in live Odoo) ───
         log("=" * 60)
-        log("Scenario 1: كم lead في مرحلة Negotiation؟", "STEP")
+        log("Scenario 1: كم lead في مرحلة Reservation؟", "STEP")
         log("=" * 60)
         try:
-            resp = await chat(client, "كم lead في مرحلة Negotiation؟", session_id="s1")
+            resp = await chat(client, "كم lead في مرحلة Reservation؟", session_id="s1")
             content = resp["message"]["content"]
             intent = resp["message"].get("intent", "?")
             log(f"Intent:   {intent}")
             log(f"Response: {content[:250]}")
-            assert_no_br(content, "S1 Negotiation")
-            assert_not_clarification(content, "S1 Negotiation")
-            assert_contains_number(content, "S1 Negotiation")
+            assert_no_br(content, "S1 Reservation")
+            assert_not_clarification(content, "S1 Reservation")
+            assert_contains_number(content, "S1 Reservation")
         except Exception as e:
             log(f"Scenario 1 FAILED: {e}", "FAIL")
             failures += 1
 
         # ── S2: Arabic stage name alias ────────────────────────────────────────
         log("=" * 60)
-        log("Scenario 2: Arabic stage names (التفاوض / الحجز)", "STEP")
+        log("Scenario 2: Arabic stage names (متابعة / الحجز)", "STEP")
         log("=" * 60)
-        for question in ["كم عميل في التفاوض؟", "كم lead في الحجز؟"]:
+        for question in ["كم عميل في متابعة؟", "كم lead في الحجز؟"]:
             try:
                 resp = await chat(client, question, session_id=f"s2-{hash(question)}")
                 content = resp["message"]["content"]
@@ -281,6 +329,58 @@ async def run_scenarios() -> int:
         except Exception as e:
             log(f"Scenario 7 FAILED: {e}", "FAIL")
             failures += 1
+
+        # ── S8: Stage count accuracy vs Odoo ground truth ─────────────────────
+        log("=" * 60)
+        log("Scenario 8: Stage count accuracy — AI must match Odoo", "STEP")
+        log("=" * 60)
+
+        s8_cases = [
+            ("New",        "كم lead في مرحلة New؟",            "ar"),
+            ("Follow up",  "كم lead في مرحلة Follow up؟",      "ar"),
+            ("Interested", "كم lead في مرحلة Interested؟",     "ar"),
+            ("Reservation","How many leads in Reservation?",    "en"),
+            ("New",        "How many leads in New stage?",      "en"),
+        ]
+
+        for stage_name, question, lang in s8_cases:
+            try:
+                # Ground truth from Odoo (read-only, no OpenAI)
+                odoo_count = _get_odoo_stage_count(stage_name)
+                log(f"Odoo ground truth — '{stage_name}': {odoo_count} leads")
+
+                resp = await chat(client, question,
+                                  session_id=f"s8-{stage_name.replace(' ', '_')}",
+                                  lang=lang)
+                content = resp["message"]["content"]
+                intent = resp["message"].get("intent", "?")
+                log(f"  Q: {question}")
+                log(f"  Intent: {intent}  Response: {content[:200]}")
+
+                assert_no_br(content, f"S8 {stage_name}")
+
+                # Extract first number from AI response
+                nums = re.findall(r"\d[\d,]*", content)
+                if not nums:
+                    log(f"  No number found in AI response for '{stage_name}'", "FAIL")
+                    raise AssertionError(f"No number in S8 response for '{stage_name}'")
+
+                # Strip commas (Arabic formatting sometimes adds them)
+                ai_count = int(nums[0].replace(",", ""))
+
+                if ai_count == odoo_count:
+                    log(f"  '{stage_name}': AI={ai_count} == Odoo={odoo_count}", "PASS")
+                else:
+                    log(f"  '{stage_name}': AI={ai_count} != Odoo={odoo_count} "
+                        f"(diff={abs(ai_count - odoo_count)})", "FAIL")
+                    raise AssertionError(
+                        f"Count mismatch for '{stage_name}': AI={ai_count}, Odoo={odoo_count}"
+                    )
+            except AssertionError:
+                failures += 1
+            except Exception as e:
+                log(f"Scenario 8 FAILED for '{stage_name}': {e}", "FAIL")
+                failures += 1
 
     log("=" * 60)
     if failures == 0:

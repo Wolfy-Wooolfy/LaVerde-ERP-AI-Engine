@@ -10,6 +10,7 @@ from backend.modules.crm.schemas import (
     OverdueBySalesperson,
     OverdueByStage,
     OverdueByTeam,
+    StageCountResult,
 )
 
 
@@ -33,6 +34,14 @@ def mock_crm():
             OverdueByStage(stage_id=28, stage_name="Negotiation", overdue_count=20),
             OverdueByStage(stage_id=34, stage_name="Site Visit", overdue_count=7),
         ]
+    )
+    crm.count_leads_by_stage = AsyncMock(
+        return_value=StageCountResult(
+            stage_name="Negotiation",
+            matched_stages=[{"id": 28, "name": "Negotiation"}],
+            count=120,
+            overdue_only=False,
+        )
     )
     crm.data_quality_summary = AsyncMock(
         return_value=DataQuality(
@@ -73,16 +82,47 @@ async def test_list_overdue_by_stage(mock_crm):
     assert data["total"] == 2
 
 
-async def test_count_by_stage_all(mock_crm):
+async def test_count_by_stage_no_filter_returns_clarification(mock_crm):
+    """No stage filter → clarification_needed (handler requires a stage name)."""
     data = await fetch_data_for_intent("count_by_stage", {}, mock_crm)
-    assert data["type"] == "count"
-    assert data["count"] == 27  # 20 + 7
+    assert data["type"] == "clarification_needed"
 
 
-async def test_count_by_stage_filtered(mock_crm):
+async def test_count_by_stage_returns_stage_count_type(mock_crm):
+    """Handler returns stage_count type with correct fields."""
     data = await fetch_data_for_intent("count_by_stage", {"stage": "Negotiation"}, mock_crm)
-    assert data["count"] == 20
-    assert data["label"] == "Negotiation"
+    assert data["type"] == "stage_count"
+    assert data["stage_name"] == "Negotiation"
+    assert data["count"] == 120
+    assert data["overdue_only"] is False
+
+
+async def test_count_by_stage_not_found(mock_crm):
+    """Unknown stage name → stage_not_found response."""
+    mock_crm.count_leads_by_stage.return_value = StageCountResult(
+        stage_name="Nonexistent",
+        matched_stages=[],
+        count=0,
+        overdue_only=False,
+    )
+    data = await fetch_data_for_intent("count_by_stage", {"stage": "Nonexistent"}, mock_crm)
+    assert data["type"] == "stage_not_found"
+    assert data["requested_stage"] == "Nonexistent"
+
+
+async def test_count_by_stage_does_not_match_new_x(mock_crm):
+    """'New' must NOT match 'New X' — exact match enforced in service layer."""
+    mock_crm.count_leads_by_stage.return_value = StageCountResult(
+        stage_name="New",
+        matched_stages=[{"id": 24, "name": "New"}],
+        count=97,
+        overdue_only=False,
+    )
+    data = await fetch_data_for_intent("count_by_stage", {"stage": "New"}, mock_crm)
+    assert data["type"] == "stage_count"
+    assert data["count"] == 97
+    # Verify the service was called with the normalised name, not a substring
+    mock_crm.count_leads_by_stage.assert_called_once_with(stage_name="New", overdue_only=False)
 
 
 async def test_count_by_team(mock_crm):
@@ -169,22 +209,43 @@ def test_normalise_stage_unknown_passthrough():
 
 
 async def test_count_by_stage_arabic_stage_name(mock_crm):
-    """'التفاوض' (Arabic for Negotiation) must resolve to the Negotiation stage."""
+    """'التفاوض' (Arabic for Negotiation) normalises to 'Negotiation' before service call."""
     data = await fetch_data_for_intent("count_by_stage", {"stage": "التفاوض"}, mock_crm)
-    assert data["count"] == 20
-    assert data["label"] == "Negotiation"
+    assert data["type"] == "stage_count"
+    assert data["stage_name"] == "Negotiation"
+    mock_crm.count_leads_by_stage.assert_called_once_with(stage_name="Negotiation", overdue_only=False)
 
 
 async def test_count_by_stage_mixed_language_english_term(mock_crm):
     """'Negotiation' in an Arabic question context must still work."""
     data = await fetch_data_for_intent("count_by_stage", {"stage": "Negotiation"}, mock_crm)
-    assert data["count"] == 20
-    assert data["label"] == "Negotiation"
+    assert data["type"] == "stage_count"
+    assert data["count"] == 120
 
 
 async def test_count_by_stage_follow_up_alias(mock_crm):
-    """'متابعة' should map to 'Follow up' stage — but mock only has Negotiation/Site Visit."""
+    """'متابعة' normalises to 'Follow up'; if stage not found returns stage_not_found."""
+    mock_crm.count_leads_by_stage.return_value = StageCountResult(
+        stage_name="Follow up",
+        matched_stages=[],
+        count=0,
+        overdue_only=False,
+    )
     data = await fetch_data_for_intent("count_by_stage", {"stage": "متابعة"}, mock_crm)
-    # No matching stage in mock → count is 0, but normalisation ran without error
-    assert data["type"] == "count"
-    assert data["label"] == "Follow up"
+    assert data["type"] == "stage_not_found"
+    mock_crm.count_leads_by_stage.assert_called_once_with(stage_name="Follow up", overdue_only=False)
+
+
+async def test_count_overdue_by_stage(mock_crm):
+    """count_overdue_by_stage intent forces overdue_only=True."""
+    mock_crm.count_leads_by_stage.return_value = StageCountResult(
+        stage_name="New",
+        matched_stages=[{"id": 24, "name": "New"}],
+        count=1,
+        overdue_only=True,
+    )
+    data = await fetch_data_for_intent("count_overdue_by_stage", {"stage": "New"}, mock_crm)
+    assert data["type"] == "stage_count"
+    assert data["count"] == 1
+    assert data["overdue_only"] is True
+    mock_crm.count_leads_by_stage.assert_called_once_with(stage_name="New", overdue_only=True)

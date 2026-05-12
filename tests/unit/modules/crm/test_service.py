@@ -136,3 +136,67 @@ async def test_summary_fires_parallel_odoo_calls(mock_client: MagicMock) -> None
     await svc.summary()
     # summary fires activity + dq(4) + total + critical + 3 overdue + matrix = 11 calls
     assert mock_client.execute_kw.call_count >= 8
+
+
+# ── count_leads_by_stage ──────────────────────────────────────────────────────
+
+
+async def test_count_leads_by_stage_exact_match(mock_client: MagicMock) -> None:
+    """'New' must NOT match 'New X' — strict exact match only."""
+    mock_client.execute_kw.side_effect = [
+        # search_read on crm.stage
+        [{"id": 24, "name": "New"}, {"id": 44, "name": "New X"}],
+        # read_group count for stage_id=24 only
+        [{"__count": 97}],
+    ]
+    svc = CrmService(client=mock_client)
+    result = await svc.count_leads_by_stage("New")
+    assert result.count == 97
+    assert len(result.matched_stages) == 1
+    assert result.matched_stages[0]["id"] == 24
+    assert result.matched_stages[0]["name"] == "New"
+
+
+async def test_count_leads_by_stage_case_insensitive(mock_client: MagicMock) -> None:
+    """'new' (lowercase) must match 'New' (capitalised)."""
+    mock_client.execute_kw.side_effect = [
+        [{"id": 24, "name": "New"}, {"id": 44, "name": "New X"}],
+        [{"__count": 97}],
+    ]
+    svc = CrmService(client=mock_client)
+    result = await svc.count_leads_by_stage("new")
+    assert result.count == 97
+    assert result.stage_name == "New"  # canonical name from Odoo
+
+
+async def test_count_leads_by_stage_overdue_filter(mock_client: MagicMock) -> None:
+    """overdue_only=True applies the activity_state=overdue filter."""
+    mock_client.execute_kw.side_effect = [
+        [{"id": 24, "name": "New"}],
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    result = await svc.count_leads_by_stage("New", overdue_only=True)
+    assert result.count == 1
+    assert result.overdue_only is True
+    # Confirm activity_state filter was included in the domain
+    call_args = mock_client.execute_kw.call_args_list[1]
+    # execute_kw(model, method, args=...) — domain is args kwarg index 0
+    domain_arg = call_args.kwargs["args"][0]
+    assert any(
+        c == ["activity_state", "=", "overdue"] for c in domain_arg
+    ), f"overdue filter missing from domain: {domain_arg}"
+
+
+async def test_count_leads_by_stage_no_match_returns_zero(mock_client: MagicMock) -> None:
+    """Unknown stage name returns count=0 with empty matched_stages."""
+    mock_client.execute_kw.return_value = [
+        {"id": 24, "name": "New"},
+        {"id": 27, "name": "Follow up"},
+    ]
+    svc = CrmService(client=mock_client)
+    result = await svc.count_leads_by_stage("Nonexistent Stage")
+    assert result.count == 0
+    assert result.matched_stages == []
+    # Must not make a second Odoo call (no stage matched — no lead query needed)
+    assert mock_client.execute_kw.call_count == 1
