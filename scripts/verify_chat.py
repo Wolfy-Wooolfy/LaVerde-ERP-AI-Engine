@@ -382,6 +382,58 @@ async def run_scenarios() -> int:
                 log(f"Scenario 8 FAILED for '{stage_name}': {e}", "FAIL")
                 failures += 1
 
+        # ── S9: AI-generated follow-ups must be answerable ───────────────────────
+        log("=" * 60)
+        log("Scenario 9: AI-generated follow-ups must not return clarification", "STEP")
+        log("=" * 60)
+
+        _CLARIFICATION_SIGNALS = [
+            "لم أفهم",
+            "لم أجد مرحلة",
+            "لا تتوفر",
+            "جرّب أحد هذه",
+            "couldn't find a stage",
+            "I'm not sure I understood",
+            "not enough",
+            "try one of these",
+        ]
+
+        s9_seed_questions = [
+            ("كم lead في مرحلة Follow up؟", "ar"),
+            ("Show me team performance", "en"),
+        ]
+
+        for seed_q, seed_lang in s9_seed_questions:
+            try:
+                seed_resp = await chat(client, seed_q,
+                                       session_id=f"s9-{abs(hash(seed_q))}",
+                                       lang=seed_lang)
+                followups = seed_resp.get("suggested_followups", [])
+                log(f"Seed: {seed_q!r} → {len(followups)} follow-up(s)")
+
+                if not followups:
+                    log("  No follow-ups returned — skipping", "INFO")
+                    continue
+
+                for fu in followups:
+                    log(f"  Testing follow-up: {fu}", "STEP")
+                    fu_resp = await chat(client, fu,
+                                        session_id=f"s9-fu-{abs(hash(fu))}",
+                                        lang=seed_lang)
+                    fu_content = fu_resp["message"]["content"]
+                    bad = next((p for p in _CLARIFICATION_SIGNALS
+                                if p.lower() in fu_content.lower()), None)
+                    if bad:
+                        log(f"  Follow-up returned clarification (matched {bad!r}): {fu!r}", "FAIL")
+                        log(f"  Response: {fu_content[:200]}", "INFO")
+                        failures += 1
+                    else:
+                        log(f"  Follow-up answered correctly: {fu!r}", "PASS")
+
+            except Exception as e:
+                log(f"Scenario 9 FAILED for seed '{seed_q}': {e}", "FAIL")
+                failures += 1
+
     log("=" * 60)
     if failures == 0:
         log("ALL SCENARIOS PASSED", "PASS")

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -53,6 +55,85 @@ _META_FOLLOWUP_PATTERNS = re.compile(
 
 
 _BR_RE = re.compile(r'<br\s*/?>', re.IGNORECASE)
+
+# ── Real stage-name cache (1-hour TTL, fetched from Odoo on first use) ────────
+
+_stage_names_cache: dict = {}
+_STAGE_CACHE_TTL = 3600  # seconds
+
+# Intents that don't produce a concrete, answerable follow-up
+_DROP_INTENTS: frozenset[str] = frozenset({
+    "unknown",
+    "free_form_analysis",
+    "greeting",
+    "thanks",
+    "meta_question",
+    "help_request",
+    "farewell",
+})
+
+
+async def _get_real_stage_names(crm) -> list[str]:
+    """Fetch real CRM stage names from Odoo; cached for 1 hour."""
+    now = time.monotonic()
+    entry = _stage_names_cache.get("names")
+    if entry and now - entry["ts"] < _STAGE_CACHE_TTL:
+        return entry["data"]
+    try:
+        stages = await crm.client.execute_kw(
+            "crm.stage",
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["name"], "limit": 200},
+        )
+        names = [s["name"] for s in stages]
+    except Exception as exc:
+        logger.warning(f"Could not fetch real stage names for prompt injection: {exc}")
+        names = []
+    _stage_names_cache["names"] = {"data": names, "ts": now}
+    return names
+
+
+async def _validate_followups(
+    followups: list[str],
+    real_stage_names: list[str],
+    ai_client,
+    intent_cache,
+    locale: str,
+) -> list[str]:
+    """
+    Drop follow-up suggestions that:
+    - parse to a non-data / vague intent (unknown, free_form_analysis, conversational)
+    - reference a stage name not present in real Odoo data
+
+    All intent-parse calls run in parallel (cache hits are free; misses cost ~$0.00002 each).
+    """
+    from backend.modules.ai.chat.intent_parser import parse_intent  # local to avoid circular
+    from backend.modules.ai.chat.data_fetcher import _normalise_stage
+
+    real_lower = {s.lower() for s in real_stage_names}
+
+    async def _check_one(fu: str) -> str | None:
+        try:
+            parsed, _ = await parse_intent(fu, [], locale, ai_client, intent_cache)
+            if parsed.intent in _DROP_INTENTS:
+                logger.debug(f"Dropping follow-up (intent={parsed.intent!r}): {fu!r}")
+                return None
+            stage = (parsed.filters or {}).get("stage", "")
+            if stage and real_lower:
+                normalised = _normalise_stage(stage)
+                if normalised.lower() not in real_lower:
+                    logger.debug(
+                        f"Dropping follow-up (unknown stage {stage!r}→{normalised!r}): {fu!r}"
+                    )
+                    return None
+        except Exception as exc:
+            logger.debug(f"Dropping follow-up (parse error: {exc}): {fu!r}")
+            return None
+        return fu
+
+    results = await asyncio.gather(*(_check_one(fu) for fu in followups))
+    return [r for r in results if r is not None]
 
 
 def _normalise_linebreaks(text: str) -> str:
@@ -124,11 +205,21 @@ async def build_response(
     locale: str,
     context: list[ChatMessage],
     ai_client: "OpenAIClient",
+    crm=None,
+    intent_cache=None,
 ) -> tuple[str, list[str], float]:
     """
     Stage 2b: Generate final human-readable response.
     Returns (response_text, followup_suggestions, cost_usd).
+
+    crm / intent_cache: when provided, real stage names are injected into the
+    Stage 2 prompt and AI-generated follow-ups are post-validated against Odoo data.
     """
+    # Fetch real stage names once; used for prompt injection + follow-up validation
+    real_stages: list[str] = []
+    if crm is not None:
+        real_stages = await _get_real_stage_names(crm)
+
     # ── Fast-path: conversational intents (bypass CRM, short prompt) ──────────
     if intent.intent in CONVERSATIONAL_INTENTS:
         subtype = intent.intent
@@ -151,6 +242,8 @@ async def build_response(
 
         main_text, followups = _extract_followups(_normalise_linebreaks(response.content))
         followups = _filter_followups(followups)
+        if real_stages and intent_cache is not None:
+            followups = await _validate_followups(followups, real_stages, ai_client, intent_cache, locale)
         if len(followups) < 2:
             followups = _get_fallback_followups("free_form_analysis", locale)
         return main_text, followups, response.cost_usd
@@ -193,6 +286,17 @@ async def build_response(
     else:
         user_prompt = build_response_generation_prompt_en(question, intent.intent, data, format_hint)
 
+    # Inject real stage names so the AI cannot invent placeholder examples
+    if real_stages:
+        real_stages_str = ", ".join(f'"{s}"' for s in real_stages)
+        user_prompt += (
+            "\n\nCRITICAL — FOLLOW-UP QUESTIONS MUST USE REAL STAGES ONLY: "
+            f"The real pipeline stage names in this system are: {real_stages_str}. "
+            "When writing follow-up question suggestions, ONLY reference stage names from this list. "
+            "NEVER invent names like 'مؤهل', 'معلق', 'Qualified', 'Pending'. "
+            "If you cannot think of a concrete follow-up, skip it — the system will provide alternatives."
+        )
+
     # Include last 3 conversation turns for coherence
     messages: list[dict[str, str]] = []
     for msg in context[-3:]:
@@ -216,8 +320,14 @@ async def build_response(
 
     main_text, followups = _extract_followups(_normalise_linebreaks(response.content))
 
-    # Filter out meta/open-ended follow-ups then pad with fallbacks if needed
+    # Layer 1: drop meta/open-ended follow-ups (regex filter)
     followups = _filter_followups(followups)
+
+    # Layer 2: post-validate against intent parser + real stage existence
+    if real_stages and intent_cache is not None:
+        followups = await _validate_followups(followups, real_stages, ai_client, intent_cache, locale)
+
+    # Layer 3: pad with curated fallbacks if not enough valid follow-ups remain
     if len(followups) < 2:
         fallbacks = _get_fallback_followups(intent.intent, locale)
         for fb in fallbacks:

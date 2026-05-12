@@ -170,6 +170,8 @@ async def post_message(
             locale=locale,
             context=context,
             ai_client=ai_client,
+            crm=crm,
+            intent_cache=intent_cache,
         )
     except Exception as exc:
         logger.error(f"Response builder failed: {exc}")
