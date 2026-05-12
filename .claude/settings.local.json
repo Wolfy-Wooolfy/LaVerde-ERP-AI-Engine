@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Process uvicorn -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force)",
+      "Bash(python -m pytest tests/ --ignore=tests/e2e -q --tb=short)"
+    ]
+  }
+}
