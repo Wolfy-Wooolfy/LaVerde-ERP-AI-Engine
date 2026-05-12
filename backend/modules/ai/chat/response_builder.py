@@ -23,30 +23,24 @@ if TYPE_CHECKING:
     from backend.modules.ai.client import OpenAIClient
 
 _CLARIFICATION_EN = (
-    "I'm not sure I understood your question well enough to answer accurately.\n"
-    "Could you rephrase it? For example:\n"
+    "I'm not sure I understood that well enough to answer accurately. "
+    "Could you rephrase it? For example:\n\n"
     "- 'Show me the top 5 sales employees with the most overdue leads'\n"
     "- 'How many leads are in Negotiation stage?'\n"
     "- 'Recommend leads for me to call today'"
 )
 
 _CLARIFICATION_AR = (
-    "عذراً، لم أفهم سؤالك بشكل كافٍ لأجيب بدقة.\n"
-    "هل يمكنك إعادة صياغته؟ على سبيل المثال:\n"
-    "- 'إيه أعلى 5 موظفي مبيعات عندهم تأخر؟'\n"
-    "- 'كم lead في مرحلة Negotiation؟'\n"
-    "- 'اقترح عليّ leads أتصل بيهم النهارده'"
+    "عذراً، لم أفهم سؤالك بشكل كافٍ لأجيب بدقة. "
+    "هل يمكنك إعادة صياغته؟ على سبيل المثال:\n\n"
+    "- إيه أعلى 5 موظفي مبيعات عندهم تأخر؟\n"
+    "- كم lead في مرحلة Negotiation؟\n"
+    "- اقترح عليّ leads أتصل بيهم النهارده"
 )
 
-_EMPTY_DATA_EN = (
-    "I don't have enough data to answer that question specifically. "
-    "Try asking one of these instead:"
-)
+_EMPTY_DATA_EN = "I don't have enough specific data to answer that. Try one of these:"
 
-_EMPTY_DATA_AR = (
-    "لا تتوفر لديّ بيانات كافية للإجابة على هذا السؤال تحديداً. "
-    "جرّب أحد هذه الأسئلة بدلاً من ذلك:"
-)
+_EMPTY_DATA_AR = "لا تتوفر لديّ بيانات كافية لهذا السؤال تحديداً. جرّب أحد هذه:"
 
 # Patterns that indicate a meta/open-ended follow-up (not data-grounded)
 _META_FOLLOWUP_PATTERNS = re.compile(
@@ -112,8 +106,8 @@ def is_data_empty(data: dict) -> bool:
         return False
     if rows or items or leads:
         return False
-    if count is not None and count > 0:
-        return False
+    if count is not None:
+        return False  # 0 overdue leads is a real answer, not missing data
     # data_quality types always have content
     if dtype in ("data_quality", "data_quality_full", "team_performance", "salesperson_performance"):
         return False
@@ -167,12 +161,10 @@ async def build_response(
     if is_data_empty(data):
         empty_msg = _EMPTY_DATA_AR if locale == "ar" else _EMPTY_DATA_EN
         fallbacks = _get_fallback_followups(intent.intent, locale)
-        if locale == "ar":
-            bullet_list = "\n".join(f"- {q}" for q in fallbacks)
-            return f"{empty_msg}\n{bullet_list}", fallbacks, 0.0
-        else:
-            bullet_list = "\n".join(f"- {q}" for q in fallbacks)
-            return f"{empty_msg}\n{bullet_list}", fallbacks, 0.0
+        bullet_list = "\n".join(f"- {q}" for q in fallbacks)
+        # Double newline separates intro paragraph from bullet list block so
+        # marked.js renders the bullets as a proper <ul>, not escaped <br> text.
+        return f"{empty_msg}\n\n{bullet_list}", fallbacks, 0.0
 
     # ── Normal path: data-backed response generation ──────────────────────────
     format_hint = RESPONSE_FORMATS.get(intent.response_format, RESPONSE_FORMATS["analysis"])

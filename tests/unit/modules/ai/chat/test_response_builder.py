@@ -132,7 +132,8 @@ def test_is_data_empty_with_rows():
 
 
 def test_is_data_empty_count_zero():
-    assert is_data_empty({"type": "count", "count": 0, "label": "x"}) is True
+    # count=0 is a valid "0 overdue leads" answer — NOT empty
+    assert is_data_empty({"type": "count", "count": 0, "label": "x"}) is False
 
 
 def test_is_data_empty_count_positive():
@@ -249,7 +250,8 @@ async def test_build_response_empty_data_returns_clarification_not_ai_call():
 async def test_build_response_empty_data_en_includes_fallback_hints():
     mock_client = AsyncMock()
     intent = QueryIntent(intent="count_by_stage", response_format="number")
-    empty_data = {"type": "count", "count": 0, "label": "Unknown Stage"}
+    # count=0 is valid data ("0 overdue leads"). Use empty rows to test the guardrail.
+    empty_data = {"type": "salesperson_overdue_list", "rows": [], "total": 0}
 
     text, followups, cost = await build_response(
         "How many in Unknown Stage?", intent, empty_data, "en", [], mock_client
