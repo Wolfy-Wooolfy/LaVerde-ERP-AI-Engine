@@ -65,6 +65,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cleanup_task = asyncio.create_task(_session_cleanup_loop(session_manager))
 
     # ── AI service initialization ─────────────────────────────────────────────
+    logger.info(f"Display name resolved: '{settings.DISPLAY_NAME}' (set DISPLAY_NAME in .env; restart required to apply)")
+
     if settings.AI_ENABLED:
         from backend.modules.ai.budget_tracker import BudgetTracker
         from backend.modules.ai.cache import AICache

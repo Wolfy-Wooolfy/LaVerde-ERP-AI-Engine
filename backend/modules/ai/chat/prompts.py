@@ -79,11 +79,11 @@ FALLBACK_FOLLOWUPS: dict[str, dict[str, list[str]]] = {
     "list_overdue_by_stage": {
         "ar": [
             "إيه أعلى 5 موظفي مبيعات عندهم تأخر؟",
-            "كم lead في مرحلة Negotiation؟",
+            "كم lead في مرحلة Follow up؟",
         ],
         "en": [
             "Which 5 sales employees have the most overdue leads?",
-            "How many leads are in Negotiation stage?",
+            "How many leads are in Follow up stage?",
         ],
     },
     "count_by_stage": {
@@ -447,17 +447,17 @@ def build_conversational_response_prompt_ar(question: str, subtype: str) -> str:
 SUGGESTED_QUESTIONS: dict[str, list[str]] = {
     "en": [
         "Show me the top 5 sales employees with the most overdue leads",
-        "How many leads are in Negotiation stage?",
+        "How many leads are in Follow up stage?",
+        "How many leads are in Reservation stage?",
         "Recommend 3 leads I should contact today",
-        "Which team has the worst data quality?",
         "Show me clients who requested a site visit",
         "Which critical overdue leads need urgent contact?",
     ],
     "ar": [
         "إيه أعلى 5 موظفي مبيعات عندهم تأخر؟",
-        "كم lead في مرحلة Negotiation؟",
+        "كم lead في مرحلة Follow up؟",
+        "كم lead في مرحلة Reservation؟",
         "اقترح عليّ 3 عملاء أتواصل معاهم النهارده",
-        "ايه أسوأ فريق في جودة البيانات؟",
         "عرضلي العملاء اللي طلبوا معاينة",
         "ايه الـ critical overdue اللي محتاج تواصل عاجل؟",
     ],

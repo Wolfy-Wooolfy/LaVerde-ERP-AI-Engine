@@ -9,7 +9,7 @@
         href="/dashboard"
    ) }} #}
 
-{% macro kpi_card(label, value, variant="default", icon="activity", sparkline_metric=none, href=none) %}
+{% macro kpi_card(label, value, variant="default", icon="activity", sparkline_metric=none, href=none, tooltip=none) %}
 {% set border_colors = {
   "default":  "border-neutral-200  dark:border-neutral-700",
   "danger":   "border-danger-200   dark:border-danger-800",
@@ -38,8 +38,14 @@
   {% if sparkline_metric %}data-sparkline-metric="{{ sparkline_metric }}"{% endif %}
 >
   <div class="flex items-start justify-between mb-3">
-    <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
+    <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight flex items-center gap-1"
+       {% if tooltip %}title="{{ tooltip }}"{% endif %}>
       {{ label }}
+      {% if tooltip %}
+      <svg class="w-3 h-3 shrink-0 text-neutral-400 dark:text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      {% endif %}
     </p>
     <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center {{ icon_bg.get(variant, icon_bg.default) }}">
       {% if icon == "users" %}

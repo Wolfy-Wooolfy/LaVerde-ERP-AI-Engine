@@ -26,7 +26,7 @@ _CLARIFICATION_EN = (
     "I'm not sure I understood that well enough to answer accurately. "
     "Could you rephrase it? For example:\n\n"
     "- 'Show me the top 5 sales employees with the most overdue leads'\n"
-    "- 'How many leads are in Negotiation stage?'\n"
+    "- 'How many leads are in Follow up stage?'\n"
     "- 'Recommend leads for me to call today'"
 )
 
@@ -34,7 +34,7 @@ _CLARIFICATION_AR = (
     "عذراً، لم أفهم سؤالك بشكل كافٍ لأجيب بدقة. "
     "هل يمكنك إعادة صياغته؟ على سبيل المثال:\n\n"
     "- إيه أعلى 5 موظفي مبيعات عندهم تأخر؟\n"
-    "- كم lead في مرحلة Negotiation؟\n"
+    "- كم lead في مرحلة Follow up؟\n"
     "- اقترح عليّ leads أتصل بيهم النهارده"
 )
 

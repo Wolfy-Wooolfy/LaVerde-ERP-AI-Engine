@@ -191,6 +191,8 @@ DISPLAY_NAME=La Verde
 
 Both the dashboard hero and the chat drawer welcome will then read "La Verde" consistently.
 
+> **Common gotcha:** changing `DISPLAY_NAME` in `.env` has no effect until the server is restarted. Settings are read once at startup.
+
 ---
 
 ## Budget Integration

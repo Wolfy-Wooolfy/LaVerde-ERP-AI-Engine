@@ -17,6 +17,7 @@
   "Planned Follow-ups": "متابعات مخططة",
   "No Activity Leads": "فرص بلا نشاط",
   "Data Quality Issues": "مشاكل جودة البيانات",
+  "data_quality_tooltip": "يشمل الفرص في مرحلة 'New X' (بانتظار التصنيف) + الفرص التي تفتقر إلى مرحلة أو بيانات تواصل أو موظف مبيعات",
   "Missing Contact Info": "بيانات تواصل مفقودة",
   "Missing Salesperson": "بائع مفقود",
   "Missing Stage": "مرحلة مفقودة",
