@@ -232,7 +232,7 @@ EGYPTIAN REAL ESTATE CONTEXT:
 - "مندوب" / "مندوبين" also means sales employee (legacy term — map same as above)
 - "فريق" = team
 - "متأخر" / "تأخر" / "overdue" = overdue leads
-- "مرحلة" / "stage" = pipeline stage (Negotiation, Site Visit, Closed, etc.)
+- "مرحلة" / "stage" = pipeline stage (New, New X, Follow up, Reservation, Interested, Lost, Re-Distribution, Contact, No Answer, Unqualified, etc.)
 - "معاينة" / "معاين" = site visit — customer interest in visiting property
 - "اتصال" / "رن" / "phone" = phone attempt in chatter
 - "بيانات مفقودة" / "ناقصة" = missing contact data
@@ -249,8 +249,8 @@ CRITICAL RULE — total vs overdue stage count:
 - When ambiguous (no overdue keyword), DEFAULT to count_by_stage (total)
 
 EXAMPLES:
-Input:  "كم lead في مرحلة Negotiation؟"
-Output: {{"intent":"count_by_stage","filters":{{"stage":"Negotiation"}},"response_format":"number","confidence":0.95}}
+Input:  "كم lead في مرحلة Reservation؟"
+Output: {{"intent":"count_by_stage","filters":{{"stage":"Reservation"}},"response_format":"number","confidence":0.95}}
 
 Input:  "كم lead متأخر في مرحلة New؟"
 Output: {{"intent":"count_overdue_by_stage","filters":{{"stage":"New"}},"response_format":"number","confidence":0.95}}
@@ -270,8 +270,8 @@ Output: {{"intent":"count_by_stage","filters":{{"stage":"Reservation"}},"respons
 Input:  "كم lead في Follow up؟"
 Output: {{"intent":"count_by_stage","filters":{{"stage":"Follow up"}},"response_format":"number","confidence":0.95}}
 
-Input:  "How many leads in مرحلة التفاوض?"
-Output: {{"intent":"count_by_stage","filters":{{"stage":"Negotiation"}},"response_format":"number","confidence":0.9}}
+Input:  "How many leads in مرحلة إعادة التوزيع?"
+Output: {{"intent":"count_by_stage","filters":{{"stage":"Re-Distribution"}},"response_format":"number","confidence":0.9}}
 
 Input:  "show me Ahmed Adel leads"
 Output: {{"intent":"count_by_salesperson","filters":{{"salesperson":"Ahmed Adel"}},"response_format":"number","confidence":0.9}}
@@ -279,15 +279,40 @@ Output: {{"intent":"count_by_salesperson","filters":{{"salesperson":"Ahmed Adel"
 Input:  "leads عند رضوي"
 Output: {{"intent":"count_by_salesperson","filters":{{"salesperson":"رضوي"}},"response_format":"number","confidence":0.9}}
 
+Input:  "عرضلي تفاصيل العميل 707758"
+Output: {{"intent":"lead_details_by_id","filters":{{"lead_id":707758}},"response_format":"list","confidence":0.98}}
+
+Input:  "show me details for lead 123456"
+Output: {{"intent":"lead_details_by_id","filters":{{"lead_id":123456}},"response_format":"list","confidence":0.98}}
+
+Input:  "عرضلي العملاء اللي اتصلنا بيهم ومردوش"
+Output: {{"intent":"leads_with_phone_attempt_signal","filters":{{}},"response_format":"list","confidence":0.92}}
+
+Input:  "which leads had phone calls with no answer?"
+Output: {{"intent":"leads_with_phone_attempt_signal","filters":{{}},"response_format":"list","confidence":0.92}}
+
+Input:  "كم lead في مرحلة New X؟"
+Output: {{"intent":"count_by_stage","filters":{{"stage":"New X"}},"response_format":"number","confidence":0.95}}
+
+Input:  "كم lead في مرحلة إعادة التوزيع؟"
+Output: {{"intent":"count_by_stage","filters":{{"stage":"Re-Distribution"}},"response_format":"number","confidence":0.95}}
+
 STAGE NAME MAPPING (Arabic → English, use English in the filter):
-- التفاوض / تفاوض → Negotiation
+Real stages in this Odoo instance — ONLY use these stage names:
 - الحجز / حجز → Reservation
 - متابعة / المتابعة / Follow up → Follow up
 - اهتمام / مهتم → Interested
 - خسارة / خسر → Lost
-- فاز / مغلق → Won
-- معاينة / Site Visit → Site Visit
 - جديد → New
+- New X → New X  (two-word stage name — include the X)
+- إعادة التوزيع / اعادة التوزيع / توزيع → Re-Distribution
+- Contact / اتصال → Contact
+- No Answer / مردش / لا رد → No Answer
+- Unqualified / غير مؤهل → Unqualified
+
+NOTE: "Negotiation", "Won", and "Site Visit" are NOT valid stage names in this system.
+If the user mentions تفاوض/Negotiation or معاينة/Site Visit as a STAGE, map to the closest real stage
+(Follow up or Interested) or use "unknown" if truly ambiguous.
 
 OUTPUT FORMAT (strict JSON only, no markdown, no extra text):
 {{
@@ -296,6 +321,7 @@ OUTPUT FORMAT (strict JSON only, no markdown, no extra text):
     "salesperson": "<name or null>",
     "team": "<name or null>",
     "stage": "<English stage name or null>",
+    "lead_id": <integer or null>,
     "min_days_overdue": <int or null>,
     "limit": <int, default 10>
   }},

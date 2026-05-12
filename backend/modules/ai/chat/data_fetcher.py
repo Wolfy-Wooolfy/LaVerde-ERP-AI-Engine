@@ -6,12 +6,12 @@ from typing import Any
 
 from loguru import logger
 
+from backend.modules.crm.domain import BASE_DOMAIN
 from backend.modules.crm.service import CrmService
 
 # Arabic → English stage name normalization (case-insensitive partial match applied separately)
+# Only maps stages that actually exist in the live Odoo instance.
 STAGE_AR_TO_EN: dict[str, str] = {
-    "التفاوض": "Negotiation",
-    "تفاوض": "Negotiation",
     "الحجز": "Reservation",
     "حجز": "Reservation",
     "متابعة": "Follow up",
@@ -22,12 +22,12 @@ STAGE_AR_TO_EN: dict[str, str] = {
     "مهتم": "Interested",
     "خسارة": "Lost",
     "خسر": "Lost",
-    "فاز": "Won",
-    "مغلق": "Won",
-    "معاينة": "Site Visit",
-    "site visit": "Site Visit",
     "جديد": "New",
     "new": "New",
+    "إعادة التوزيع": "Re-Distribution",
+    "اعادة التوزيع": "Re-Distribution",
+    "توزيع": "Re-Distribution",
+    "new x": "New X",
 }
 
 
@@ -42,8 +42,19 @@ def _normalise_stage(stage_filter: str) -> str:
     for ar, en in STAGE_AR_TO_EN.items():
         if lower == ar.lower() or lower == en.lower():
             return en
-    # Return as-is for direct English stage names (Negotiation, Reservation, …)
+    # Return as-is for direct English stage names (Reservation, Follow up, …)
     return stripped
+
+
+def _or_domain(conditions: list) -> list:
+    """Build an Odoo OR domain from a list of leaf conditions (Polish notation)."""
+    if not conditions:
+        return []
+    if len(conditions) == 1:
+        return list(conditions)
+    result: list = ["|"] * (len(conditions) - 1)
+    result.extend(conditions)
+    return result
 
 
 async def fetch_data_for_intent(
@@ -180,74 +191,115 @@ async def _handle_count_by_salesperson(crm: CrmService, filters: dict, _p: Any) 
 async def _handle_lead_details_by_id(
     crm: CrmService, filters: dict, prioritizer: Any
 ) -> dict:
-    lead_id = filters.get("lead_id")
-    if not prioritizer or not lead_id:
-        return {"type": "error", "message": "Lead ID required and AI must be enabled"}
+    raw_id = filters.get("lead_id")
+    if not raw_id:
+        return {"type": "error", "message": "Lead ID required — include the numeric lead ID in your question"}
     try:
-        leads = await prioritizer._fetch_overdue_leads(100)
-        lead = next((l for l in leads if l.lead_id == lead_id), None)
-        if not lead:
+        lead_id = int(raw_id)
+    except (TypeError, ValueError):
+        return {"type": "error", "message": f"Invalid lead ID: {raw_id!r}"}
+    try:
+        rows = await crm.client.execute_kw(
+            "crm.lead",
+            "search_read",
+            args=[BASE_DOMAIN + [["id", "=", lead_id]]],
+            kwargs={
+                "fields": [
+                    "id", "name", "contact_name", "partner_name",
+                    "user_id", "team_id", "stage_id",
+                    "activity_state", "create_date", "write_date",
+                    "planned_revenue",
+                ],
+                "limit": 1,
+            },
+        )
+        if not rows:
             return {"type": "not_found", "lead_id": lead_id}
-        return {"type": "lead_detail", "lead": lead.model_dump()}
+        lead = rows[0]
+        user = lead.get("user_id")
+        team = lead.get("team_id")
+        stage = lead.get("stage_id")
+        return {
+            "type": "lead_detail",
+            "lead": {
+                "lead_id": lead["id"],
+                "name": lead.get("name", ""),
+                "contact_name": lead.get("contact_name") or lead.get("partner_name") or "",
+                "salesperson": user[1] if user else "Unassigned",
+                "team": team[1] if team else "Unassigned",
+                "stage": stage[1] if stage else "No Stage",
+                "activity_state": lead.get("activity_state") or "none",
+                "create_date": str(lead.get("create_date", "")),
+                "write_date": str(lead.get("write_date", "")),
+                "planned_revenue": lead.get("planned_revenue") or 0,
+            },
+        }
     except Exception as exc:
         logger.warning(f"Failed to fetch lead {lead_id}: {exc}")
         return {"type": "error", "message": str(exc)}
 
 
-async def _handle_leads_with_site_visit_signal(
-    crm: CrmService, filters: dict, prioritizer: Any
+async def _search_leads_by_chatter_keywords(
+    crm: CrmService, keywords: list[str], limit: int, signal: str
 ) -> dict:
-    if not prioritizer:
-        return {"type": "unavailable", "message": "AI service required for signal detection"}
-    limit = int(filters.get("limit") or 10)
+    """Search mail.message chatter for keywords, return matching resolved opportunities."""
     try:
-        leads = await prioritizer._fetch_overdue_leads(50)
-        matching = [l for l in leads if l.has_site_visit][:limit]
-        return {
-            "type": "lead_list",
-            "signal": "site_visit",
-            "rows": [
-                {
-                    "lead_id": l.lead_id,
-                    "name": l.name,
-                    "salesperson": l.salesperson_name,
-                    "stage": l.stage_name,
-                }
-                for l in matching
-            ],
-            "total": len(matching),
-        }
+        leaf_conditions = [["body", "ilike", kw] for kw in keywords]
+        msg_domain = (
+            _or_domain(leaf_conditions)
+            + [["model", "=", "crm.lead"], ["message_type", "in", ["comment", "email"]]]
+        )
+        messages = await crm.client.execute_kw(
+            "mail.message",
+            "search_read",
+            args=[msg_domain],
+            kwargs={"fields": ["res_id"], "limit": 500},
+        )
+        lead_ids = list({m["res_id"] for m in messages if m.get("res_id")})
+        if not lead_ids:
+            return {"type": "lead_list", "signal": signal, "rows": [], "total": 0}
+
+        leads_raw = await crm.client.execute_kw(
+            "crm.lead",
+            "search_read",
+            args=[BASE_DOMAIN + [["id", "in", lead_ids]]],
+            kwargs={
+                "fields": ["id", "name", "user_id", "team_id", "stage_id", "activity_state"],
+                "limit": limit,
+                "order": "write_date desc",
+            },
+        )
+        rows = []
+        for lead in leads_raw:
+            user = lead.get("user_id")
+            stage = lead.get("stage_id")
+            rows.append({
+                "lead_id": lead["id"],
+                "name": lead.get("name", ""),
+                "salesperson": user[1] if user else "Unassigned",
+                "stage": stage[1] if stage else "No Stage",
+                "activity_state": lead.get("activity_state") or "none",
+            })
+        return {"type": "lead_list", "signal": signal, "rows": rows, "total": len(rows)}
     except Exception as exc:
-        logger.warning(f"Site visit signal fetch failed: {exc}")
+        logger.warning(f"{signal} signal fetch failed: {exc}")
         return {"type": "error", "message": str(exc)}
+
+
+async def _handle_leads_with_site_visit_signal(
+    crm: CrmService, filters: dict, _p: Any
+) -> dict:
+    limit = int(filters.get("limit") or 10)
+    keywords = ["معاينة", "زيارة", "شاف الموقع", "site visit", "visited", "viewing", "tour"]
+    return await _search_leads_by_chatter_keywords(crm, keywords, limit, "site_visit")
 
 
 async def _handle_leads_with_phone_attempt_signal(
-    crm: CrmService, filters: dict, prioritizer: Any
+    crm: CrmService, filters: dict, _p: Any
 ) -> dict:
-    if not prioritizer:
-        return {"type": "unavailable", "message": "AI service required for signal detection"}
     limit = int(filters.get("limit") or 10)
-    try:
-        leads = await prioritizer._fetch_overdue_leads(50)
-        matching = [l for l in leads if l.has_phone_attempt][:limit]
-        return {
-            "type": "lead_list",
-            "signal": "phone_attempt",
-            "rows": [
-                {
-                    "lead_id": l.lead_id,
-                    "name": l.name,
-                    "salesperson": l.salesperson_name,
-                    "stage": l.stage_name,
-                }
-                for l in matching
-            ],
-            "total": len(matching),
-        }
-    except Exception as exc:
-        logger.warning(f"Phone attempt signal fetch failed: {exc}")
-        return {"type": "error", "message": str(exc)}
+    keywords = ["مردش", "مرد", "اتصلت", "كلمته", "didn't answer", "no response", "called", "no answer"]
+    return await _search_leads_by_chatter_keywords(crm, keywords, limit, "phone_attempt")
 
 
 async def _handle_missing_contact_summary(crm: CrmService, filters: dict, _p: Any) -> dict:
@@ -329,14 +381,16 @@ async def _handle_recommendation_for_salesperson(
 ) -> dict:
     if not prioritizer:
         return {"type": "unavailable", "message": "AI prioritization service required"}
-    sp_filter = filters.get("salesperson")
+    sp_filter = (filters.get("salesperson") or "").lower()
     limit = min(int(filters.get("limit") or 3), 10)
     try:
         leads = await prioritizer.prioritize_overdue(limit=50, locale="en")
+        if sp_filter:
+            leads = [l for l in leads if sp_filter in (getattr(l, "salesperson_name", "") or "").lower()]
         top = sorted(leads, key=lambda l: l.score, reverse=True)[:limit]
         return {
             "type": "recommendations",
-            "salesperson_filter": sp_filter,
+            "salesperson_filter": filters.get("salesperson"),
             "leads": [
                 {
                     "lead_id": l.lead_id,
