@@ -257,7 +257,7 @@ async def _search_leads_by_chatter_keywords(
         )
         lead_ids = list({m["res_id"] for m in messages if m.get("res_id")})
         if not lead_ids:
-            return {"type": "lead_list", "signal": signal, "rows": [], "total": 0}
+            return {"type": "signal_no_data", "signal": signal, "rows": [], "total": 0}
 
         leads_raw = await crm.client.execute_kw(
             "crm.lead",
@@ -349,6 +349,32 @@ async def _handle_salesperson_performance_summary(
     }
 
 
+async def _enrich_lead_info(crm: CrmService, lead_ids: list[int]) -> dict[int, dict]:
+    """Fetch name, salesperson, and stage for a list of lead IDs."""
+    if not lead_ids:
+        return {}
+    try:
+        rows = await crm.client.execute_kw(
+            "crm.lead",
+            "search_read",
+            args=[BASE_DOMAIN + [["id", "in", lead_ids]]],
+            kwargs={"fields": ["id", "name", "user_id", "stage_id"], "limit": len(lead_ids)},
+        )
+        result = {}
+        for row in rows:
+            user = row.get("user_id")
+            stage = row.get("stage_id")
+            result[row["id"]] = {
+                "name": row.get("name") or "",
+                "salesperson": user[1] if user else "Unassigned",
+                "stage": stage[1] if stage else "No Stage",
+            }
+        return result
+    except Exception as exc:
+        logger.warning(f"Lead enrichment failed: {exc}")
+        return {}
+
+
 async def _handle_recommendation_top_priority(
     crm: CrmService, filters: dict, prioritizer: Any
 ) -> dict:
@@ -358,11 +384,15 @@ async def _handle_recommendation_top_priority(
     try:
         leads = await prioritizer.prioritize_overdue(limit=20, locale="en")
         top = sorted(leads, key=lambda l: l.score, reverse=True)[:limit]
+        lead_info = await _enrich_lead_info(crm, [l.lead_id for l in top])
         return {
             "type": "recommendations",
             "leads": [
                 {
                     "lead_id": l.lead_id,
+                    "name": lead_info.get(l.lead_id, {}).get("name", ""),
+                    "salesperson": lead_info.get(l.lead_id, {}).get("salesperson", "Unassigned"),
+                    "stage": lead_info.get(l.lead_id, {}).get("stage", "No Stage"),
                     "score": l.score,
                     "tier": l.tier,
                     "reasoning": l.reasoning,
@@ -388,12 +418,16 @@ async def _handle_recommendation_for_salesperson(
         if sp_filter:
             leads = [l for l in leads if sp_filter in (getattr(l, "salesperson_name", "") or "").lower()]
         top = sorted(leads, key=lambda l: l.score, reverse=True)[:limit]
+        lead_info = await _enrich_lead_info(crm, [l.lead_id for l in top])
         return {
             "type": "recommendations",
             "salesperson_filter": filters.get("salesperson"),
             "leads": [
                 {
                     "lead_id": l.lead_id,
+                    "name": lead_info.get(l.lead_id, {}).get("name", ""),
+                    "salesperson": lead_info.get(l.lead_id, {}).get("salesperson", "Unassigned"),
+                    "stage": lead_info.get(l.lead_id, {}).get("stage", "No Stage"),
                     "score": l.score,
                     "tier": l.tier,
                     "reasoning": l.reasoning,

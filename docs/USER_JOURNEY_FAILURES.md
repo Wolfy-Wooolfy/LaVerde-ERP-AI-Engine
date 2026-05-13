@@ -1,16 +1,16 @@
 # User Journey Failures
 
-**Generated**: 2026-05-12 17:30:10  
+**Generated**: 2026-05-13 11:25:44  
 **Note**: Site-visit chatter probe confirmed 0 messages in Odoo — site visit intent returns empty by design (product gap).  
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Steps run | 42 |
-| Failures | 6 |
-| Passes | 36 |
-| Total cost | $0.0162 |
+| Steps run | 44 |
+| Failures | 4 |
+| Passes | 40 |
+| Total cost | $0.0180 |
 
 ## Failures
 
@@ -22,7 +22,7 @@
 - **Question**: اعرض تفاصيل أول عميل منهم
 - **Intent classified**: `lead_details_by_id`
 - **Data type**: `error`
-- **Failure reason**: clarification response (phrase: 'لا تتوفر لديّ بيانات')
+- **Failure reason**: clarification response (phrase: 'لا تتوفر')
 - **Diagnosis**: lead_details_by_id — question has no numeric ID; parser can only extract ID from session context (previous response). If Q1 was empty, there's nothing to reference.
 - **Proposed fix**: AI response builder should include clickable lead IDs; intent parser should extract ID from session context
 
@@ -45,92 +45,31 @@
 
 ---
 
-### J1-Q3 — Site Visit Investigation
-
-- **Step**: J1-Q3 (Q3: who is the responsible salesperson (context-dependent))
-- **Question**: مين الموظف المسؤول عنه؟
-- **Intent classified**: `unknown`
-- **Data type**: `clarification_needed`
-- **Failure reason**: clarification response (phrase: 'لم أفهم سؤالك')
-- **Diagnosis**: No dedicated intent for 'who is the salesperson of a specific lead'. May map to unknown or free_form_analysis.
-- **Proposed fix**: If lead_details_by_id is working, salesperson is in the data. AI should answer from context without a new CRM query.
-
-**AI Response** (first 400 chars):
-
-```
-عذراً، لم أفهم سؤالك بشكل كافٍ لأجيب بدقة. هل يمكنك إعادة صياغته؟ على سبيل المثال:
-
-- إيه أعلى 5 موظفي مبيعات عندهم تأخر؟
-- كم lead في مرحلة Follow up؟
-- اقترح عليّ leads أتصل بيهم النهارده
-```
-
-**Data snapshot**:
-
-```json
-{
-  "type": "clarification_needed"
-}
-```
-
----
-
-### J4-Q2 — Recommendation Flow
-
-- **Step**: J4-Q2 (Q2: who are the salespeople of those leads (no intent + no data))
-- **Question**: مين موظفي المبيعات المسؤولين عن العملاء دول؟
-- **Intent classified**: `unknown`
-- **Data type**: `clarification_needed`
-- **Failure reason**: clarification response (phrase: 'لم أفهم سؤالك')
-- **Diagnosis**: DOUBLE BUG: (1) No intent for 'salespeople of previously-shown leads'; (2) recommendation handler output does NOT include salesperson_name field — only lead_id, score, tier, reasoning, recommended_action.
-- **Proposed fix**: Add salesperson_name to recommendation handler output. Add free_form_analysis fallback that can answer contextual questions from prior response.
-
-**AI Response** (first 400 chars):
-
-```
-عذراً، لم أفهم سؤالك بشكل كافٍ لأجيب بدقة. هل يمكنك إعادة صياغته؟ على سبيل المثال:
-
-- إيه أعلى 5 موظفي مبيعات عندهم تأخر؟
-- كم lead في مرحلة Follow up؟
-- اقترح عليّ leads أتصل بيهم النهارده
-```
-
-**Data snapshot**:
-
-```json
-{
-  "type": "clarification_needed"
-}
-```
-
----
-
 ### J4-Q3 — Recommendation Flow
 
 - **Step**: J4-Q3 (Q3: details of first lead (context-dependent ID))
 - **Question**: أعطيني تفاصيل أكتر عن أول واحد
-- **Intent classified**: `unknown`
-- **Data type**: `clarification_needed`
-- **Failure reason**: clarification response (phrase: 'لم أفهم سؤالك')
+- **Intent classified**: `lead_details_by_id`
+- **Data type**: `error`
+- **Failure reason**: clarification response (phrase: 'لا تتوفر')
 - **Diagnosis**: lead_details_by_id — if Q1 response mentioned a lead ID (e.g., 707758), parser may extract it from context. Depends on session context quality.
 - **Proposed fix**: Recommendation response should explicitly surface lead IDs so context-dependent follow-ups can extract them.
 
 **AI Response** (first 400 chars):
 
 ```
-عذراً، لم أفهم سؤالك بشكل كافٍ لأجيب بدقة. هل يمكنك إعادة صياغته؟ على سبيل المثال:
+لا تتوفر لديّ بيانات كافية لهذا السؤال تحديداً. جرّب أحد هذه:
 
 - إيه أعلى 5 موظفي مبيعات عندهم تأخر؟
-- كم lead في مرحلة Follow up؟
-- اقترح عليّ leads أتصل بيهم النهارده
+- اقترح عليّ 3 عملاء أتواصل معاهم النهارده
 ```
 
 **Data snapshot**:
 
 ```json
 {
-  "type": "clarification_needed"
-}
+  "type": "error",
+  "message": "Odoo query error: {'code': 200, 'message': 'Odoo Server Error', 'data': {'name': 'builtins.ValueError', 'debug': 'Traceback (most recent call last):\\n  File \"/home/odoo/src/odoo/odoo/http.py\", line 2167, in _transactioning\\n    return service_model.retrying(func, env=self.env)\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"/home/odoo/src/odoo/odoo/service/model.py\", line 157, in retrying\\n    result = func()\\n             ^^^^^^\\n  F
 ```
 
 ---
@@ -141,7 +80,7 @@
 - **Question**: إيه نوع المشكلة بالضبط؟
 - **Intent classified**: `unknown`
 - **Data type**: `clarification_needed`
-- **Failure reason**: clarification response (phrase: 'لم أفهم سؤالك')
+- **Failure reason**: clarification response (phrase: 'لم أفهم')
 - **Diagnosis**: data_quality_summary or free_form_analysis — should describe missing phone/email/stage categories
 - **Proposed fix**: N/A
 
@@ -165,28 +104,31 @@
 
 ---
 
-### J6-Q3 — Pure Conversational
+### J7-Q3 — Mixed Language
 
-- **Step**: J6-Q3 (Q3: show me an example question)
-- **Question**: اعرضلي مثال على سؤال أقدر أسأله
-- **Intent classified**: `help_request`
-- **Data type**: `conversational`
-- **Failure reason**: response too short (45 non-whitespace chars)
-- **Diagnosis**: help_request — should suggest a concrete CRM question
-- **Proposed fix**: N/A
+- **Step**: J7-Q3 (Q3: details of top salesperson in Re-Distribution (no salesperson-in-stage intent))
+- **Question**: Show me details of the top salesperson there
+- **Intent classified**: `unknown`
+- **Data type**: `clarification_needed`
+- **Failure reason**: clarification response (phrase: 'not sure i understood')
+- **Diagnosis**: No intent for 'top salesperson in [previously mentioned stage]'. May map to list_overdue_by_salesperson (ignoring stage) or unknown.
+- **Proposed fix**: Add stage filter to list_overdue_by_salesperson. Or use free_form_analysis to answer from context.
 
 **AI Response** (first 400 chars):
 
 ```
-مرحباً! يمكنك طرح أسئلة حول أداء المبيعات أو العملاء.
+I'm not sure I understood that well enough to answer accurately. Could you rephrase it? For example:
+
+- 'Show me the top 5 sales employees with the most overdue leads'
+- 'How many leads are in Follow up stage?'
+- 'Recommend leads for me to call today'
 ```
 
 **Data snapshot**:
 
 ```json
 {
-  "type": "conversational",
-  "subtype": "help_request"
+  "type": "clarification_needed"
 }
 ```
 

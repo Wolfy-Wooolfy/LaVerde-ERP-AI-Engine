@@ -297,6 +297,12 @@ Output: {{"intent":"count_by_stage","filters":{{"stage":"New X"}},"response_form
 Input:  "كم lead في مرحلة إعادة التوزيع؟"
 Output: {{"intent":"count_by_stage","filters":{{"stage":"Re-Distribution"}},"response_format":"number","confidence":0.95}}
 
+Input:  "مين الموظف المسؤول عن العملاء دول؟"
+Output: {{"intent":"free_form_analysis","filters":{{}},"response_format":"analysis","confidence":0.8}}
+
+Input:  "مين موظفي المبيعات المسؤولين عن العملاء اللي اقترحتهم؟"
+Output: {{"intent":"free_form_analysis","filters":{{}},"response_format":"analysis","confidence":0.8}}
+
 STAGE NAME MAPPING (Arabic → English, use English in the filter):
 Real stages in this Odoo instance — ONLY use these stage names:
 - الحجز / حجز → Reservation
@@ -444,13 +450,16 @@ def build_conversational_response_prompt_en(question: str, subtype: str) -> str:
         f"The user sent a conversational message (type: {subtype}).\n\n"
         f"USER MESSAGE: {question}\n\n"
         f"INSTRUCTIONS:\n"
-        f"1. Reply warmly and briefly (1-3 sentences max).\n"
+        f"1. Reply warmly and helpfully (2-4 sentences).\n"
         f"2. Steer the user toward useful CRM data questions.\n"
-        f"3. End with 2 example data questions they could ask, prefixed with "
+        f"3. End with AT LEAST 3 concrete example questions they could ask, prefixed with "
         f"'💡 You might also ask:'\n"
-        f"4. Example questions must be CONCRETE and CRM-data-grounded "
-        f"(e.g. 'Show me the top 5 sales employees with overdue leads').\n"
-        f"5. Do NOT make up any CRM data. This is a conversational reply only."
+        f"4. Each example question MUST be CRM-data-grounded and specific, for example:\n"
+        f"   - 'Show me the top 5 sales employees with the most overdue leads'\n"
+        f"   - 'How many leads are in the Reservation stage?'\n"
+        f"   - 'Recommend 3 leads I should contact today'\n"
+        f"5. Your total response MUST be at least 120 characters (excluding the question list).\n"
+        f"6. Do NOT make up any CRM data. This is a conversational reply only."
     )
 
 
@@ -460,13 +469,16 @@ def build_conversational_response_prompt_ar(question: str, subtype: str) -> str:
         f"المستخدم أرسل رسالة تحادثية (النوع: {subtype}).\n\n"
         f"رسالة المستخدم: {question}\n\n"
         f"التعليمات:\n"
-        f"1. رد بشكل ودي ومختصر (جملة إلى 3 جمل كحد أقصى).\n"
+        f"1. رد بشكل ودي ومفيد (جملتان إلى 4 جمل).\n"
         f"2. وجّه المستخدم نحو أسئلة بيانات CRM المفيدة.\n"
-        f"3. اختتم بسؤالين نموذجيين يمكنه طرحهما، مسبوقين بـ "
+        f"3. اختتم بثلاثة أسئلة نموذجية على الأقل يمكنه طرحها، مسبوقين بـ "
         f"'💡 يمكنك أيضاً أن تسأل:'\n"
-        f"4. الأسئلة يجب أن تكون ملموسة ومبنية على بيانات CRM "
-        f"(مثال: 'إيه أعلى 5 موظفي مبيعات عندهم تأخر؟').\n"
-        f"5. لا تخترع بيانات CRM. هذا رد تحادثي فقط."
+        f"4. الأسئلة يجب أن تكون ملموسة ومبنية على بيانات CRM، مثال:\n"
+        f"   - 'إيه أعلى 5 موظفي مبيعات عندهم تأخر؟'\n"
+        f"   - 'كم lead في مرحلة Reservation؟'\n"
+        f"   - 'اقترح لي 3 عملاء أتواصل معاهم النهارده'\n"
+        f"5. ردك الإجمالي يجب أن يكون 120 حرفاً على الأقل (بدون حساب قائمة الأسئلة).\n"
+        f"6. لا تخترع بيانات CRM. هذا رد تحادثي فقط."
     )
 
 

@@ -195,6 +195,12 @@ def is_data_empty(data: dict) -> bool:
     # data_quality types always have content
     if dtype in ("data_quality", "data_quality_full", "team_performance", "salesperson_performance"):
         return False
+    # lead_detail always has a lead object; not_found is handled by short-circuit above
+    if dtype == "lead_detail":
+        return False
+    # recommendations: let the AI explain "no leads" even when the list is empty
+    if dtype == "recommendations":
+        return False
     return True
 
 
@@ -252,6 +258,46 @@ async def build_response(
     if intent.intent == "unknown" or data.get("type") == "clarification_needed":
         clarification = _CLARIFICATION_AR if locale == "ar" else _CLARIFICATION_EN
         return clarification, _get_fallback_followups("free_form_analysis", locale), 0.0
+
+    # ── Short-circuit: signal with no chatter data (product gap, not a code error) ─
+    if data.get("type") == "signal_no_data":
+        signal = data.get("signal", "")
+        if locale == "ar":
+            if signal == "site_visit":
+                msg = (
+                    "ما لقيتش عملاء طلبوا معاينة في الـ chatter بتاع Odoo. "
+                    "ممكن السيلز بيسجلوا المعاينات في مكان تاني زي WhatsApp. "
+                    "هل عايز أعرضلك العملاء الأعلى أولوية للاتصال بدل كده؟"
+                )
+            else:
+                msg = (
+                    "ما لقيتش محادثات بالكلمات دي في الـ chatter بتاع Odoo. "
+                    "ممكن الفريق بيسجل هذا النشاط خارج النظام. "
+                    "هل عايز أعرضلك العملاء المتأخرين بدل كده؟"
+                )
+        else:
+            if signal == "site_visit":
+                msg = (
+                    "I couldn't find leads with site visit signals in Odoo's chatter. "
+                    "The sales team may be logging visits elsewhere (e.g., WhatsApp). "
+                    "Want me to show top-priority leads to contact instead?"
+                )
+            else:
+                msg = (
+                    "I couldn't find leads with this signal in Odoo's chatter. "
+                    "The team may be logging this activity outside the system. "
+                    "Want me to show overdue leads instead?"
+                )
+        return msg, _get_fallback_followups("recommendation_top_priority", locale), 0.0
+
+    # ── Short-circuit: lead ID not found in system ───────────────────────────
+    if data.get("type") == "not_found":
+        lead_id = data.get("lead_id", "")
+        if locale == "ar":
+            msg = f"ما لقيتش lead بالرقم {lead_id} في النظام."
+        else:
+            msg = f"No lead with ID {lead_id} was found in the system."
+        return msg, _get_fallback_followups("lead_details_by_id", locale), 0.0
 
     # ── Short-circuit: stage not found (no AI call needed) ────────────────────
     if data.get("type") == "stage_not_found":

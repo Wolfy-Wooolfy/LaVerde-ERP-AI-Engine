@@ -144,24 +144,31 @@ def _start_server() -> subprocess.Popen:
 # ── UX assertions ──────────────────────────────────────────────────────────────
 
 _CLARIFICATION_PHRASES = [
-    "لا تتوفر لديّ بيانات",
-    "لا تتوفر لدي بيانات",
-    "لم أفهم سؤالك",
-    "لم افهم سؤالك",
-    "عذراً، لم أفهم",
-    "عذرا، لم أفهم",
-    "لا أستطيع الإجابة",
-    "لا استطيع الاجابة",
-    "not enough data",
+    # Arabic
+    "لا تتوفر",            # main empty-data phrase (catches all variants)
+    "لم أفهم",             # didn't understand
+    "لم افهم",
+    "عذراً",               # sorry (catches clarification + error fallback)
+    "عذرا",
+    "جرّب أحد",            # "try one of these" — fallback suggestion marker
+    "جرب أحد",
+    "لم أجد",              # I didn't find
+    "لا أستطيع",
+    "لا استطيع",
+    # English
     "couldn't understand",
-    "I couldn't understand",
-    "i couldn't understand",
+    "not enough data",
+    "sorry, an error",
+    "sorry, i",            # "Sorry, I couldn't..." / "Sorry, I don't..."
+    "couldn't find",
+    "i didn't quite",
+    "try one of",
     "do not understand",
     "don't understand",
     "please clarify",
+    "not sure i understood",   # catches _CLARIFICATION_EN verbatim
+    "could you rephrase",      # catches _CLARIFICATION_EN verbatim
     "unclear",
-    "جرّب أحد هذه:\n",  # the exact clarification fallback pattern
-    "جرب أحد هذه:\n",
 ]
 
 
