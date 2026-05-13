@@ -101,10 +101,10 @@
   "ai_budget_exceeded": "Monthly AI budget exhausted. Resets next month.",
   "ai_unavailable": "AI service unavailable",
 
-  "chat_button": "Ask CRM AI",
-  "chat_title": "Ask CRM AI",
+  "chat_button": "Ask AI",
+  "chat_title": "Ask AI",
   "chat_greeting": "Hello",
-  "chat_subgreeting": "Ask me anything about your CRM",
+  "chat_subgreeting": "Ask me anything about your pipeline",
   "chat_new": "New chat",
   "chat_send": "Send",
   "chat_placeholder": "Type your question...",
@@ -114,6 +114,6 @@
   "chat_rate_limit": "You're sending messages too fast. Slow down a bit.",
   "chat_session_limit": "Session limit reached. Start a new chat.",
   "chat_you": "You",
-  "chat_ai": "CRM AI",
+  "chat_ai": "LaVerde AI",
   "chat_empty_hint": "Ask a question or pick one below to get started"
 }

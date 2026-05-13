@@ -1,7 +1,7 @@
-from backend.core.exceptions import CRMAIEngineError
+from backend.core.exceptions import LaVerdeERPError
 
 
-class AIServiceError(CRMAIEngineError):
+class AIServiceError(LaVerdeERPError):
     """Base exception for all AI service errors."""
 
 

@@ -101,10 +101,10 @@
   "ai_budget_exceeded": "انتهت الميزانية الشهرية للذكاء الاصطناعي. تتجدد الشهر القادم.",
   "ai_unavailable": "خدمة الذكاء الاصطناعي غير متاحة",
 
-  "chat_button": "اسأل CRM AI",
-  "chat_title": "اسأل CRM AI",
+  "chat_button": "اسأل LaVerde AI",
+  "chat_title": "اسأل LaVerde AI",
   "chat_greeting": "أهلاً",
-  "chat_subgreeting": "اسألني أي حاجة عن الـ CRM",
+  "chat_subgreeting": "اسألني أي حاجة عن المبيعات",
   "chat_new": "محادثة جديدة",
   "chat_send": "إرسال",
   "chat_placeholder": "اكتب سؤالك...",
@@ -114,6 +114,6 @@
   "chat_rate_limit": "أنت ترسل رسائل بسرعة كبيرة. قلل قليلاً.",
   "chat_session_limit": "تم الوصول لحد الجلسة. ابدأ محادثة جديدة.",
   "chat_you": "أنت",
-  "chat_ai": "CRM AI",
+  "chat_ai": "LaVerde AI",
   "chat_empty_hint": "اسأل سؤالاً أو اختر من الأسئلة أدناه للبدء"
 }

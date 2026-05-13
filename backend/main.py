@@ -1,5 +1,5 @@
 """
-CRM AI Engine — FastAPI application entry point.
+LaVerde ERP AI Engine — FastAPI application entry point.
 Phase 3: Enterprise frontend — Tailwind, Alpine.js, i18n, dark mode, RTL.
 """
 
@@ -24,7 +24,7 @@ from backend.api.v1.router import api_v1_router
 from backend.core.cache import init_cache
 from backend.core.config import settings
 from backend.core.exceptions import (
-    CRMAIEngineError,
+    LaVerdeERPError,
     OdooAuthenticationError,
     OdooConnectionError,
     ReadOnlyViolationError,
@@ -116,7 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Read-only CRM intelligence dashboard connected to Odoo.",
+    description="Read-only ERP intelligence dashboard connected to Odoo.",
     lifespan=lifespan,
 )
 
@@ -211,8 +211,8 @@ async def odoo_connection_handler(request: Request, exc: OdooConnectionError) ->
     return _error_response(request, 503, "ODOO_CONNECTION_ERROR", "Odoo is unreachable")
 
 
-@app.exception_handler(CRMAIEngineError)
-async def crm_engine_handler(request: Request, exc: CRMAIEngineError) -> JSONResponse:
+@app.exception_handler(LaVerdeERPError)
+async def crm_engine_handler(request: Request, exc: LaVerdeERPError) -> JSONResponse:
     return _error_response(request, 500, "INTERNAL_ERROR", "Internal service error")
 
 
@@ -270,7 +270,7 @@ def legacy_missing_contact() -> RedirectResponse:
 def logout() -> Response:
     return Response(
         status_code=401,
-        headers={"WWW-Authenticate": 'Basic realm="CRM AI Engine"'},
+        headers={"WWW-Authenticate": 'Basic realm="LaVerde ERP AI Engine"'},
         content=b"Logged out. <a href='/dashboard'>Sign in again</a>",
         media_type="text/html",
     )

@@ -1,22 +1,22 @@
-class CRMAIEngineError(Exception):
-    """Base exception for all CRM AI Engine errors."""
+class LaVerdeERPError(Exception):
+    """Base exception for all LaVerde ERP AI Engine errors."""
 
 
-class OdooConnectionError(CRMAIEngineError):
+class OdooConnectionError(LaVerdeERPError):
     """Raised when the HTTP connection to Odoo fails."""
 
 
-class OdooAuthenticationError(CRMAIEngineError):
+class OdooAuthenticationError(LaVerdeERPError):
     """Raised when Odoo rejects the provided credentials."""
 
 
-class OdooQueryError(CRMAIEngineError):
+class OdooQueryError(LaVerdeERPError):
     """Raised when Odoo returns a JSON-RPC error in the response."""
 
 
-class ReadOnlyViolationError(CRMAIEngineError):
+class ReadOnlyViolationError(LaVerdeERPError):
     """Raised when a write operation is attempted on the read-only client."""
 
 
-class StageResolutionError(CRMAIEngineError):
+class StageResolutionError(LaVerdeERPError):
     """Raised when stage names cannot be fetched or resolved from Odoo."""

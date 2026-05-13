@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.deps import get_crm_service, get_current_user
 from backend.core.exceptions import (
-    CRMAIEngineError,
+    LaVerdeERPError,
     OdooAuthenticationError,
     OdooConnectionError,
     ReadOnlyViolationError,
@@ -84,11 +84,11 @@ def test_odoo_connection_error_returns_503(client: TestClient) -> None:
         _clear()
 
 
-# ── CRMAIEngineError → 500 ────────────────────────────────────────────────────
+# ── LaVerdeERPError → 500 ────────────────────────────────────────────────────
 
 
 def test_generic_crm_error_returns_500(client: TestClient) -> None:
-    _with_auth(_raising(CRMAIEngineError("unexpected")))
+    _with_auth(_raising(LaVerdeERPError("unexpected")))
     try:
         r = client.get("/api/v1/summary", auth=_AUTH)
         assert r.status_code == 500

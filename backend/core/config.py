@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     )
 
     # ── App ──────────────────────────────────────────────────────────────────
-    APP_NAME: str = "CRM AI Engine"
-    APP_VERSION: str = "2.0.0"
+    APP_NAME: str = "LaVerde ERP AI Engine"
+    APP_VERSION: str = "6.0.0"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     DISPLAY_NAME: str = ""

@@ -71,7 +71,7 @@ def client() -> TestClient:
 def test_dashboard_loads(client: TestClient) -> None:
     r = client.get("/dashboard", auth=_AUTH)
     assert r.status_code == 200
-    assert b"CRM AI Engine" in r.content
+    assert b"LaVerde ERP AI Engine" in r.content
 
 
 def test_dashboard_has_kpi_section(client: TestClient) -> None:
