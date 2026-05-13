@@ -1,6 +1,6 @@
 # User Journey Failures
 
-**Generated**: 2026-05-13 11:25:44  
+**Generated**: 2026-05-13 17:01:14  
 **Note**: Site-visit chatter probe confirmed 0 messages in Odoo — site visit intent returns empty by design (product gap).  
 
 ## Summary
@@ -10,7 +10,7 @@
 | Steps run | 44 |
 | Failures | 4 |
 | Passes | 40 |
-| Total cost | $0.0180 |
+| Total cost | $0.0174 |
 
 ## Failures
 
