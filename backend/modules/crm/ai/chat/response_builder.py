@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from backend.core.config import settings
-from backend.modules.ai.chat.prompts import (
+from backend.modules.crm.ai.chat.prompts import (
     CONVERSATIONAL_INTENTS,
     FALLBACK_FOLLOWUPS,
     RESPONSE_FORMATS,
@@ -19,7 +19,7 @@ from backend.modules.ai.chat.prompts import (
     build_response_generation_prompt_ar,
     build_response_generation_prompt_en,
 )
-from backend.modules.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
+from backend.modules.crm.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
 
 if TYPE_CHECKING:
     from backend.shared.ai.client import OpenAIClient
@@ -108,8 +108,8 @@ async def _validate_followups(
 
     All intent-parse calls run in parallel (cache hits are free; misses cost ~$0.00002 each).
     """
-    from backend.modules.ai.chat.intent_parser import parse_intent  # local to avoid circular
-    from backend.modules.ai.chat.data_fetcher import _normalise_stage
+    from backend.modules.crm.ai.chat.intent_parser import parse_intent  # local to avoid circular
+    from backend.modules.crm.ai.chat.data_fetcher import _normalise_stage
 
     real_lower = {s.lower() for s in real_stage_names}
 

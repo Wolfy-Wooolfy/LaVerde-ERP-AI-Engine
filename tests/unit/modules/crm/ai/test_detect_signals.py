@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.modules.ai.chatter import detect_signals
-from backend.modules.ai.schemas import ChatterMessage
+from backend.modules.crm.ai.chatter import detect_signals
+from backend.modules.crm.ai.schemas import ChatterMessage
 
 
 def _msg(text: str) -> ChatterMessage:

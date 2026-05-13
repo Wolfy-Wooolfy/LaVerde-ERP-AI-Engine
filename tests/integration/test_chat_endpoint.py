@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.shared.ai.cache import IntentCache
-from backend.modules.ai.chat.session_manager import SessionManager
+from backend.modules.crm.ai.chat.session_manager import SessionManager
 from backend.modules.crm.schemas import OverdueBySalesperson
 from backend.modules.crm.service import CrmService
 

@@ -4,11 +4,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.modules.ai.prompts import (
+from backend.modules.crm.ai.prompts import (
     LEAD_PRIORITIZATION_SYSTEM_PROMPT_EN as LEAD_PRIORITIZATION_SYSTEM_PROMPT,
     build_lead_prioritization_prompt,
 )
-from backend.modules.ai.schemas import ChatterMessage, LeadContext
+from backend.modules.crm.ai.schemas import ChatterMessage, LeadContext
 
 
 def _base_lead(**kwargs) -> LeadContext:

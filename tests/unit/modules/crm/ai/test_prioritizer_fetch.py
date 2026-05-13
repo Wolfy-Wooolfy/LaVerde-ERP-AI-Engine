@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.shared.ai.cache import AICache
-from backend.modules.ai.prioritizer import LeadPrioritizer, _parse_ai_response, _completeness_score
-from backend.modules.ai.schemas import ChatCompletionResponse, LeadContext
+from backend.modules.crm.ai.prioritizer import LeadPrioritizer, _parse_ai_response, _completeness_score
+from backend.modules.crm.ai.schemas import ChatCompletionResponse, LeadContext
 
 
 def _good_ai_response() -> ChatCompletionResponse:

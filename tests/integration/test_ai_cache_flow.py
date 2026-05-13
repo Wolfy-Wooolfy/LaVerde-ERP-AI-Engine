@@ -9,8 +9,8 @@ import pytest
 from backend.shared.ai.budget_tracker import BudgetTracker
 from backend.shared.ai.cache import AICache
 from backend.shared.ai.client import OpenAIClient
-from backend.modules.ai.prioritizer import LeadPrioritizer
-from backend.modules.ai.schemas import ChatCompletionResponse, LeadContext
+from backend.modules.crm.ai.prioritizer import LeadPrioritizer
+from backend.modules.crm.ai.schemas import ChatCompletionResponse, LeadContext
 
 
 def _make_lead(lead_id: int = 1) -> LeadContext:

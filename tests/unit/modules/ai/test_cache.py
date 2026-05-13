@@ -59,7 +59,7 @@ def test_stats(cache):
 
 
 def test_persistence_survives_reload(tmp_path):
-    from backend.modules.ai.schemas import LeadPriority
+    from backend.modules.crm.ai.schemas import LeadPriority
 
     f = tmp_path / "cache_persist.json"
     priority = LeadPriority(

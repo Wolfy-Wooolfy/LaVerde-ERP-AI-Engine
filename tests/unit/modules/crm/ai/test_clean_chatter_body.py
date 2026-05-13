@@ -2,7 +2,7 @@
 
 import pytest
 
-from backend.modules.ai.chatter import clean_chatter_body
+from backend.modules.crm.ai.chatter import clean_chatter_body
 
 
 def test_strips_html_tags():

@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # ── Chat session manager (always initialized) ─────────────────────────────
     from backend.shared.ai.cache import IntentCache
-    from backend.modules.ai.chat.session_manager import SessionManager
+    from backend.modules.crm.ai.chat.session_manager import SessionManager
 
     session_manager = SessionManager()
     app.state.chat_session_manager = session_manager
@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from backend.shared.ai.budget_tracker import BudgetTracker
         from backend.shared.ai.cache import AICache
         from backend.shared.ai.client import OpenAIClient
-        from backend.modules.ai.prioritizer import LeadPrioritizer
+        from backend.modules.crm.ai.prioritizer import LeadPrioritizer
 
         budget_tracker = BudgetTracker(
             monthly_budget_usd=settings.AI_MONTHLY_BUDGET_USD,

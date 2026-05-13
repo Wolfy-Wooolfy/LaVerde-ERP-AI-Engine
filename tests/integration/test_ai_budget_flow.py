@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from backend.shared.ai.budget_tracker import BudgetTracker
 from backend.shared.ai.cache import AICache
 from backend.shared.ai.exceptions import BudgetExceededError
-from backend.modules.ai.prioritizer import LeadPrioritizer
+from backend.modules.crm.ai.prioritizer import LeadPrioritizer
 from backend.main import app
 
 AUTH = ("testadmin", "testpass")

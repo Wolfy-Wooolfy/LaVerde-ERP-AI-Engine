@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.shared.ai.cache import IntentCache
-from backend.modules.ai.chat.intent_parser import _parse_intent_json, parse_intent
-from backend.modules.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
+from backend.modules.crm.ai.chat.intent_parser import _parse_intent_json, parse_intent
+from backend.modules.crm.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
 
 
 # ── _parse_intent_json ────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ def test_parse_invalid_response_format_falls_back():
 
 
 def test_parse_all_allowed_intents():
-    from backend.modules.ai.chat.prompts import ALLOWED_INTENTS
+    from backend.modules.crm.ai.chat.prompts import ALLOWED_INTENTS
 
     for allowed in ALLOWED_INTENTS:
         raw = f'{{"intent":"{allowed}","filters":{{}},"response_format":"analysis","confidence":0.8}}'
@@ -103,7 +103,7 @@ async def test_parse_intent_caches_after_ai_call():
 
 
 def test_parse_greeting_intent_is_allowed():
-    from backend.modules.ai.chat.prompts import ALLOWED_INTENTS, CONVERSATIONAL_INTENTS
+    from backend.modules.crm.ai.chat.prompts import ALLOWED_INTENTS, CONVERSATIONAL_INTENTS
     for ci in CONVERSATIONAL_INTENTS:
         assert ci in ALLOWED_INTENTS, f"Conversational intent {ci!r} missing from ALLOWED_INTENTS"
 

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.modules.ai.chat.data_fetcher import _normalise_stage, fetch_data_for_intent
+from backend.modules.crm.ai.chat.data_fetcher import _normalise_stage, fetch_data_for_intent
 from backend.modules.crm.schemas import (
     DataQuality,
     OverdueBySalesperson,

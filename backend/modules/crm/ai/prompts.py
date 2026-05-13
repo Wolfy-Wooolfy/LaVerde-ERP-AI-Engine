@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from backend.modules.ai.schemas import LeadContext
+from backend.modules.crm.ai.schemas import LeadContext
 
 # ── System prompts ────────────────────────────────────────────────────────────
 

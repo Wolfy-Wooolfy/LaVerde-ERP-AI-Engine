@@ -13,7 +13,7 @@ from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_af
 from backend.core.config import settings
 from backend.shared.ai.budget_tracker import PRICING, BudgetTracker, calculate_cost
 from backend.shared.ai.exceptions import AIInvalidResponseError, AIProviderError, AIRateLimitError, AITimeoutError
-from backend.modules.ai.schemas import ChatCompletionResponse
+from backend.modules.crm.ai.schemas import ChatCompletionResponse
 
 # Singleton encoder (gpt-4o-mini uses cl100k_base)
 _ENCODER: tiktoken.Encoding | None = None

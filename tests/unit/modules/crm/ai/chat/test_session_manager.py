@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.modules.ai.chat.schemas import ChatMessage, ChatMessageRole
-from backend.modules.ai.chat.session_manager import SessionManager
+from backend.modules.crm.ai.chat.schemas import ChatMessage, ChatMessageRole
+from backend.modules.crm.ai.chat.session_manager import SessionManager
 
 
 def _msg(content: str = "hello") -> ChatMessage:

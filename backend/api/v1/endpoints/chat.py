@@ -10,18 +10,18 @@ from backend.api.deps import get_crm_service, get_current_user
 from backend.core.config import settings
 from backend.core.limiter import limiter
 from backend.shared.ai.cache import IntentCache
-from backend.modules.ai.chat.data_fetcher import fetch_data_for_intent
-from backend.modules.ai.chat.intent_parser import parse_intent
-from backend.modules.ai.chat.prompts import CONVERSATIONAL_INTENTS, SUGGESTED_QUESTIONS
-from backend.modules.ai.chat.response_builder import build_response
-from backend.modules.ai.chat.schemas import (
+from backend.modules.crm.ai.chat.data_fetcher import fetch_data_for_intent
+from backend.modules.crm.ai.chat.intent_parser import parse_intent
+from backend.modules.crm.ai.chat.prompts import CONVERSATIONAL_INTENTS, SUGGESTED_QUESTIONS
+from backend.modules.crm.ai.chat.response_builder import build_response
+from backend.modules.crm.ai.chat.schemas import (
     ChatMessage,
     ChatMessageRole,
     ChatRequest,
     ChatResponse,
     QueryIntent,
 )
-from backend.modules.ai.chat.session_manager import SessionManager
+from backend.modules.crm.ai.chat.session_manager import SessionManager
 from backend.shared.ai.exceptions import BudgetExceededError
 from backend.modules.crm.service import CrmService
 

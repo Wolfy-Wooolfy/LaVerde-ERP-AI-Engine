@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from backend.core.config import settings
-from backend.modules.ai.chat.prompts import ALLOWED_INTENTS, INTENT_PARSING_SYSTEM_PROMPT
-from backend.modules.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
+from backend.modules.crm.ai.chat.prompts import ALLOWED_INTENTS, INTENT_PARSING_SYSTEM_PROMPT
+from backend.modules.crm.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
 
 if TYPE_CHECKING:
     from backend.shared.ai.cache import IntentCache

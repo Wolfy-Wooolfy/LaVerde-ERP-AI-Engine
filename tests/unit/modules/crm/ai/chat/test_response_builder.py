@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.modules.ai.chat.response_builder import (
+from backend.modules.crm.ai.chat.response_builder import (
     _extract_followups,
     _filter_followups,
     _get_fallback_followups,
@@ -12,7 +12,7 @@ from backend.modules.ai.chat.response_builder import (
     build_response,
     is_data_empty,
 )
-from backend.modules.ai.chat.schemas import QueryIntent
+from backend.modules.crm.ai.chat.schemas import QueryIntent
 
 
 # ── _extract_followups ────────────────────────────────────────────────────────
@@ -315,13 +315,13 @@ async def test_build_response_conversational_ai_error_returns_friendly_fallback(
 
 
 def test_no_mandup_in_clarification_ar():
-    from backend.modules.ai.chat.response_builder import _CLARIFICATION_AR
+    from backend.modules.crm.ai.chat.response_builder import _CLARIFICATION_AR
     assert "مندوب" not in _CLARIFICATION_AR
     assert "مندوبين" not in _CLARIFICATION_AR
 
 
 def test_no_mandup_in_suggested_questions():
-    from backend.modules.ai.chat.prompts import SUGGESTED_QUESTIONS
+    from backend.modules.crm.ai.chat.prompts import SUGGESTED_QUESTIONS
     for q in SUGGESTED_QUESTIONS["ar"]:
         assert "مندوب" not in q, f"Found 'مندوب' in suggested question: {q!r}"
 
@@ -361,7 +361,7 @@ async def test_build_response_strips_br_from_ai_output():
 
 
 def test_terminology_prompt_uses_correct_term():
-    from backend.modules.ai.chat.prompts import _TERMINOLOGY_RULES
+    from backend.modules.crm.ai.chat.prompts import _TERMINOLOGY_RULES
     assert "موظف مبيعات" in _TERMINOLOGY_RULES
     assert "NEVER" in _TERMINOLOGY_RULES  # English rule present
     assert "مندوب" in _TERMINOLOGY_RULES  # only appears as the forbidden term

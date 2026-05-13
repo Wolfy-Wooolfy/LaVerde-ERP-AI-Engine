@@ -13,11 +13,11 @@ from loguru import logger
 from backend.core.config import settings
 from backend.shared.ai.budget_tracker import BudgetTracker
 from backend.shared.ai.cache import AICache, lead_cache_key, overdue_list_cache_key
-from backend.modules.ai.chatter import clean_chatter_body, detect_signals
+from backend.modules.crm.ai.chatter import clean_chatter_body, detect_signals
 from backend.shared.ai.client import OpenAIClient
 from backend.shared.ai.exceptions import AIFeatureDisabledError, AIInvalidResponseError, BudgetExceededError
-from backend.modules.ai.prompts import build_lead_prioritization_prompt, get_system_prompt
-from backend.modules.ai.schemas import ChatterMessage, LeadContext, LeadPriority
+from backend.modules.crm.ai.prompts import build_lead_prioritization_prompt, get_system_prompt
+from backend.modules.crm.ai.schemas import ChatterMessage, LeadContext, LeadPriority
 from backend.shared.odoo.client import OdooClient
 from backend.modules.crm.domain import BASE_DOMAIN, get_critical_stage_ids
 

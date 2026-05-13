@@ -16,7 +16,7 @@ from backend.shared.ai.exceptions import (
     AIServiceError,
     BudgetExceededError,
 )
-from backend.modules.ai.schemas import (
+from backend.modules.crm.ai.schemas import (
     AIHealthResponse,
     BudgetStatus,
     LeadContext,

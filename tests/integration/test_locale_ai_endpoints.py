@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.modules.ai.schemas import LeadPriority
+from backend.modules.crm.ai.schemas import LeadPriority
 
 AUTH = ("testadmin", "testpass")
 

@@ -58,7 +58,7 @@ class AICache:
             return
 
         # Lazy import avoids circular dependency at module level
-        from backend.modules.ai.schemas import LeadPriority  # noqa: PLC0415
+        from backend.modules.crm.ai.schemas import LeadPriority  # noqa: PLC0415
 
         now = datetime.now(timezone.utc).timestamp()
         loaded = 0

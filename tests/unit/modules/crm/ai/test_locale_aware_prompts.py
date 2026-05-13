@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.shared.ai.cache import lead_cache_key, overdue_list_cache_key
-from backend.modules.ai.prompts import (
+from backend.modules.crm.ai.prompts import (
     LEAD_PRIORITIZATION_SYSTEM_PROMPT_AR,
     LEAD_PRIORITIZATION_SYSTEM_PROMPT_EN,
     build_lead_prioritization_prompt,
     get_system_prompt,
 )
-from backend.modules.ai.schemas import LeadContext
+from backend.modules.crm.ai.schemas import LeadContext
 
 
 def _lead(**kwargs) -> LeadContext:

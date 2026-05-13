@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.shared.ai.cache import lead_cache_key
-from backend.modules.ai.schemas import ChatterMessage, LeadContext
+from backend.modules.crm.ai.schemas import ChatterMessage, LeadContext
 
 
 def _base_lead(messages: list[ChatterMessage] | None = None) -> LeadContext:
@@ -27,7 +27,7 @@ def _chatter_hash(lead: LeadContext) -> str:
 
 
 def _key(lead: LeadContext) -> str:
-    from backend.modules.ai.prioritizer import _completeness_score
+    from backend.modules.crm.ai.prioritizer import _completeness_score
     completeness = _completeness_score(lead)
     return lead_cache_key(
         lead.lead_id,

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-from backend.modules.ai.chat.schemas import ChatMessage, ChatSession
+from backend.modules.crm.ai.chat.schemas import ChatMessage, ChatSession
 
 
 class SessionManager:

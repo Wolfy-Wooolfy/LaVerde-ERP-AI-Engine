@@ -8,8 +8,8 @@ import pytest
 
 from backend.shared.ai.cache import AICache
 from backend.shared.ai.exceptions import BudgetExceededError
-from backend.modules.ai.prioritizer import LeadPrioritizer, _parse_ai_response
-from backend.modules.ai.schemas import ChatCompletionResponse, LeadContext, LeadPriority
+from backend.modules.crm.ai.prioritizer import LeadPrioritizer, _parse_ai_response
+from backend.modules.crm.ai.schemas import ChatCompletionResponse, LeadContext, LeadPriority
 
 
 def _make_lead(lead_id: int = 1, stage_id: int = 28) -> LeadContext:

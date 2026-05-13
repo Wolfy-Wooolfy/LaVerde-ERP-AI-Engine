@@ -3,7 +3,7 @@
 import pytest
 
 from backend.shared.ai.cache import IntentCache
-from backend.modules.ai.chat.schemas import QueryIntent
+from backend.modules.crm.ai.chat.schemas import QueryIntent
 
 
 def _make_intent(name: str = "count_by_stage") -> QueryIntent:
