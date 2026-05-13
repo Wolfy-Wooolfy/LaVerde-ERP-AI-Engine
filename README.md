@@ -1,13 +1,23 @@
-# CRM AI Engine
+# LaVerde ERP AI Engine
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
-![Tests](https://img.shields.io/badge/tests-60%20passed-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-85%25-green)
+![Tests](https://img.shields.io/badge/tests-350%2B%20passed-brightgreen)
+![Version](https://img.shields.io/badge/version-6.0.0-blue)
 
-Read-only intelligence dashboard for Odoo CRM. Connects to Odoo via JSON-RPC and surfaces
-follow-up risk, data quality issues, and pipeline summaries for Sales Managers and Top Management.
+A **read-only AI intelligence layer** over Odoo ERP. Surfaces actionable insights across 7 business modules — CRM, Customer Service, HR, Contracts, Collections, Accounting, and Project Management — without ever writing to Odoo.
+
+---
+
+## What It Does
+
+LaVerde ERP AI Engine connects to Odoo via JSON-RPC and provides:
+
+- **Real-time dashboards** — pipeline health, overdue follow-ups, data quality issues
+- **AI Priority Queue** — GPT-powered lead scoring with WhatsApp-first recommendations
+- **Natural language chat** — ask questions about your CRM in Arabic or English
+- **Read-only guarantee** — `ALLOWED_METHODS` enforces zero write access at the client layer
 
 ---
 
@@ -17,11 +27,15 @@ follow-up risk, data quality issues, and pipeline summaries for Sales Managers a
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Copy and fill in environment variables
+# 2. Copy and configure environment
 cp .env.example .env
-# Edit .env with your Odoo URL, credentials, and Basic Auth password
+# Edit .env: ODOO_URL, ODOO_DB, ODOO_USERNAME, ODOO_API_KEY,
+#            BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD, OPENAI_API_KEY
 
-# 3. Run the application
+# 3. Build frontend CSS
+cd frontend && npm install && npm run build:css && cd ..
+
+# 4. Run the application
 uvicorn backend.main:app --reload
 ```
 
@@ -33,228 +47,87 @@ Open [http://localhost:8000/dashboard](http://localhost:8000/dashboard) and sign
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      HTTP Clients                        │
-│              (Browsers / API consumers)                  │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│                   FastAPI (main.py)                      │
-│   Middleware (Request ID) │ Exception Handlers           │
-│   Lifespan (init cache, create service)                  │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│               API Layer  /api/v1/                        │
-│   deps.py (BasicAuth, DI)                                │
-│   health │ summary │ followup │ data_quality │ dashboard │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│          modules/crm/  (business logic)                  │
-│   service │ client (httpx+tenacity) │ stage_resolver     │
-│   domain  │ schemas (Pydantic v2)                        │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│          core/  config │ exceptions │ security           │
-│                 cache  │ logging                         │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│                  Odoo JSON-RPC (read-only)                │
-└─────────────────────────────────────────────────────────┘
+LaVerde ERP AI Engine
+├── backend/
+│   ├── core/              # Config, auth, cache, logging, metrics
+│   ├── shared/
+│   │   ├── odoo/          # Shared Odoo JSON-RPC client (read-only)
+│   │   └── ai/            # Shared AI services (client, budget, cache, registry)
+│   ├── modules/
+│   │   ├── crm/           # CRM module (active)
+│   │   │   └── ai/        # CRM-specific AI (prioritizer, prompts, chat)
+│   │   ├── customer_service/  # 🚧 Coming Soon
+│   │   ├── hr/                # 🚧 Coming Soon
+│   │   ├── contracts/         # 🚧 Coming Soon
+│   │   ├── collections/       # 🚧 Coming Soon
+│   │   ├── accounting/        # 🚧 Coming Soon
+│   │   └── project_mgmt/      # 🚧 Coming Soon
+│   └── api/               # FastAPI routers and endpoints
+├── frontend/
+│   ├── templates/         # Jinja2 HTML (Tailwind, Alpine.js)
+│   ├── translations/      # i18n (en.json, ar.json)
+│   └── static/            # Self-hosted CSS, JS, vendor libs
+├── tests/                 # 350+ tests (unit, integration, e2e)
+└── docs/                  # Architecture, module specs, changelog
 ```
 
-Full architecture details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full layer diagram and module pattern.
 
 ---
 
-## Tech Stack
+## Modules
 
-| Layer | Technology |
-|-------|-----------|
-| Web framework | FastAPI 0.115 |
-| HTTP client | httpx 0.27 (sync, connection pool) |
-| Retry | tenacity (exponential backoff) |
-| Config | pydantic-settings 2.x |
-| Validation | Pydantic v2 |
-| Caching | cachetools TTLCache (in-memory) |
-| Logging | Loguru (JSON prod / pretty dev) |
-| Templates | Jinja2 |
-| Tests | pytest + pytest-cov |
-| Linting | Ruff |
+| Module | Status | Description |
+|--------|--------|-------------|
+| CRM | ✅ Active | Pipeline health, overdue leads, AI prioritization, chat |
+| Customer Service | 🚧 Soon | Ticket SLA, escalation risk, agent workload |
+| HR | 🚧 Soon | Contract expiry, leave patterns, headcount |
+| Contracts | 🚧 Soon | Renewal tracking, unsigned agreements |
+| Collections | 🚧 Soon | Overdue receivables, debtor aging, payment risk |
+| Accounting | 🚧 Soon | Budget variance, cash flow anomalies |
+| Project Mgmt | 🚧 Soon | Task overdue, milestone risk, team workload |
+
+See [docs/MODULES.md](docs/MODULES.md) for detailed specs.
 
 ---
 
-## Development Setup
+## Key Constraints
 
-**Requirements:** Python 3.11+
-
-```bash
-# Create and activate virtual environment
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/macOS
-
-# Install all dependencies (app + dev)
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
-
-# Copy environment file
-cp .env.example .env
-```
-
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ODOO_URL` | Yes | — | Odoo instance URL |
-| `ODOO_DB` | Yes | — | Database name |
-| `ODOO_USERNAME` | Yes | — | Odoo login email |
-| `ODOO_API_KEY` | Yes | — | Odoo API key |
-| `BASIC_AUTH_USERNAME` | Yes | — | Dashboard login user |
-| `BASIC_AUTH_PASSWORD` | Yes | — | Dashboard login password |
-| `CACHE_TTL_SECONDS` | No | `60` | API response cache TTL |
-| `ENVIRONMENT` | No | `development` | `development` or `production` |
-| `CRM_CRITICAL_STAGE_IDS` | No | `28,34,35,37,41` | Comma-separated stage IDs |
-| `CRM_CLOSED_EXCLUDED_STAGE_IDS` | No | `26,30,31,32,38,42,46` | Stages excluded from counts |
-| `CRM_DATA_QUALITY_STAGE_IDS` | No | `44` | Stages flagged for data quality |
+- **Read-only absolute** — `ALLOWED_METHODS` in `shared/odoo/client.py` never contains create/write/unlink
+- **Arabic-first UX** — fully bilingual (AR + EN), RTL layout, WhatsApp-first recommendations
+- **AI cost ceiling** — `AI_MONTHLY_BUDGET_USD` hard stop with warning threshold
+- **Self-hosted only** — zero CDN dependencies in production
 
 ---
 
 ## Running Tests
 
 ```bash
-# All tests with coverage report
-pytest tests/ -v --cov=backend --cov-report=term-missing
-
-# Unit tests only
-pytest tests/unit/ -v
-
-# Integration tests only
-pytest tests/integration/ -v
-
-# Single test file
-pytest tests/unit/modules/crm/test_client.py -v
+pytest tests/ -v --tb=short
 ```
 
-### Test Suite Summary
-
-```
-tests/unit/core/test_config.py          — Settings validation
-tests/unit/core/test_cache.py           — TTLCache wrapper
-tests/unit/core/test_security.py        — Basic Auth verify
-tests/unit/modules/crm/test_client.py   — Read-only enforcement, retry
-tests/unit/modules/crm/test_service.py  — Business logic, caching
-tests/unit/modules/crm/test_stage_resolver.py — Stage name cache
-tests/integration/test_api_v1.py        — Full API endpoint tests
-```
+Expected: 350+ tests passing, ~0 failures.
 
 ---
 
-## Running the Mock Odoo Server
+## Environment Variables
 
-No real Odoo instance needed for development:
+See `.env.example` for the full list with comments. Key variables:
 
-```bash
-# Windows
-.\scripts\run_mock_odoo.ps1
-
-# Linux/macOS
-bash scripts/run_mock_odoo.sh
-```
-
-The mock server starts at `http://localhost:8069` and responds to JSON-RPC calls with
-50 synthetic leads, 5 teams, and 8 salespeople.
-
-Then point your `.env` at it:
-
-```
-ODOO_URL=http://localhost:8069
-ODOO_DB=mock
-ODOO_USERNAME=admin
-ODOO_API_KEY=mock-key
-```
+| Variable | Description |
+|----------|-------------|
+| `ODOO_URL` | Your Odoo instance URL |
+| `ODOO_API_KEY` | Odoo API key (Settings → Technical → API Keys) |
+| `BASIC_AUTH_PASSWORD` | Dashboard login password |
+| `OPENAI_API_KEY` | OpenAI API key for AI features |
+| `AI_MONTHLY_BUDGET_USD` | Monthly AI spend ceiling (default: $10) |
+| `DISPLAY_NAME` | Name shown in dashboard greeting |
 
 ---
 
-## API Endpoints
+## Changelog
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/health` | No | Liveness probe |
-| GET | `/api/v1/health` | Yes | Authenticated health |
-| GET | `/api/v1/health/odoo` | Yes | Odoo connectivity check |
-| GET | `/api/v1/summary` | Yes | Pipeline summary |
-| GET | `/api/v1/followup-risk` | Yes | Overdue leads |
-| GET | `/api/v1/data-quality/missing-contact` | Yes | Leads missing contact info |
-| GET | `/dashboard` | Yes | HTML management dashboard |
-| GET | `/data-quality/missing-contact` | Yes | HTML data quality view |
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for version history.
 
-Legacy paths (`/crm/*`) redirect 301 to their `/api/v1/` equivalents.
-
----
-
-## Read-Only Guarantee
-
-Write operations are blocked at the client layer — before any authentication or network call:
-
-```python
-ALLOWED_METHODS = frozenset({
-    "search_read", "read_group", "search_count",
-    "search", "read", "fields_get", "name_search", "name_get",
-})
-
-def _ensure_read_only(method: str) -> None:
-    if method not in ALLOWED_METHODS:
-        raise ReadOnlyViolationError(...)
-```
-
-`create`, `write`, and `unlink` raise `ReadOnlyViolationError` (HTTP 403). This is unit-tested
-and cannot be bypassed by configuration.
-
----
-
-## Project Structure
-
-```
-CRM-AI-Engine/
-├── backend/
-│   ├── main.py                  ← FastAPI app, middleware, lifespan
-│   ├── api/
-│   │   ├── deps.py              ← Auth + DI dependencies
-│   │   └── v1/endpoints/        ← Route handlers
-│   ├── core/                    ← Config, cache, security, logging, exceptions
-│   ├── modules/crm/             ← OdooClient, CrmService, schemas, domain
-│   └── shared/audit.py          ← Audit log writer
-├── frontend/templates/          ← Jinja2 HTML templates
-├── tests/
-│   ├── unit/                    ← Fast, isolated unit tests
-│   ├── integration/             ← API-level tests (no real Odoo)
-│   └── mock_odoo/               ← Mock JSON-RPC server for dev
-├── docs/                        ← ARCHITECTURE.md, PHASE_1_REPORT.md
-├── scripts/                     ← Helper scripts
-├── .env.example
-├── requirements.txt
-├── requirements-dev.txt
-└── pyproject.toml
-```
-
----
-
-## Contributing
-
-1. Branch from `main`
-2. Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
-3. Run `ruff check .` and `pytest tests/` before pushing
-4. Keep the read-only invariant — never add write-capable Odoo methods
-
----
-
-## Roadmap
-
-- **Phase 2:** AI-powered insights (lead scoring, churn prediction)
-- **Phase 3:** Inventory module integration
-- **Phase 4:** Finance & Marketing modules
-- **Phase 5:** Render deployment + CI/CD pipeline
+> **Note:** GitHub repo rename and local folder rename are pending user action.
+> After renaming to `LaVerde-ERP-AI-Engine`, update the git remote URL.
