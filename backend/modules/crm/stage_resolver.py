@@ -14,7 +14,7 @@ from loguru import logger
 from backend.core.exceptions import StageResolutionError
 
 if TYPE_CHECKING:
-    from backend.modules.crm.client import OdooClient
+    from backend.shared.odoo.client import OdooClient
 
 _CACHE_TTL: float = 3600.0  # 1 hour
 

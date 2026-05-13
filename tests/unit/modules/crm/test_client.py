@@ -13,7 +13,7 @@ from backend.core.exceptions import (
     OdooQueryError,
     ReadOnlyViolationError,
 )
-from backend.modules.crm.client import ALLOWED_METHODS, OdooClient, _ensure_read_only
+from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient, _ensure_read_only
 
 # ── _ensure_read_only ─────────────────────────────────────────────────────────
 

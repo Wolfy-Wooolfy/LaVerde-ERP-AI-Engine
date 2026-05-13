@@ -18,7 +18,7 @@ from backend.modules.ai.client import OpenAIClient
 from backend.modules.ai.exceptions import AIFeatureDisabledError, AIInvalidResponseError, BudgetExceededError
 from backend.modules.ai.prompts import build_lead_prioritization_prompt, get_system_prompt
 from backend.modules.ai.schemas import ChatterMessage, LeadContext, LeadPriority
-from backend.modules.crm.client import OdooClient
+from backend.shared.odoo.client import OdooClient
 from backend.modules.crm.domain import BASE_DOMAIN, get_critical_stage_ids
 
 _OVERDUE_CACHE_TTL = 600  # 10 min for the aggregated list

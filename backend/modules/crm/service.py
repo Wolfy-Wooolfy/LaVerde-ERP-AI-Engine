@@ -9,7 +9,7 @@ from typing import Optional, cast
 from loguru import logger
 
 from backend.core.cache import get_cached, set_cached
-from backend.modules.crm.client import OdooClient
+from backend.shared.odoo.client import OdooClient
 from backend.modules.crm.domain import (
     BASE_DOMAIN,
     build_missing_contact_domain,
