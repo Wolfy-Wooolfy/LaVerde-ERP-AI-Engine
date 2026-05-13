@@ -121,7 +121,7 @@ def test_ai_budget_requires_auth():
 
 
 def test_prioritize_overdue_budget_exceeded(client_with_ai):
-    from backend.modules.ai.exceptions import BudgetExceededError
+    from backend.shared.ai.exceptions import BudgetExceededError
 
     client_with_ai.app.state.ai_prioritizer.prioritize_overdue = AsyncMock(
         side_effect=BudgetExceededError(10.0, 10.0)

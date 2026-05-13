@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.modules.ai.cache import IntentCache
+from backend.shared.ai.cache import IntentCache
 from backend.modules.ai.chat.session_manager import SessionManager
 from backend.modules.crm.schemas import OverdueBySalesperson
 from backend.modules.crm.service import CrmService
@@ -44,7 +44,7 @@ def _make_ai_client(intent: str = "list_overdue_by_salesperson"):
 def _make_budget(over: bool = False):
     budget = MagicMock()
     if over:
-        from backend.modules.ai.exceptions import BudgetExceededError
+        from backend.shared.ai.exceptions import BudgetExceededError
         budget.enforce_budget.side_effect = BudgetExceededError(spent=10.0, budget=10.0)
     else:
         budget.enforce_budget.return_value = None

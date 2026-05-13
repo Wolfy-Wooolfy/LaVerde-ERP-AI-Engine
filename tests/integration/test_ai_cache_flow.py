@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.modules.ai.budget_tracker import BudgetTracker
-from backend.modules.ai.cache import AICache
-from backend.modules.ai.client import OpenAIClient
+from backend.shared.ai.budget_tracker import BudgetTracker
+from backend.shared.ai.cache import AICache
+from backend.shared.ai.client import OpenAIClient
 from backend.modules.ai.prioritizer import LeadPrioritizer
 from backend.modules.ai.schemas import ChatCompletionResponse, LeadContext
 

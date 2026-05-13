@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.modules.ai.cache import AICache
-from backend.modules.ai.exceptions import BudgetExceededError
+from backend.shared.ai.cache import AICache
+from backend.shared.ai.exceptions import BudgetExceededError
 from backend.modules.ai.prioritizer import LeadPrioritizer, _parse_ai_response
 from backend.modules.ai.schemas import ChatCompletionResponse, LeadContext, LeadPriority
 
@@ -134,7 +134,7 @@ def test_parse_ai_response_score_clamped():
 
 
 def test_parse_ai_response_invalid_json_raises():
-    from backend.modules.ai.exceptions import AIInvalidResponseError
+    from backend.shared.ai.exceptions import AIInvalidResponseError
 
     with pytest.raises(AIInvalidResponseError):
         _parse_ai_response("this is not json", lead_id=1, model="gpt-4o-mini", cost=0.0, cached=False)

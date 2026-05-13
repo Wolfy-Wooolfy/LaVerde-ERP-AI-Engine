@@ -9,7 +9,7 @@ from loguru import logger
 from backend.api.deps import get_crm_service, get_current_user
 from backend.core.config import settings
 from backend.core.limiter import limiter
-from backend.modules.ai.cache import IntentCache
+from backend.shared.ai.cache import IntentCache
 from backend.modules.ai.chat.data_fetcher import fetch_data_for_intent
 from backend.modules.ai.chat.intent_parser import parse_intent
 from backend.modules.ai.chat.prompts import CONVERSATIONAL_INTENTS, SUGGESTED_QUESTIONS
@@ -22,7 +22,7 @@ from backend.modules.ai.chat.schemas import (
     QueryIntent,
 )
 from backend.modules.ai.chat.session_manager import SessionManager
-from backend.modules.ai.exceptions import BudgetExceededError
+from backend.shared.ai.exceptions import BudgetExceededError
 from backend.modules.crm.service import CrmService
 
 router = APIRouter(prefix="/chat", tags=["chat"])

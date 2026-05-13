@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.modules.ai.cache import lead_cache_key, overdue_list_cache_key
+from backend.shared.ai.cache import lead_cache_key, overdue_list_cache_key
 from backend.modules.ai.prompts import (
     LEAD_PRIORITIZATION_SYSTEM_PROMPT_AR,
     LEAD_PRIORITIZATION_SYSTEM_PROMPT_EN,

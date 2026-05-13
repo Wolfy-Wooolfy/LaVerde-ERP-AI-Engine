@@ -4,8 +4,8 @@ import pytest
 import respx
 from httpx import Response
 
-from backend.modules.ai.client import OpenAIClient
-from backend.modules.ai.exceptions import AIInvalidResponseError, AIProviderError, AIRateLimitError
+from backend.shared.ai.client import OpenAIClient
+from backend.shared.ai.exceptions import AIInvalidResponseError, AIProviderError, AIRateLimitError
 
 
 @pytest.fixture

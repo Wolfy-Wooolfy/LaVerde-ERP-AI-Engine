@@ -4,8 +4,8 @@ import pytest
 import respx
 from httpx import Response
 
-from backend.modules.ai.client import OpenAIClient, count_tokens
-from backend.modules.ai.exceptions import AIProviderError, AITimeoutError
+from backend.shared.ai.client import OpenAIClient, count_tokens
+from backend.shared.ai.exceptions import AIProviderError, AITimeoutError
 
 
 def test_count_tokens_returns_positive():
@@ -36,7 +36,7 @@ GOOD_RESPONSE = {
 @pytest.mark.asyncio
 @respx.mock
 async def test_cost_recorded_with_budget_tracker(tmp_path):
-    from backend.modules.ai.budget_tracker import BudgetTracker
+    from backend.shared.ai.budget_tracker import BudgetTracker
 
     bt = BudgetTracker(10.0, 0.8, budget_file=tmp_path / "b.json")
     c = OpenAIClient(budget_tracker=bt)

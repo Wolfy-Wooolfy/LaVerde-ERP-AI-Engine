@@ -11,8 +11,8 @@ from loguru import logger
 from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from backend.core.config import settings
-from backend.modules.ai.budget_tracker import PRICING, BudgetTracker, calculate_cost
-from backend.modules.ai.exceptions import AIInvalidResponseError, AIProviderError, AIRateLimitError, AITimeoutError
+from backend.shared.ai.budget_tracker import PRICING, BudgetTracker, calculate_cost
+from backend.shared.ai.exceptions import AIInvalidResponseError, AIProviderError, AIRateLimitError, AITimeoutError
 from backend.modules.ai.schemas import ChatCompletionResponse
 
 # Singleton encoder (gpt-4o-mini uses cl100k_base)

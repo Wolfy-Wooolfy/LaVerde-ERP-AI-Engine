@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.modules.ai.budget_tracker import BudgetTracker, calculate_cost
-from backend.modules.ai.exceptions import BudgetExceededError
+from backend.shared.ai.budget_tracker import BudgetTracker, calculate_cost
+from backend.shared.ai.exceptions import BudgetExceededError
 
 
 @pytest.fixture

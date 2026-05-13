@@ -9,7 +9,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from backend.modules.ai.exceptions import BudgetExceededError
+from backend.shared.ai.exceptions import BudgetExceededError
 
 # Cost per million tokens (USD)
 PRICING: dict[str, dict[str, float]] = {

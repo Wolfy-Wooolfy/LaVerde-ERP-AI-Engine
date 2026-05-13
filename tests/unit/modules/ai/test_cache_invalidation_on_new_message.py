@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.modules.ai.cache import lead_cache_key
+from backend.shared.ai.cache import lead_cache_key
 from backend.modules.ai.schemas import ChatterMessage, LeadContext
 
 

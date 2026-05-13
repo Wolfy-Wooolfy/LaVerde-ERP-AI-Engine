@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.modules.ai.budget_tracker import BudgetTracker
-from backend.modules.ai.cache import AICache
-from backend.modules.ai.exceptions import BudgetExceededError
+from backend.shared.ai.budget_tracker import BudgetTracker
+from backend.shared.ai.cache import AICache
+from backend.shared.ai.exceptions import BudgetExceededError
 from backend.modules.ai.prioritizer import LeadPrioritizer
 from backend.main import app
 

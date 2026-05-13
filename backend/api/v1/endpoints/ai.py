@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from backend.api.deps import get_current_user
 from backend.core.config import settings
 from backend.core.limiter import limiter
-from backend.modules.ai.exceptions import (
+from backend.shared.ai.exceptions import (
     AIFeatureDisabledError,
     AIServiceError,
     BudgetExceededError,

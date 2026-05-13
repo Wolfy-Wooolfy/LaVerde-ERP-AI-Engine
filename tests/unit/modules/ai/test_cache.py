@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.modules.ai.cache import CACHE_SCHEMA_VERSION, AICache, lead_cache_key, overdue_list_cache_key
+from backend.shared.ai.cache import CACHE_SCHEMA_VERSION, AICache, lead_cache_key, overdue_list_cache_key
 
 
 @pytest.fixture

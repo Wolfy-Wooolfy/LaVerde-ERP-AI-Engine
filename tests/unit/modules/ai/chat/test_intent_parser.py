@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.modules.ai.cache import IntentCache
+from backend.shared.ai.cache import IntentCache
 from backend.modules.ai.chat.intent_parser import _parse_intent_json, parse_intent
 from backend.modules.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
 

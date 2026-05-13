@@ -12,8 +12,8 @@ from backend.modules.ai.chat.prompts import ALLOWED_INTENTS, INTENT_PARSING_SYST
 from backend.modules.ai.chat.schemas import ChatMessage, ChatMessageRole, QueryIntent
 
 if TYPE_CHECKING:
-    from backend.modules.ai.cache import IntentCache
-    from backend.modules.ai.client import OpenAIClient
+    from backend.shared.ai.cache import IntentCache
+    from backend.shared.ai.client import OpenAIClient
 
 
 def _build_context_messages(context: list[ChatMessage]) -> list[dict[str, str]]:

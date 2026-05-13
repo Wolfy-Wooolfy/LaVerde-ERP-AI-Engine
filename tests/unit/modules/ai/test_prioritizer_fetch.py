@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.modules.ai.cache import AICache
+from backend.shared.ai.cache import AICache
 from backend.modules.ai.prioritizer import LeadPrioritizer, _parse_ai_response, _completeness_score
 from backend.modules.ai.schemas import ChatCompletionResponse, LeadContext
 

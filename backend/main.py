@@ -32,7 +32,7 @@ from backend.core.exceptions import (
 from backend.core.limiter import limiter
 from backend.core.logging import setup_logging
 from backend.core.metrics import get_uptime, metrics, set_start_time
-from backend.modules.ai.exceptions import AIServiceError, BudgetExceededError
+from backend.shared.ai.exceptions import AIServiceError, BudgetExceededError
 from backend.modules.crm.service import CrmService
 
 # ── Application lifespan ──────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     set_start_time()
 
     # ── Chat session manager (always initialized) ─────────────────────────────
-    from backend.modules.ai.cache import IntentCache
+    from backend.shared.ai.cache import IntentCache
     from backend.modules.ai.chat.session_manager import SessionManager
 
     session_manager = SessionManager()
@@ -68,9 +68,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(f"Display name resolved: '{settings.DISPLAY_NAME}' (set DISPLAY_NAME in .env; restart required to apply)")
 
     if settings.AI_ENABLED:
-        from backend.modules.ai.budget_tracker import BudgetTracker
-        from backend.modules.ai.cache import AICache
-        from backend.modules.ai.client import OpenAIClient
+        from backend.shared.ai.budget_tracker import BudgetTracker
+        from backend.shared.ai.cache import AICache
+        from backend.shared.ai.client import OpenAIClient
         from backend.modules.ai.prioritizer import LeadPrioritizer
 
         budget_tracker = BudgetTracker(
