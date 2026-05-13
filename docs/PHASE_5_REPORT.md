@@ -119,3 +119,64 @@ At $0.0003/message average, the $10/month budget covers approximately **33,000 c
 - [x] No regressions in pre-existing 285 non-e2e tests
 - [x] `docs/AI_CHAT.md` architecture guide
 - [x] `docs/PHASE_5_REPORT.md` (this file)
+
+---
+
+## Phase 5 Bug Hunt + User Journey Verification
+
+After the initial build, a comprehensive bug hunt and user journey simulation were run to validate production readiness. This section covers all findings.
+
+### Verification Layers
+
+| Layer | File | Tests | Pass Rate | AI Cost |
+|---|---|---|---|---|
+| Unit + Integration | `tests/` | 351 total (66 new) | 350/351 (99.7%) | $0.00 |
+| Intent/data regression | `scripts/verify_chat_comprehensive.py` | 100 | 92/100 (92%) | $0.045 |
+| Multi-turn user journeys | `scripts/verify_user_journeys.py` | 44 steps | 40/44 (91%) | $0.018 |
+| **Total verification AI cost** | | | | **~$0.07** |
+
+### Bugs Found and Fixed (14 total)
+
+| # | Component | Bug | Fix |
+|---|---|---|---|
+| 1 | `prompts.py` | `lead_id` missing from intent parser filter schema → `lead_details_by_id` always returned empty | Added `"lead_id": <integer or null>` to JSON schema examples |
+| 2 | `data_fetcher.py` | Site-visit / phone signal handlers scanned only 50 overdue leads × 3 messages → missed most chatter | Replaced with global `mail.message` search across all CRM leads |
+| 3 | `data_fetcher.py` | `Re-Distribution` stage missing from Arabic alias map | Added `"إعادة توزيع"`, `"re distribution"` aliases |
+| 4 | `data_fetcher.py` | `New X` stage missing from Arabic alias map | Added `"new x"`, `"جديد"` aliases |
+| 5 | `data_fetcher.py` | Non-existent stages (Negotiation, Won, Site Visit) in `STAGE_AR_TO_EN` | Removed invalid stages; added NOTE in code |
+| 6 | `prompts.py` | No English examples for `leads_with_phone_attempt_signal` intent | Added 2 EN examples to system prompt |
+| 7 | `data_fetcher.py` | `sp_filter` captured but never applied in `_handle_recommendation_for_salesperson` | Added filter step before scoring sort |
+| 8 | `response_builder.py` | `is_data_empty()` treated `lead_detail` type as empty → successful lead lookups showed "لا تتوفر" | Added `if dtype == "lead_detail": return False` |
+| 9 | `response_builder.py` | `is_data_empty()` treated `recommendations` with 0 leads as empty → no salesperson feedback | Added `if dtype == "recommendations": return False` |
+| 10 | `response_builder.py` | No `signal_no_data` short-circuit → honest "no chatter data" message not shown | Added short-circuit with AR/EN product-gap messages |
+| 11 | `response_builder.py` | No `not_found` short-circuit for lead ID lookup → fell to generic empty-data message | Added short-circuit with lead-specific "not found" message |
+| 12 | `data_fetcher.py` | Recommendation handlers returned no salesperson name / stage → AI couldn't answer "who are the salespeople" | Added `_enrich_lead_info()` enrichment step for top leads |
+| 13 | `prompts.py` + `response_builder.py` | AI-generated follow-ups could reference non-existent stage names | Injected real stage names into Stage 2 prompt; added `_validate_followups()` post-filter |
+| 14 | `prompts.py` | `help_request` / `greeting` conversational prompts produced < 50-char responses with no example questions | Required ≥ 3 example questions and ~150-char minimum in prompt instructions |
+
+### Deferred Items (4) — Require Context-Aware Parser
+
+These 4 failures require the intent parser to extract entity references (lead IDs, salesperson names) from the **previous AI response**, not from the current question. This is an architectural change beyond the Phase 5 scope.
+
+| Journey Step | Example Question | Why It Fails | Phase 6 Fix |
+|---|---|---|---|
+| J4-Q3 | "أعطيني تفاصيل أكتر عن أول واحد" | "first one" → no lead_id extractable from text alone | Context-aware entity extraction |
+| J5-Q3 | "إيه نوع المشكلة بالضبط؟" | "the problem" refers to prior AI-described issue | Context-aware reference resolution |
+| J7-Q3 | "Show me details of the top salesperson there" | "top salesperson" needs prior response salesperson rank | Salesperson drilldown intent |
+| J1-Q2 | "تفاصيل أول واحد" after site-visit empty result | Previous answer has no leads to drill into | Conditional follow-up guard |
+
+### Production Signal — Site Visit Chatter
+
+`scripts/probe_site_visit.py` confirmed zero chatter messages matching site-visit keywords across 1,281 total crm.lead messages. The sales team logs visits outside Odoo (WhatsApp). Response now returns an honest "no chatter data" message with an alternative suggestion rather than a generic empty-state.
+
+---
+
+## Phase 6 Recommendation
+
+| Priority | Feature | Rationale |
+|---|---|---|
+| High | Context-aware entity extraction | Unlocks the 4 deferred journey steps; makes "first one", "that salesperson" work in follow-ups |
+| High | Salesperson-in-stage drilldown intent | Common question pattern: "who in Re-Distribution has the most overdue?" |
+| Medium | Lead search by name (fuzzy) | Support "what's the status of Ahmed Hassan's leads?" without requiring exact IDs |
+| Medium | Stage name fuzzy matching | Edge cases: "Contact in the Future" in long Arabic questions; mixed-language queries |
+| Low | Chatter logging guidance | Inform sales team to log site visits in Odoo chatter so data exists for future queries |
