@@ -55,6 +55,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.limiter = limiter
     set_start_time()
 
+    # ── AI Module Registry ────────────────────────────────────────────────────
+    from backend.modules.crm.ai.registry import register as register_crm
+    register_crm()
+
     # ── Chat session manager (always initialized) ─────────────────────────────
     from backend.shared.ai.cache import IntentCache
     from backend.modules.crm.ai.chat.session_manager import SessionManager
