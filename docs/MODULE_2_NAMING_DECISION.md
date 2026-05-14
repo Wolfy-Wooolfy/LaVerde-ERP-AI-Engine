@@ -2,15 +2,18 @@
 
 > **Decision date:** 2026-05-14  
 > **Decision owner:** Khaled (Sales Manager, La Verde Real Estate)  
-> **Status:** Approved — folder rename pending in a separate commit
+> **Status:** Approved — no folder rename needed; `collections/` already exists from Phase 6
 
 ---
 
 ## Background
 
-During Phase 6 (multi-module architecture), a placeholder folder was created as `backend/modules/accounting/` based on the initial assumption that Module 2 would cover general accounting functionality.
+When documenting the naming decision (commit 4a8b89a), it was assumed that Phase 6 had created a single placeholder folder named `backend/modules/accounting/` for Module 2. Inspection during the rename planning session revealed that Phase 6 had actually created two separate placeholder folders with distinct scopes:
 
-After a detailed business context walkthrough with Khaled, the actual scope is significantly more specific:
+- `backend/modules/collections/` — AR/receivables intelligence (already correctly named for Module 2)
+- `backend/modules/accounting/` — general financial intelligence (different future module, not Module 2)
+
+After a detailed business context walkthrough with Khaled, the confirmed scope of Module 2 is:
 
 **This module is a receivables intelligence and collections management layer — not a general accounting module.**
 
@@ -36,16 +39,18 @@ After a detailed business context walkthrough with Khaled, the actual scope is s
 |-|----------------|-------------------|
 | Module name | Accounting | Collections |
 | Slug | `module_2_accounting` | `module_2_collections` |
-| Placeholder folder | `backend/modules/accounting/` | `backend/modules/collections/` |
+| Placeholder folder | (assumed `accounting/`) | `backend/modules/collections/` (already exists from Phase 6) |
 | Display name (AR) | — | التحصيلات |
 
 ---
 
-## Folder Rename
+## Folder State (No Rename Required)
 
-The rename from `backend/modules/accounting/` to `backend/modules/collections/` will be performed in a **separate atomic commit** after this documentation is approved and committed. Both placeholder folders currently exist; the `accounting/` placeholder will be removed and `collections/` will become the canonical location.
+Inspection of `backend/modules/` during the rename planning session revealed that Phase 6 had already created `backend/modules/collections/` as a distinct placeholder for AR/receivables intelligence. The folder is already correctly named for Module 2.
 
-This document does not perform the rename. The rename commit will reference this document as the source of the decision.
+The separate `backend/modules/accounting/` folder exists for a different future scope: general financial intelligence (budgets, cash flow, reconciliation). It is retained as a future module placeholder, not part of Module 2.
+
+**Conclusion:** No folder rename was performed. This document confirms the naming, not a rename operation.
 
 ---
 

@@ -1,6 +1,10 @@
 # Collections Module
 
-**Status:** 🚧 Coming Soon
+**Detailed business context:** see [`docs/MODULE_2_BUSINESS_CONTEXT.md`](../../../docs/MODULE_2_BUSINESS_CONTEXT.md)
+
+**Status:** Pre-Discovery. Models and fields below are approximate and will be verified against live Odoo in the Discovery phase.
+
+---
 
 ## Planned Scope
 
@@ -23,3 +27,14 @@ All data access is strictly read-only. No invoices, payments, or records are eve
 3. "Which accounts have had no payment activity in 60 days?"
 4. "What is our total overdue receivables amount by aging bucket?"
 5. "Which customers have a history of late payments but are currently current?"
+
+---
+
+## La Verde-Specific Notes
+
+La Verde uses three Odoo apps that this module reads from:
+- Accounting (Standard Odoo)
+- RS Accounting (Custom — checks, payments, penalties, discounts)
+- Collections Mgmt (Custom — installment list views by status)
+
+The full workflow, installment types, and column definitions are documented in the business context file above.
