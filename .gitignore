@@ -25,3 +25,6 @@ build/
 Thumbs.db
 node_modules/
 frontend/node_modules/
+
+# Discovery script transient output (curated doc committed separately)
+scripts/discover_collections_output.txt
