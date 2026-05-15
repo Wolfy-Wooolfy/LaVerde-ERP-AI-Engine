@@ -14,8 +14,10 @@
 | Slug | `module_2_collections` |
 | Display Name (EN) | Collections |
 | Display Name (AR) | التحصيلات |
-| Primary User | Collections Officer (موظف تحصيلات) |
-| Secondary User | Khaled — Sales Manager, high-level dashboards only |
+| Primary User | Board of Directors (Chairman, CEO, CFO) — مجلس الإدارة (رئيس مجلس الإدارة، الرئيس التنفيذي، المدير المالي) |
+| Secondary User | Khaled — Sales Manager, builder and curator of the module, not the daily target user |
+
+> **Note / ملاحظة:** The daily Collections Officer (موظف تحصيلات) workflow is explicitly deferred to a future module / phase — see [Out of Scope](#16-out-of-scope-explicit).
 
 **Why "Collections" and not "Accounting":** The module name matches the existing Odoo app "Collections Mgmt" that the daily user (Collections Officer) already uses. This provides immediate familiarity and clearly distinguishes the scope from Standard Odoo Accounting. See `docs/MODULE_2_NAMING_DECISION.md`.
 
@@ -25,17 +27,31 @@
 
 ## 2. Target User Persona
 
-**Primary: Collections Officer (موظف تحصيلات)**
-- Role: Accountant under the Accounting department
-- Uses the system daily
-- Needs: real-time installment status, overdue tracking, check status, outstanding balances per customer
-- Current tool: Collections Mgmt app (Odoo custom)
+**Primary: Board of Directors — مجلس الإدارة**
+- Role: Chairman (primary), CEO, CFO
+- Use frequency: on-demand, not daily — opens the tool for review, decisions, and ad-hoc questions
+- Needs: aggregate KPIs, project-level performance comparison, trend visibility, on-demand drill-down into any detail
+- Explicit Chairman request: "complete visibility into any detail at any time"
 
-**Secondary: Khaled (Sales Manager — موظف مبيعات)**
-- Uses high-level dashboards only
-- Needs: portfolio summary, total outstanding, late receivables, trend analysis
+**Builder / Curator: Khaled (Sales Manager — موظف مبيعات)**
+- Builds and maintains the tool on his own initiative
+- Validates every figure against live Odoo before presenting to the Board
+- Not a daily consumer of the tool's output
 
-**NOT a target user:** Standard Odoo Accounting users. They have native Odoo financial reporting and do not need this module.
+**Deferred: Collections Officer (موظف تحصيلات)**
+- Daily operational user of the existing Collections Mgmt app
+- Will NOT be a target user of this MVP
+- A future module or future phase may address this persona, but it is explicitly out of scope here
+
+**NOT a target user in this MVP:** Standard Odoo Accounting users, and Collections Officers using the daily Collections Mgmt workflow.
+
+### 2.1 Persona Evolution
+
+**Original assumption (initial discovery phase):** The primary target persona was the Collections Officer (موظف تحصيلات) — the daily operational user of the existing Collections Mgmt app. The initial framing assumed the module would address operational needs: overdue installment tracking, follow-up workflows, and per-installment status views.
+
+**What changed:** A subsequent strategy discussion confirmed that the actual driver was a Board-level request for executive visibility. The Chairman's explicit request — "complete visibility into any detail at any time" — reframed the entire MVP from an operational tool to an executive intelligence layer. The Collections Officer persona is explicitly deferred.
+
+**Technical implication:** Phase 1 discovery findings remain fully valid. The data sources, Odoo models, field names, record counts, and linkage paths do not change as a result of this pivot. The feature scope, KPIs, and AI interaction patterns — which shift from operational to executive — are to be defined in `MODULE_2_MVP_DESIGN.md` (Work Item 2).
 
 ---
 
@@ -474,3 +490,6 @@ This module will NOT do:
 - Manual installment status changes — system handles automatically
 - Writing back to Odoo — READ-ONLY architectural rule is absolute
 - Replacing Collections Mgmt, RS Accounting, or Accounting apps — this is an intelligence layer on top of them
+- Collections Officer daily workflow — operational follow-up logging, per-installment manual actions, and the daily filter-by-status views of Collections Mgmt remain in the existing Odoo app
+- Per-salesperson operational dashboards — sales team management views are not a Board-level concern in this MVP
+- Predictive analytics, alerts, and notifications — deferred until the Board confirms what is "alert-worthy" through actual use
