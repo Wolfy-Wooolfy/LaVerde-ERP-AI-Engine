@@ -121,7 +121,33 @@ Full type list not reproduced — `name` fields sanitized per PII policy. Type I
 
 **Programmatic cross-check result:** The posting-date field (`rs.account.payment.installment.date`) is **NOT** present on `rs.installment`. KPI 6 date-range grouping requires a join to `rs.account.payment.installment` — it cannot filter `rs.installment` directly.
 
-**Status: RESOLVED** — Project IDs 1, 2, 3 confirmed active. KPI 6 join path confirmed necessary.
+### §6.4 — Confirmed Join Path for KPI 4 and KPI 6
+
+Confirmed via `fields_get` on `rs.account.payment.installment` and `rs.account.payment.installment.line` (2026-05-15, 2 additional RPCs after the main Phase 2 run):
+
+```
+rs.installment.id
+  → rs.account.payment.installment.line.installment_id
+      (many2one → rs.installment)
+  → rs.account.payment.installment.line.payment_id
+      (many2one → rs.account.payment.installment)
+  → rs.account.payment.installment.date
+      (datetime — payment posting date, confirmed in §2)
+```
+
+Implementers can use Odoo's native dotted-field traversal — no manual joins required:
+
+```python
+domain = [
+    ('installment_id', 'in', installment_ids),
+    ('payment_id.date', '>=', period_start),
+    ('payment_id.date', '<=', period_end),
+]
+# Query model: rs.account.payment.installment.line
+# Aggregate: SUM(amount) grouped by payment_id.date:month
+```
+
+**Status: RESOLVED** — Project IDs 1, 2, 3 confirmed active. KPI 4 and KPI 6 join path fully confirmed.
 
 ---
 
@@ -203,7 +229,15 @@ Hypothesized result based on snapshot evidence: The 2026-05-14 Late snapshot sho
 
 ### U1 — Join field name on `rs.account.payment.installment`
 
-`installment_id` does not exist on `rs.account.payment.installment`. The correct relational field linking payment installments back to `rs.installment` is unknown. Resolve in Phase 3 by running `fields_get` on `rs.account.payment.installment` and inspecting `many2one` fields with `comodel_name = 'rs.installment'`.
+**RESOLVED 2026-05-15 via follow-up micro-discovery (2 RPCs)**
+
+`installment_id` does not exist on `rs.account.payment.installment`. The correct relational field linking payment installments back to `rs.installment` is on the `.line` submodel, not the header.
+
+**Resolution:**
+- Linkage field on `rs.account.payment.installment`: none (no direct many2one back to `rs.installment`).
+- Linkage field on `rs.account.payment.installment.line`: `installment_id` (many2one → `rs.installment`).
+- Header link from line to parent: `payment_id` (many2one → `rs.account.payment.installment`).
+- Full join path documented in §6.4.
 
 ### U2 — 13 installment types vs. assumed 8
 

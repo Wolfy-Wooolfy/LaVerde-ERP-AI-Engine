@@ -278,6 +278,15 @@ Domain: date-range filter — exact field names not confirmed in Phase 1
 Fields: `x_studio_actual_paid_amount` (Studio field, confirmed),
 `amount` (native, confirmed)
 
+Payment-date filtering note: The payment posting date is on
+`rs.account.payment.installment`, NOT on `rs.installment`. The
+payment-date period filter uses the join path documented in
+`MODULE_2_DISCOVERY_PHASE_2.md §6.4`:
+  rs.installment ← line.installment_id, line.payment_id → header.date
+In Odoo domain terms: query `rs.account.payment.installment.line`
+with `[('installment_id', 'in', <ids>), ('payment_id.date', ...)]`
+and aggregate amount by month.
+
 **Baseline Value (from 2026-05-14 snapshot)**
 Not available. The 2026-05-14 snapshot in `MODULE_2_BUSINESS_CONTEXT.md`
 §9 shows all-time portfolio totals, not period-specific figures.
@@ -302,14 +311,10 @@ table. Allows the Chairman to identify which months performed well or
 poorly within the year.
 
 **Open Questions / Phase 2 Dependencies**
-[PHASE 2 VERIFICATION REQUIRED] Three dependencies:
-1. Date field names on `rs.installment` — Phase 1 sampled fields
-   alphabetically and returned only `activity_*` and `message_*`
-   infrastructure fields. No date field name (due date, payment date,
-   posting date) was confirmed. Both the MTD/YTD filter and the
-   6-Month Trend (KPI 6) depend on resolving this.
-2. Denominator definition — see Open Strategic Question Q1.
-3. YTD period definition — calendar year vs fiscal year, see Open
+Date field dependency resolved — see `MODULE_2_DISCOVERY_PHASE_2.md §6.4`.
+Two remaining dependencies:
+1. Denominator definition — see Open Strategic Question Q1.
+2. YTD period definition — calendar year vs fiscal year, see Open
    Strategic Question Q2.
 
 ---
@@ -408,12 +413,15 @@ For each of the 6 trailing calendar months M:
 ```
 
 **Data Source**
-Model: `rs.installment`
-Domain: date-range filter covering trailing 6 months from today
-Grouping: by calendar month
-Field: `x_studio_actual_paid_amount` (Odoo Studio field, confirmed in
-`MODULE_2_DISCOVERY_PHASE_1.md` §3 and `MODULE_2_BUSINESS_CONTEXT.md`
-§8)
+Model: `rs.account.payment.installment.line` (via join from `rs.installment`
+— see `MODULE_2_DISCOVERY_PHASE_2.md §6.4`)
+Domain: date-range filter covering trailing 6 months from today,
+applied on `payment_id.date` (posting datetime on the header record)
+Grouping: by `payment_id.date:month` (calendar month)
+Field: `amount` on `rs.account.payment.installment.line`
+
+Join path (`MODULE_2_DISCOVERY_PHASE_2.md §6.4`):
+  rs.installment ← line.installment_id, line.payment_id → header.date
 
 **Baseline Value (from 2026-05-14 snapshot)**
 Not available. The 2026-05-14 snapshot shows cumulative totals only.
@@ -440,10 +448,9 @@ a larger chart canvas, plus a table below: Month | Total Amount Billed
 the exact figures behind each month's data point.
 
 **Open Questions / Phase 2 Dependencies**
-[PHASE 2 VERIFICATION REQUIRED] Date field names on `rs.installment`
-not confirmed in Phase 1 — same dependency as KPI 4. Additionally,
-see Open Strategic Question Q4 (should the month axis use installment
-due date or payment posting date?).
+Date field dependency resolved — see `MODULE_2_DISCOVERY_PHASE_2.md §6.4`.
+Remaining: see Open Strategic Question Q4 (should the month axis use
+installment due date or payment posting date?).
 
 ---
 
