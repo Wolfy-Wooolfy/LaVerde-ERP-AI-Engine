@@ -1,0 +1,298 @@
+========================================================================
+  Module 2 — Collections Discovery Phase 2
+  Run at : 2026-05-15T18:08:32.592124
+  Today  : 2026-05-15
+  ALLOWED_METHODS: ['fields_get', 'read', 'read_group', 'search', 'search_count', 'search_read']
+  RPC budget ceiling: 200
+  READ-ONLY. No writes. No OpenAI. AI cost = $0.00
+========================================================================
+
+[AUTH] Authenticating...
+  OK uid=1947
+
+========================================================================
+  SECTION 1: Date Fields on rs.installment
+========================================================================
+  Filter patterns applied to field names: ('date', 'due', 'payment', 'post', 'schedule', 'maturity')
+  Also including all fields whose Odoo type is 'date' or 'datetime'.
+  Today (used as boundary in S2 domain candidates): 2026-05-15
+
+  Found 13 date-candidate fields:
+
+  FIELD                                         TYPE          LABEL
+  --------------------------------------------- ------------  ----------------------------------------
+  create_date                                   datetime      Created on
+  date                                          date          Date
+  due_amount                                    monetary      Due Amount
+  my_activity_date_deadline                     date          My Activity Deadline
+  payment_line                                  one2many      Payment Lines
+  payment_plan_id                               many2one      Payment Plan
+  payment_state                                 selection     Payment Status
+  payment_term_id                               many2one      Payment Term
+  payment_type                                  selection     Payment Type
+  payment_type_id                               many2one      Payment Period
+  termination_payment_id                        many2one      Termination Payment
+  total_due_amount                              monetary      Total Due Amount
+  write_date                                    datetime      Last Updated on
+
+  --- 3 sample records — date-candidate fields only (partner_id excluded) ---
+
+  --- Sample 1 ---
+    id                                            = 36066
+    create_date                                   = 2025-07-29 15:44:54
+    date                                          = 2018-02-17
+    due_amount                                    = 0.0
+    my_activity_date_deadline                     = False
+    payment_line                                  = []
+    payment_plan_id                               = False
+    payment_state                                 = paid
+    payment_term_id                               = [2128, 'PT01478 (Opening Balance)']
+    payment_type                                  = inbound
+    payment_type_id                               = [3, 'Quarterly']
+    termination_payment_id                        = False
+    total_due_amount                              = 0.0
+    write_date                                    = 2026-04-15 16:47:36
+    state                                         = post
+    amount                                        = 17650.0
+    project_id                                    = [1, 'Project#New Capital']
+    installment_type_id                           = [2, 'Down Payment']
+
+  --- Sample 2 ---
+    id                                            = 49847
+    create_date                                   = 2025-07-29 15:44:54
+    date                                          = 2018-02-17
+    due_amount                                    = 0.0
+    my_activity_date_deadline                     = False
+    payment_line                                  = []
+    payment_plan_id                               = False
+    payment_state                                 = paid
+    payment_term_id                               = [2603, 'PT01953 (Opening Balance)']
+    payment_type                                  = inbound
+    payment_type_id                               = [3, 'Quarterly']
+    termination_payment_id                        = False
+    total_due_amount                              = 0.0
+    write_date                                    = 2026-04-15 16:47:36
+    state                                         = post
+    amount                                        = 67500.0
+    project_id                                    = [1, 'Project#New Capital']
+    installment_type_id                           = [2, 'Down Payment']
+
+  --- Sample 3 ---
+    id                                            = 47693
+    create_date                                   = 2025-07-29 15:44:54
+    date                                          = 2018-02-25
+    due_amount                                    = 0.0
+    my_activity_date_deadline                     = False
+    payment_line                                  = []
+    payment_plan_id                               = False
+    payment_state                                 = paid
+    payment_term_id                               = [2529, 'PT01879 (Opening Balance)']
+    payment_type                                  = inbound
+    payment_type_id                               = [3, 'Quarterly']
+    termination_payment_id                        = False
+    total_due_amount                              = 0.0
+    write_date                                    = 2026-04-20 16:13:52
+    state                                         = post
+    amount                                        = 249750.0
+    project_id                                    = [1, 'Project#New Capital']
+    installment_type_id                           = [2, 'Down Payment']
+
+  Due-date candidates   : ['date']
+  Payment/posting-date  : ['payment_type', 'payment_type_id', 'payment_state', 'payment_line', 'payment_term_id', 'payment_plan_id', 'termination_payment_id']
+  Ambiguous ('date')    : ['date']
+
+========================================================================
+  SECTION 2: "Late" Installment Domain
+========================================================================
+  Baseline SUM(amount)    =         373,147,294.00 EGP
+  Baseline SUM(due_amount)=         312,604,879.40 EGP
+  Tolerance: ±1.00 EGP
+  Today (boundary for Candidates B/C): 2026-05-15
+
+  Due-date field selected for domain tests: date
+  Candidate D: no boolean flag field (is_late / overdue / is_overdue / late) found — skipped.
+
+  --- Candidate A ---
+    Domain: [('payment_state', 'in', ['unpaid', 'partial'])]
+    search_count = 13433
+    SUM(amount)    =       2,845,275,490.88  delta=+2,472,128,196.88  NO MATCH
+    SUM(due_amount)=       2,775,571,377.28  delta=+2,462,966,497.88  NO MATCH
+
+  --- Candidate B ---
+    Domain: [('payment_state', 'in', ['unpaid', 'partial']), ('date', '<', '2026-05-15')]
+    search_count = 2135
+    SUM(amount)    =         439,964,215.00  delta=+66,816,921.00  NO MATCH
+    SUM(due_amount)=         377,412,445.40  delta=+64,807,566.00  NO MATCH
+
+  --- Candidate C ---
+    Domain: [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '<', '2026-05-15')]
+    search_count = 1971
+    SUM(amount)    =         376,068,794.00  delta= +2,921,500.00  NO MATCH
+    SUM(due_amount)=         313,597,379.40  delta=   +992,500.00  NO MATCH
+
+  !! NO candidate matched both baselines within ±1.0 EGP.
+  !! STOPPING — data inconsistency. Report to Khaled before implementing.
+  !! Closest: Candidate C  amount delta=+2,921,500.00 EGP
+
+========================================================================
+  SECTION 3: Pending Check Exposure Reconciliation
+========================================================================
+  Baseline (derived from snapshot): 520,455,684.10 EGP
+  Formula: SUM(paid_amount) - SUM(x_studio_actual_paid_amount)
+
+  SUM(paid_amount)                  =       3,491,309,772.95
+  SUM(x_studio_actual_paid_amount)  =       2,970,603,504.85
+  SUM(check_pending_amount)         =         518,235,384.10
+  SUM(check_approved_amount)        =          74,635,668.00
+
+  DERIVED exposure (paid - actual)  =         520,706,268.10
+  vs. 2026-05-14 baseline           =         520,455,684.10
+  Delta vs. baseline                =            +250,584.00  NOTE: data likely changed since 2026-05-14 snapshot
+
+  DERIVED vs. check_pending_amount  =          +2,470,884.00
+  CONCLUSION: check_pending_amount DIFFERS from derived formula by +2,470,884.00 EGP — use derived formula for KPI 3
+  => Stick with derived formula (paid_amount - x_studio_actual_paid_amount).
+
+========================================================================
+  SECTION 4: rs.installment.type Records
+========================================================================
+  Expected: 8 types per Business Context §7 (Down Payment, Regular, Maintenance, Admin Fees, Garage, Club, Facilities, Penalties)
+  Available fields: ['category_code', 'category_id', 'create_date', 'create_uid', 'display_name', 'facility_id', 'id', 'name', 'write_date', 'write_uid']
+
+  Found 13 records:
+
+     ID  NAME                                             SEQ  OTHER
+  -----  ---------------------------------------------  -----  ----------------------------------------
+      1  [REDACTED:name]                                       {'category_id': [1, 'Reservation'], 'facility_id': False, 'category_code': 'RES', 'display_name': 'Reservation'}
+      2  [REDACTED:name]                                       {'category_id': [2, 'Down Payment'], 'facility_id': [1, 'Pool'], 'category_code': 'DNP', 'display_name': 'Down Payment'}
+      3  [REDACTED:name]                                       {'category_id': [3, 'Regular'], 'facility_id': False, 'category_code': 'REG', 'display_name': 'Regular'}
+      4  [REDACTED:name]                                       {'category_id': [4, 'Maintenance'], 'facility_id': False, 'category_code': 'MIN', 'display_name': 'Maintenance'}
+      5  [REDACTED:name]                                       {'category_id': [5, 'Facilities'], 'facility_id': [1, 'Pool'], 'category_code': 'FAC', 'display_name': 'Pool'}
+      6  [REDACTED:name]                                       {'category_id': [5, 'Facilities'], 'facility_id': [5, 'Club'], 'category_code': 'FAC', 'display_name': 'Club'}
+      7  [REDACTED:name]                                       {'category_id': [5, 'Facilities'], 'facility_id': [2, 'Garage'], 'category_code': 'FAC', 'display_name': 'Garage'}
+      8  [REDACTED:name]                                       {'category_id': [6, 'Penalty'], 'facility_id': False, 'category_code': 'PNT', 'display_name': 'Penalty'}
+      9  [REDACTED:name]                                       {'category_id': [7, 'Modification'], 'facility_id': False, 'category_code': 'MOD', 'display_name': 'Modification'}
+     10  [REDACTED:name]                                       {'category_id': [8, 'Service'], 'facility_id': False, 'category_code': 'SRV', 'display_name': 'Service'}
+     11  [REDACTED:name]                                       {'category_id': [9, 'Other Service'], 'facility_id': False, 'category_code': 'OSR', 'display_name': 'Other Service'}
+     12  [REDACTED:name]                                       {'category_id': [11, 'Termination'], 'facility_id': False, 'category_code': 'TER', 'display_name': 'Termination'}
+     13  [REDACTED:name]                                       {'category_id': [8, 'Service'], 'facility_id': [7, 'Administrative Fees'], 'category_code': 'SRV', 'display_name': 'Administrative Fees'}
+
+  Penalties type: ID=8  name='Penalty'
+
+========================================================================
+  SECTION 5: rs.structure.project Inventory
+========================================================================
+  Phase 1 error: queried rs.structure.project.type (1 record, wrong model).
+  This section queries rs.structure.project directly.
+  Expected: 3 projects — New Capital (id=1), Cassette (id=2), La puerta (id=3)
+  Fields retrieved: ['id', 'name', 'active', 'code', 'state']
+
+  Found 3 project record(s):
+
+     ID  NAME                                      ACTIVE  OTHER
+  -----  ----------------------------------------  ------  ------------------------------
+      3  [REDACTED:name]                             True  {'code': 'La puerta', 'state': 'new'}
+      2  [REDACTED:name]                             True  {'code': 'Cassette', 'state': 'new'}
+      1  [REDACTED:name]                             True  {'code': 'New Capital', 'state': 'new'}
+
+  CONFIRMED: New Capital
+  CONFIRMED: Cassette
+  CONFIRMED: La puerta
+
+========================================================================
+  SECTION 6: rs.account.payment.installment Basic Inventory
+========================================================================
+  Scope: confirm payment posting date field only (per Dependency #5 scope).
+  Q4 resolved: payment posting date (cash inflow) drives KPI 6 trend axis.
+  Date field priority order: ('date_posted', 'posting_date', 'post_date', 'payment_date', 'date_payment', 'date_done', 'date_validate', 'date_confirmed', 'effective_date', 'value_date', 'date')
+
+  Total records: 4208
+
+  Date-candidate fields on rs.account.payment.installment (4 found):
+
+  FIELD                                         TYPE          LABEL
+  --------------------------------------------- ------------  ----------------------------------------
+  create_date                                   datetime      Created on
+  date                                          datetime      Date
+  my_activity_date_deadline                     date          My Activity Deadline
+  write_date                                    datetime      Last Updated on
+
+  --- read_group by state (state distribution) ---
+    cancel                                               3
+    draft                                                7
+    post                                              4198
+
+  --- 3 sample records — date fields + state + installment_id (no PII) ---
+  search_read failed: Odoo RPC error: {'code': 200, 'message': 'Odoo Server Error', 'data': {'name': 'builtins.ValueError', 'debug': 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/odoo/http.py", line 2167, in _transactioning\n    return service_model.retrying(func, env=self.env)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 157, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 2134, in _serve_ir_http\n    response = self.dispatcher.dispatch(rule.endpoint, args)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 2382, in dispatch\n    result = self.request.registry[\'ir.http\']._dispatch(endpoint)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/addons/base/models/ir_http.py", line 333, in _dispatch\n    result = endpoint(**request.params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 754, in route_wrapper\n    result = endpoint(self, *args, **params_ok)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/addons/base/controllers/rpc.py", line 178, in jsonrpc\n    return dispatch_rpc(service, method, args)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 412, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 59, in dispatch\n    res = execute_kw(db, uid, *params[3:])\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 82, in execute_kw\n    return execute(db, uid, obj, method, *args, **kw or {})\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 88, in execute\n    res = execute_cr(cr, uid, obj, method, *args, **kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 73, in execute_cr\n    result = retrying(partial(odoo.api.call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 157, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/odoo/api.py", line 535, in call_kw\n    result = getattr(recs, name)(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 6143, in search_read\n    records = self.search_fetch(domain or [], fields, offset=offset, limit=limit, order=order)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 1784, in search_fetch\n    fields_to_fetch = self._determine_fields_to_fetch(field_names)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 4192, in _determine_fields_to_fetch\n    raise ValueError(f"Invalid field {field_name!r} on model {self._name!r}")\nValueError: Invalid field \'installment_id\' on model \'rs.account.payment.installment\'\n', 'message': "Invalid field 'installment_id' on model 'rs.account.payment.installment'", 'arguments': ["Invalid field 'installment_id' on model 'rs.account.payment.installment'"], 'context': {}}}
+
+  Best payment posting date field: date
+
+  --- Payment Posting Date Field Location (A4 follow-up) ---
+  Field 'date' confirmed on rs.account.payment.installment.
+  Field 'date' is ALSO present on rs.installment.
+  => KPI 6 can filter rs.installment directly. No join needed.
+  => KPI 4 payment-date period filter also uses rs.installment directly.
+
+========================================================================
+  SECTION 7: Late + Pending Check Overlap
+========================================================================
+  Business Context §15 open item: late installments with pending checks.
+  SKIPPED: Section 2 found no winning Late domain. Cannot compute overlap.
+
+========================================================================
+  SECTION 8: Cross-check: Total Reconciliation Against 2026-05-14 Snapshot
+========================================================================
+  Aggregating all 9 columns over rs.installment with no domain.
+  Group 1 (5 baselined columns): pass/fail within ±1.00 EGP
+  Group 2 (4 reference columns): totals only, no snapshot baseline
+
+  --- Group 1 — Baselined columns (5): pass/fail ---
+
+  Cross-check vs 2026-05-14 snapshot (All Installments):
+  FIELD                                                     COMPUTED             SNAPSHOT          DELTA  RESULT
+  --------------------------------------------- -------------------- -------------------- --------------  ------
+  amount                                            6,266,498,967.23     6,123,549,625.23 +142,949,342.00  FAIL
+  paid_amount                                       3,491,309,772.95     3,491,180,448.95    +129,324.00  FAIL
+  x_studio_actual_paid_amount                       2,970,603,504.85     2,970,724,764.85    -121,260.00  FAIL
+  due_amount                                        2,775,189,194.28     2,632,369,176.28 +142,820,018.00  FAIL
+  total_due_amount                                  3,293,424,578.38     3,152,824,860.38 +140,599,718.00  FAIL
+
+  Group 1 result: SOME FAILURES — investigate before implementing
+
+  --- Group 2 — Reference columns (4): totals only, no snapshot baseline ---
+  FIELD                                                               TOTAL
+  -------------------------------------------------- ----------------------
+  x_studio_bank_collected_amount                             133,131,754.00
+  x_studio_executive_outstanding_amount                      405,060,716.25
+  check_pending_amount                                       518,235,384.10
+  check_approved_amount                                       74,635,668.00
+
+  (no 2026-05-14 snapshot baseline available for Group 2 columns)
+
+  --- Reconciliation equation checks (Business Context §8) ---
+  EQ1: amount == paid_amount + due_amount
+       6,266,498,967.23 == 6,266,498,967.23  delta=         +0.00  PASS
+  EQ2: amount == x_studio_actual_paid_amount + total_due_amount
+       6,266,498,967.23 == 6,264,028,083.23  delta= +2,470,884.00  FAIL
+
+========================================================================
+  DEPENDENCY RESOLUTION SUMMARY
+  Run date  : 2026-05-15T18:08:35.259416
+  Today     : 2026-05-15
+  RPC used  : 18 / 200
+  AI cost   : $0.00 (no OpenAI calls)
+========================================================================
+
+  #     DEPENDENCY                                  STATUS        KEY FINDING
+  ----  ------------------------------------------  ------------  -------------------------------------------------------
+  #1    Late installment domain                     UNRESOLVED    No candidate matched both baselines
+  #2    Date field names on rs.installment          RESOLVED      Due-date: date; Posting-date: date on rs.account.paymen
+  #3    Collection Rate denominator (Q1=Option a)   RESOLVED      Denominator = installments with due_date in period. Fie
+  #4    rs.structure.project records                RESOLVED      3 project(s) fetched
+  #5    Payment model date field (scoped)           RESOLVED      Posting-date: date
+  #6    rs.installment.type records                 RESOLVED      13 type(s) fetched
+  #7    check_pending_amount vs derived formula     RESOLVED      check_pending_amount DIFFERS from derived formula by +2
+  #8    Late + pending check overlap                RESOLVED      Overlap count: 0
+
+  Snapshot cross-check (S8): FAILURES — see S8 output above
+========================================================================

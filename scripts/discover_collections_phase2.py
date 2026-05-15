@@ -66,7 +66,7 @@ SNAPSHOT_LATE = {
     "due_amount":                    312_604_879.40,
     "total_due_amount":              312_604_879.40,
 }
-# paid_amount − x_studio_actual_paid_amount from 2026-05-14 snapshot
+# paid_amount - x_studio_actual_paid_amount from 2026-05-14 snapshot
 PENDING_CHECK_EXPOSURE_BASELINE = 520_455_684.10
 
 TOLERANCE_EGP = 1.00  # ±1 EGP pass/fail threshold
@@ -247,15 +247,15 @@ def try_read_group_by(client, uid, model, groupby_field, label):
 
 # ── AUTHENTICATION ────────────────────────────────────────────────────────────
 
-def connect():
-    client = httpx.Client()
+def connect(client):
+    """Authenticate against Odoo using an already-open httpx.Client."""
     print("\n[AUTH] Authenticating...")
     uid = rpc(client, "common", "authenticate",
               [ODOO_DB, ODOO_USER, ODOO_KEY, {}])
     if not uid:
         raise RuntimeError("Auth failed — check .env credentials")
     print(f"  OK uid={uid}")
-    return client, uid
+    return uid
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -456,7 +456,7 @@ def section2_late_domain(client, uid, date_field_names, all_fields):
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 3 — Pending Check Exposure Reconciliation
-# Goal: confirm SUM(paid_amount) − SUM(x_studio_actual_paid_amount) ≈ 520.5M
+# Goal: confirm SUM(paid_amount) - SUM(x_studio_actual_paid_amount) ≈ 520.5M
 #       and compare to SUM(check_pending_amount).
 # Resolves: Dependency #7
 # ═════════════════════════════════════════════════════════════════════════════
@@ -464,7 +464,7 @@ def section2_late_domain(client, uid, date_field_names, all_fields):
 def section3_pending_check(client, uid):
     header(3, "Pending Check Exposure Reconciliation")
     print(f"  Baseline (derived from snapshot): {PENDING_CHECK_EXPOSURE_BASELINE:,.2f} EGP")
-    print("  Formula: SUM(paid_amount) − SUM(x_studio_actual_paid_amount)")
+    print("  Formula: SUM(paid_amount) - SUM(x_studio_actual_paid_amount)")
 
     agg_fields = [
         "paid_amount", "x_studio_actual_paid_amount",
@@ -481,7 +481,7 @@ def section3_pending_check(client, uid):
     print(f"  SUM(x_studio_actual_paid_amount)  = {totals['x_studio_actual_paid_amount']:>22,.2f}")
     print(f"  SUM(check_pending_amount)         = {native:>22,.2f}")
     print(f"  SUM(check_approved_amount)        = {totals['check_approved_amount']:>22,.2f}")
-    print(f"\n  DERIVED exposure (paid − actual)  = {derived:>22,.2f}")
+    print(f"\n  DERIVED exposure (paid - actual)  = {derived:>22,.2f}")
     print(f"  vs. 2026-05-14 baseline           = {PENDING_CHECK_EXPOSURE_BASELINE:>22,.2f}")
     print(f"  Delta vs. baseline                = {delta_vs_baseline:>+22,.2f}  "
           + ("PASS" if abs(delta_vs_baseline) <= TOLERANCE_EGP
@@ -498,7 +498,7 @@ def section3_pending_check(client, uid):
             f"{delta_derived_native:+,.2f} EGP — use derived formula for KPI 3"
         )
         print(f"  CONCLUSION: {conclusion}")
-        print("  => Stick with derived formula (paid_amount − x_studio_actual_paid_amount).")
+        print("  => Stick with derived formula (paid_amount - x_studio_actual_paid_amount).")
 
     return totals, conclusion
 
@@ -956,9 +956,9 @@ def main():
     check_conclusion   = "not computed"
 
     try:
-        client, uid = connect()
+        with httpx.Client() as client:
+            uid = connect(client)
 
-        with client:
             date_field_names, all_fields = section1_date_fields(client, uid)
 
             late_domain, due_field = section2_late_domain(
@@ -986,7 +986,7 @@ def main():
                 overlap_count, check_conclusion,
             )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"\n!! FATAL ERROR: {e}")
         import traceback
         traceback.print_exc()
