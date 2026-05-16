@@ -146,3 +146,122 @@ is production-ready from a numeric-correctness standpoint.
   a 2026-06-16 match if domain semantics change in Odoo.
 
 ---
+
+## Session 2 — 2026-05-16 — KPI 1 Backend + verify_kpi2 fixes
+
+### Decision 2.1 — KPI 1 domain: `state='post'` (not empty)
+
+- **Choice:** Total Portfolio Value uses domain
+  `[('state', '=', 'post')]` and aggregates `SUM(amount)` across
+  all posted `rs.installment` records (~42,443 records).
+- **Rationale:** The KPI is defined in
+  `docs/MODULE_2_MVP_DESIGN.md §3.2 KPI 1` as the portfolio
+  total matching the Odoo "All Installments" view. The original
+  design specified an empty domain; this was corrected during
+  live verification (see Decision 2.4).
+- **Baseline (2026-05-14):** 6,123,549,625.23 EGP at ~42,443
+  posted records. (The original design cited 42,970 — the total
+  including draft and cancelled — which was incorrect notation
+  for the baseline figure. The 6.12B number itself was always
+  correct.)
+
+### Decision 2.2 — verify_kpi2_live.py display bug fixes
+
+- **Choice:** Fixed two display bugs surfaced at the end of
+  Session 1:
+  1. Range-check messages had inverted comparison operators in
+     their f-strings (now corrected: `>=` and `<=`).
+  2. The `domain[2][2]` date value was not asserted (now asserted
+     to be a valid ISO date within ±1 day of UTC today).
+- **Rationale:** The assertions themselves were already correct
+  in Session 1; only the log message strings were misleading.
+  Adding the missing date-value assertion closes a small but real
+  coverage gap.
+- **Method:** Fix applied before any KPI 1 code so
+  `verify_kpi1_live.py` could be modelled on a clean template.
+- **Post-fix verification (2026-05-16):** 24 assertions, all
+  PASS. No production impact on KPI 2 itself (backend value
+  318,626,200.40 EGP, 1,981 records — identical to Session 1
+  verification result).
+
+### Decision 2.3 — KPI 1 cache key independence
+
+- **Choice:** Cache keys are prefixed per-KPI
+  (`kpi:late_uncollected:...` vs `kpi:total_portfolio_value:...`)
+  so each KPI's cache lifecycle is independent.
+- **Rationale:** Prevents any future cross-KPI cache pollution and
+  allows each KPI to be invalidated on its own if needed.
+- **Scaling note (future sessions):** The per-KPI module-level
+  constant pattern (`_CACHE_KEY_PREFIX`, `_CACHE_KEY_PREFIX_KPI1`)
+  will not scale cleanly past 3-4 KPIs. Session 3 will refactor
+  to a dict or per-function local constants when KPI 3 is added.
+
+### Decision 2.4 — KPI 1 domain correction: `state='post'`, not empty
+
+- **Choice:** KPI 1 domain is `[('state', '=', 'post')]`, not
+  the empty list `[]` originally specified in MVP Design §3.2
+  KPI 1.
+- **Discovery:** During Session 2 verification, the empty-domain
+  query returned 6,266,498,967.23 EGP (42,970 records), but the
+  Odoo "All Installments" UI showed 6,123,549,625.23 EGP.
+  Investigation script (`scripts/investigate_kpi1_delta.py`)
+  proved the Odoo view applies a `state='post'` filter at the
+  view layer, excluding 19 draft records (8,699,849.00 EGP) and
+  508 cancelled records (134,249,493.00 EGP) — total 527 records
+  / 142,949,342.00 EGP delta, accounted for exactly.
+- **Rationale:** The Board sees the Odoo UI; our backend must
+  match it identity-equal. Draft and cancelled installments are
+  not part of the "portfolio" in any business sense — they are
+  in-progress or voided records.
+- **Side note:** The MVP Design baseline of 6,123,549,625.23 EGP
+  was always the post-only total — it matched the snapshot Khaled
+  took from the Odoo UI on 2026-05-14. The "no domain filter /
+  42,970 records" notation in the design doc was incorrect from
+  the start; the baseline number itself was correct.
+- **Cross-module consistency:** KPI 2's domain already starts
+  with `('state', '=', 'post')`. KPI 1's domain alignment makes
+  both KPIs share the same `state='post'` prefix, which is the
+  right business semantic ("posted installments are the real
+  portfolio").
+- **Action item — Phase 3 discovery:** Verify the same
+  `state='post'` exclusion applies (or doesn't) to KPIs 3, 4,
+  5, 6 before each is implemented. Do NOT assume.
+- **Investigation script:** Committed at
+  `scripts/investigate_kpi1_delta.py` for audit trail.
+
+### Decision 2.5 — Investigation scripts kept in `scripts/`
+
+- **Choice:** One-off investigation scripts (like
+  `investigate_kpi1_delta.py`) are committed to `scripts/`
+  rather than deleted after use.
+- **Rationale:** Audit trail. When a future reviewer asks "how
+  did you determine KPI 1 needs `state='post'`?", the script +
+  its output in the decisions doc tell the full story. Disk
+  cost is negligible; clarity benefit is large.
+
+### Verification Result — Session 2 KPI 1 Close
+
+**Date:** 2026-05-16
+**Method:** `scripts/verify_kpi1_live.py` against live Odoo via
+the running backend, cross-checked manually against Odoo
+Collections Mgmt → All Installments → Amount measure.
+
+| Metric | Backend | Odoo UI | Delta |
+|---|---|---|---|
+| Amount (EGP) | 6,123,549,625.23 | 6,123,549,625.23 | **0.00** |
+| Record count | 42,443 | 42,443 (view total) | **0** |
+
+**Conclusion:** The corrected single-clause domain
+`[('state', '=', 'post')]` reproduces Odoo's All Installments
+view identity-equal at the EGP level on 2026-05-16. KPI 1
+backend is production-ready from a numeric-correctness standpoint.
+
+**Caveats:**
+- Same Board launch deferral as KPI 2 (Decision 1.3).
+- Ongoing daily verification is the only acceptable proof of
+  continued correctness.
+- Subsequent KPIs (3, 4, 5, 6) must each verify their own
+  domain semantics against the corresponding Odoo view —
+  do not assume `state='post'` applies universally.
+
+---

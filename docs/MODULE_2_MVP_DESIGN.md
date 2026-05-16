@@ -83,13 +83,13 @@ regardless of payment status, installment type, or project.
 
 **Formula**
 ```
-SUM(rs.installment.amount)
+SUM(rs.installment.amount) WHERE state = 'post'
 ```
-No domain filter. All 42,970 records included.
+Domain: `[('state', '=', 'post')]` — ~42,443 posted installments.
 
 **Data Source**
 Model: `rs.installment`
-Domain: none
+Domain: `[('state', '=', 'post')]`
 Aggregation: `SUM` on the `amount` field (native monetary field,
 confirmed in `MODULE_2_DISCOVERY_PHASE_1.md` §3)
 
@@ -119,6 +119,16 @@ Amount (EGP), Paid Amount (EGP), Due Amount (EGP). Filterable by
 **Open Questions / Phase 2 Dependencies**
 None. The `amount` field is confirmed as a native monetary field on
 `rs.installment` (`MODULE_2_DISCOVERY_PHASE_1.md` §3).
+
+> **Note (2026-05-16):** The original design specified domain `[]`
+> and record count 42,970. Live verification during Session 2
+> revealed that Odoo's "All Installments" view applies
+> `state='post'` at the view layer, excluding 19 draft records
+> (8.7M EGP) and 508 cancelled records (134.2M EGP). The
+> corrected domain is `[('state', '=', 'post')]`, record count
+> ~42,443. The baseline 6,123,549,625.23 EGP is unchanged — it
+> was always the post-only total taken from the Odoo UI. See
+> `MODULE_2_IMPLEMENTATION_DECISIONS.md` Decision 2.4.
 
 ---
 
