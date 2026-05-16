@@ -6,7 +6,7 @@ Live verification is the job of scripts/verify_kpi2_live.py.
 """
 
 import re
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
@@ -16,6 +16,7 @@ from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX,
     _CACHE_KEY_PREFIX_KPI1,
     get_late_uncollected,
+    get_pending_check_exposure,
     get_total_portfolio_value,
 )
 
@@ -624,3 +625,286 @@ async def test_kpi5_unknown_project_id_raises_unknown_project_error(
 
     with pytest.raises(UnknownProjectError):
         await get_late_uncollected_by_project(client=mock_client_kpi5)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 3 — Pending Check Exposure (get_pending_check_exposure)
+# ══════════════════════════════════════════════════════════════════════════════
+
+from backend.modules.collections.services.kpi_service import _CACHE_KEY_PREFIX_KPI3  # noqa: E402
+
+# D0-confirmed values (2026-05-16): derived = paid - actual = 518,235,384.10 EGP.
+_MOCK_RESPONSE_KPI3 = [{
+    "paid_amount": 3_488_834_648.95,
+    "x_studio_actual_paid_amount": 2_970_599_264.85,
+    "__count": 42_443,
+}]
+_EXPECTED_KPI3_PAID = 3_488_834_648.95
+_EXPECTED_KPI3_ACTUAL = 2_970_599_264.85
+_EXPECTED_KPI3_VALUE = _EXPECTED_KPI3_PAID - _EXPECTED_KPI3_ACTUAL  # 518_235_384.10
+_EXPECTED_KPI3_DERIVATION_NOTE = "value = paid_amount_sum - actual_paid_sum"
+
+
+@pytest.fixture
+def mock_client_kpi3() -> MagicMock:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI3)
+    return client
+
+
+# ── Test K3-1 — Domain construction ──────────────────────────────────────────
+
+
+async def test_kpi3_domain_is_state_eq_post(mock_client_kpi3: MagicMock) -> None:
+    await get_pending_check_exposure(client=mock_client_kpi3)
+
+    call_args = mock_client_kpi3.execute_kw.call_args
+    domain = call_args.kwargs["args"][0]
+
+    assert len(domain) == 1, f"Expected 1-clause domain, got {len(domain)}: {domain}"
+    assert domain[0] == ("state", "=", "post"), (
+        f"Expected ('state','=','post'), got {domain[0]!r}. "
+        "Decision 4.1: KPI 3 uses state='post' domain."
+    )
+
+
+# ── Test K3-2 — Aggregation: single read_group with BOTH fields ───────────────
+
+
+async def test_kpi3_uses_read_group_with_both_amount_fields(mock_client_kpi3: MagicMock) -> None:
+    await get_pending_check_exposure(client=mock_client_kpi3)
+
+    call_args = mock_client_kpi3.execute_kw.call_args
+    assert call_args.args[1] == "read_group", (
+        f"Expected read_group, got {call_args.args[1]!r}. "
+        "KPI 3 must aggregate via read_group, not search_read + Python sum."
+    )
+    fields = call_args.kwargs["args"][1]
+    assert "paid_amount" in fields, (
+        f"'paid_amount' must be in read_group fields, got {fields!r}"
+    )
+    assert "x_studio_actual_paid_amount" in fields, (
+        f"'x_studio_actual_paid_amount' must be in read_group fields, got {fields!r}"
+    )
+    # Confirm single RPC — not two sequential calls
+    assert mock_client_kpi3.execute_kw.call_count == 1, (
+        "Both fields must be aggregated in a single read_group call, not two."
+    )
+
+
+# ── Test K3-3 — Return shape ──────────────────────────────────────────────────
+
+
+async def test_kpi3_return_shape_has_all_required_keys(mock_client_kpi3: MagicMock) -> None:
+    result = await get_pending_check_exposure(client=mock_client_kpi3)
+
+    standard_keys = {"value", "currency", "record_count", "as_of",
+                     "cache_status", "rpc_duration_ms", "domain"}
+    kpi3_keys = {"paid_amount_sum", "actual_paid_sum",
+                 "derivation_note", "data_quality_warning"}
+    expected_keys = standard_keys | kpi3_keys
+    assert set(result.keys()) == expected_keys
+
+    assert isinstance(result["value"], float)
+    assert result["currency"] == "EGP"
+    assert isinstance(result["record_count"], int)
+    assert isinstance(result["as_of"], str)
+    assert result["cache_status"] in {"fresh", "cached"}
+    assert isinstance(result["rpc_duration_ms"], int)
+    assert isinstance(result["domain"], list)
+    assert isinstance(result["paid_amount_sum"], float)
+    assert isinstance(result["actual_paid_sum"], float)
+    assert isinstance(result["derivation_note"], str)
+    # data_quality_warning is None in the normal (non-negative) case
+    assert result["data_quality_warning"] is None
+
+
+# ── Test K3-4 — Derivation correctness ───────────────────────────────────────
+
+
+async def test_kpi3_return_values_and_derivation(mock_client_kpi3: MagicMock) -> None:
+    result = await get_pending_check_exposure(client=mock_client_kpi3)
+
+    assert result["paid_amount_sum"] == pytest.approx(_EXPECTED_KPI3_PAID)
+    assert result["actual_paid_sum"] == pytest.approx(_EXPECTED_KPI3_ACTUAL)
+    assert result["value"] == pytest.approx(_EXPECTED_KPI3_VALUE)
+    # Derivation: value == paid - actual (within float precision)
+    assert abs(result["paid_amount_sum"] - result["actual_paid_sum"] - result["value"]) < 0.01
+    assert result["derivation_note"] == _EXPECTED_KPI3_DERIVATION_NOTE
+    assert result["record_count"] == 42_443
+    assert result["cache_status"] == "fresh"
+
+
+# ── Test K3-5 — Cache hit ─────────────────────────────────────────────────────
+
+
+async def test_kpi3_second_call_is_served_from_cache(mock_client_kpi3: MagicMock) -> None:
+    result1 = await get_pending_check_exposure(client=mock_client_kpi3)
+    result2 = await get_pending_check_exposure(client=mock_client_kpi3)
+
+    assert mock_client_kpi3.execute_kw.call_count == 1
+    assert result1["cache_status"] == "fresh"
+    assert result2["cache_status"] == "cached"
+    assert result2["rpc_duration_ms"] == 0
+    assert result2["value"] == result1["value"]
+
+
+# ── Test K3-6 — Cache key independence ───────────────────────────────────────
+
+
+async def test_kpi3_cache_key_does_not_collide_with_kpi1_kpi2_kpi5() -> None:
+    from backend.modules.collections.services.kpi_service import (
+        get_late_uncollected_by_project as _get_kpi5,
+    )
+
+    mock_k2 = MagicMock()
+    mock_k2.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE)
+
+    mock_k1 = MagicMock()
+    mock_k1.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI1)
+
+    mock_k5 = MagicMock()
+    mock_k5.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI5)
+
+    mock_k3 = MagicMock()
+    mock_k3.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI3)
+
+    r2 = await get_late_uncollected(client=mock_k2)
+    r1 = await get_total_portfolio_value(client=mock_k1)
+    r5 = await _get_kpi5(client=mock_k5)
+    r3 = await get_pending_check_exposure(client=mock_k3)
+
+    assert r2["cache_status"] == "fresh"
+    assert r1["cache_status"] == "fresh"
+    assert r5["cache_status"] == "fresh"
+    assert r3["cache_status"] == "fresh"
+
+    r2b = await get_late_uncollected(client=mock_k2)
+    r1b = await get_total_portfolio_value(client=mock_k1)
+    r5b = await _get_kpi5(client=mock_k5)
+    r3b = await get_pending_check_exposure(client=mock_k3)
+
+    assert r2b["cache_status"] == "cached"
+    assert r1b["cache_status"] == "cached"
+    assert r5b["cache_status"] == "cached"
+    assert r3b["cache_status"] == "cached"
+
+    # Each Odoo client called exactly once — no cross-key pollution
+    assert mock_k2.execute_kw.call_count == 1
+    assert mock_k1.execute_kw.call_count == 1
+    assert mock_k5.execute_kw.call_count == 1
+    assert mock_k3.execute_kw.call_count == 1
+
+
+# ── Test K3-7a — RPC failure raises OdooQueryError ───────────────────────────
+
+
+async def test_kpi3_rpc_failure_raises_odoo_query_error(mock_client_kpi3: MagicMock) -> None:
+    mock_client_kpi3.execute_kw.side_effect = RuntimeError("connection refused")
+
+    with pytest.raises(OdooQueryError):
+        await get_pending_check_exposure(client=mock_client_kpi3)
+
+
+# ── Test K3-7b — RPC failure writes no cache entry ───────────────────────────
+
+
+async def test_kpi3_rpc_failure_writes_no_cache_entry(mock_client_kpi3: MagicMock) -> None:
+    mock_client_kpi3.execute_kw.side_effect = RuntimeError("timeout")
+
+    with pytest.raises(OdooQueryError):
+        await get_pending_check_exposure(client=mock_client_kpi3)
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI3)
+    assert _cache.get(cache_key) is None, "A failed RPC must not leave a cache entry"
+
+
+# ── Test K3-8a — Read-only assertion ─────────────────────────────────────────
+
+
+async def test_kpi3_contaminated_allowed_methods_raises_before_any_rpc(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_client_kpi3: MagicMock,
+) -> None:
+    monkeypatch.setattr(
+        "backend.modules.collections.services.kpi_service.ALLOWED_METHODS",
+        frozenset({"read_group", "write"}),
+    )
+
+    with pytest.raises(ReadOnlyViolationError):
+        await get_pending_check_exposure(client=mock_client_kpi3)
+
+    mock_client_kpi3.execute_kw.assert_not_called()
+
+
+async def test_kpi3_clean_allowed_methods_does_not_raise(mock_client_kpi3: MagicMock) -> None:
+    result = await get_pending_check_exposure(client=mock_client_kpi3)
+    assert result["value"] >= 0.0
+
+
+# ── Test K3-9 — Edge case: zero result ───────────────────────────────────────
+
+
+async def test_kpi3_zero_result_returns_zero_value_and_no_warning(
+    mock_client_kpi3: MagicMock,
+) -> None:
+    # Odoo returns a single row with all zeros — possible if no installments posted.
+    mock_client_kpi3.execute_kw = AsyncMock(return_value=[{
+        "paid_amount": 0.0,
+        "x_studio_actual_paid_amount": 0.0,
+        "__count": 0,
+    }])
+
+    result = await get_pending_check_exposure(client=mock_client_kpi3)
+
+    assert result["value"] == pytest.approx(0.0)
+    assert result["paid_amount_sum"] == pytest.approx(0.0)
+    assert result["actual_paid_sum"] == pytest.approx(0.0)
+    assert result["record_count"] == 0
+    # Zero is not negative — no data quality warning
+    assert result["data_quality_warning"] is None
+
+
+# ── Test K3-10 — Edge case: negative derived value (Decision 4.4 Option A) ───
+#
+# When paid_amount_sum < actual_paid_sum, the service:
+#   (a) returns value as-is (not clamped to 0.0)
+#   (b) logs a WARNING via logger.warning(...)
+#   (c) sets data_quality_warning = "value_is_negative"
+#
+# loguru does not integrate with pytest's caplog without a propagation bridge.
+# We use patch() on the module-level logger name to verify the warning call.
+
+
+async def test_kpi3_negative_derived_value_option_a(
+    mock_client_kpi3: MagicMock,
+) -> None:
+    # actual_paid > paid → derived value is negative (Studio field anomaly)
+    mock_client_kpi3.execute_kw = AsyncMock(return_value=[{
+        "paid_amount": 100.0,
+        "x_studio_actual_paid_amount": 200.0,
+        "__count": 5,
+    }])
+
+    with patch(
+        "backend.modules.collections.services.kpi_service.logger"
+    ) as mock_logger:
+        result = await get_pending_check_exposure(client=mock_client_kpi3)
+
+    # (a) Value returned as-is — Decision 4.4 Option A, no clamping
+    assert result["value"] == pytest.approx(-100.0), (
+        "Negative value must be returned as-is (Decision 4.4 Option A), not clamped."
+    )
+    # (b) WARNING was logged once
+    mock_logger.warning.assert_called_once()
+    warning_message: str = mock_logger.warning.call_args[0][0]
+    assert "negative" in warning_message.lower(), (
+        f"Warning message must mention 'negative', got: {warning_message!r}"
+    )
+    # (c) data_quality_warning flag set
+    assert result["data_quality_warning"] == "value_is_negative", (
+        "data_quality_warning must be 'value_is_negative' when value < 0."
+    )
+    # Operands preserved for traceability
+    assert result["paid_amount_sum"] == pytest.approx(100.0)
+    assert result["actual_paid_sum"] == pytest.approx(200.0)

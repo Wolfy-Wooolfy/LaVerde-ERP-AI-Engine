@@ -3,6 +3,7 @@ Endpoint integration tests for Collections KPI endpoints.
 
 GET /api/v1/collections/kpi/late-uncollected       — KPI 2
 GET /api/v1/collections/kpi/total-portfolio-value  — KPI 1
+GET /api/v1/collections/kpi/pending-check-exposure — KPI 3
 
 Uses FastAPI TestClient with service functions patched — no Odoo connection.
 """
@@ -271,4 +272,87 @@ def test_kpi5_odoo_unavailable_returns_503(client: TestClient) -> None:
 
 def test_kpi5_post_returns_405(client: TestClient) -> None:
     r = client.post(_URL_KPI5, auth=_AUTH)
+    assert r.status_code == 405
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 3 — Pending Check Exposure endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_KPI3 = "/api/v1/collections/kpi/pending-check-exposure"
+
+_MOCK_DATA_KPI3 = {
+    "value": 518_235_384.10,
+    "currency": "EGP",
+    "record_count": 42_443,
+    "as_of": "2026-05-16T20:28:58+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 5500,
+    "domain": [["state", "=", "post"]],
+    "paid_amount_sum": 3_488_834_648.95,
+    "actual_paid_sum": 2_970_599_264.85,
+    "derivation_note": "value = paid_amount_sum - actual_paid_sum",
+    "data_quality_warning": None,
+}
+
+
+# ── Test K3-8a — 200 + JSON shape ────────────────────────────────────────────
+
+
+def test_kpi3_get_returns_200_and_all_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_pending_check_exposure",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI3),
+    ):
+        r = client.get(_URL_KPI3, auth=_AUTH)
+
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "value", "currency", "record_count", "as_of",
+        "cache_status", "rpc_duration_ms", "domain",
+        "paid_amount_sum", "actual_paid_sum",
+        "derivation_note", "data_quality_warning",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+
+
+# ── Test K3-8b — Response headers ────────────────────────────────────────────
+
+
+def test_kpi3_response_has_cache_control_and_x_cache_status(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_pending_check_exposure",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI3),
+    ):
+        r = client.get(_URL_KPI3, auth=_AUTH)
+
+    assert r.status_code == 200
+    assert "private" in r.headers.get("cache-control", "")
+    assert "max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+# ── Test K3-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_kpi3_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_pending_check_exposure",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_KPI3, auth=_AUTH)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+
+
+# ── Test K3-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_kpi3_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_KPI3, auth=_AUTH)
     assert r.status_code == 405
