@@ -73,7 +73,9 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
     # Decision 1.7: prefer Odoo server date. ALLOWED_METHODS exposes no
     # server-date method, so falling back to UTC date per Khaled's
     # authorization (MODULE_2_IMPLEMENTATION_DECISIONS.md §1.7).
-    today = datetime.now(timezone.utc).date().isoformat()
+    # Using _cache.today_str() so the domain date and cache key date are
+    # always identical — tests patch a single function to control both.
+    today = _cache.today_str()
 
     domain = _build_late_domain(today)
     cache_key = _cache.make_key(_CACHE_KEY_PREFIX)
