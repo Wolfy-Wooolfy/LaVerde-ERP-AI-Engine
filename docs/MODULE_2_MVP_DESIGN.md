@@ -405,6 +405,18 @@ with `payment_state` column. Read-only.
 See also Open Strategic Question Q3 (should all 3 projects always
 appear, or only those with active late uncollected > 0?).
 
+> **Implementation note (2026-05-16):** Session 3 implements the Late
+> Uncollected per-project sub-metric only. The Collection Rate
+> per-project sub-metric is deferred until the period-based
+> machinery is built for KPI 4. See
+> `MODULE_2_IMPLEMENTATION_DECISIONS.md` Decision 3.1.
+>
+> Phase 2 dependencies resolved: project IDs 1, 2, 3 confirmed active
+> (`MODULE_2_DISCOVERY_PHASE_2.md §6`). Late domain confirmed as
+> three-clause Candidate C (Decision 3.2). Q3 resolved: always show all
+> 3 projects, zero-padding when a project has no late records (Decision 3.4).
+> Q1, Q2 deferred with KPI 4.
+
 ---
 
 #### KPI 6 — 6-Month Collection Trend / منحنى التحصيل — 6 أشهر

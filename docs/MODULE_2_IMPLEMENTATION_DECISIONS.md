@@ -296,3 +296,140 @@ backend is production-ready from a numeric-correctness standpoint.
   do not assume `state='post'` applies universally.
 
 ---
+
+## Session 3 — 2026-05-16 — KPI 5 Backend (Late Uncollected per Project)
+
+### Decision 3.1 — KPI 5 scope narrowed to Late Uncollected per project only
+
+- **Choice:** Session 3 implements only the Late Uncollected
+  sub-metric of KPI 5 (per-project breakdown of the KPI 2 number).
+  The Collection Rate sub-metric is deferred to a later session
+  alongside KPI 4 which shares the period-based machinery.
+- **Rationale:** Consistent with the one-metric-per-session pattern
+  proven in Sessions 1 and 2. Avoids compound complexity that
+  could repeat Lesson B (Decision 2.4) at greater scale.
+
+### Decision 3.2 — Pre-implementation discovery is now mandatory
+
+- **Choice:** Every new KPI session must include a Deliverable 0
+  discovery script that verifies per-record and per-grouping
+  semantics against Odoo BEFORE writing service code.
+- **Rationale:** Lesson B from Session 2 (`domain=[]` vs
+  `state='post'`) cost ~1 hour of investigation that would have
+  been avoided by a 10-minute discovery script. The
+  `scripts/investigate_kpi1_delta.py` pattern (read-only,
+  evidence-based, audit-trail-preserved) is the template.
+- **Applies to:** All future KPI sessions (3, 4, 6) and any
+  re-implementation of KPI 1/2 if specs change.
+
+### Decision 3.3 — Project order is fixed: 1, 2, 3
+
+- **Choice:** The `projects` array in KPI 5 responses is always
+  ordered by `project_id` ascending: New Capital (1), Cassette (2),
+  La puerta (3). This order is enforced by the service, not by
+  Odoo's response.
+- **Rationale:** Consistent display order is a UI requirement that
+  the backend should guarantee, not delegate.
+
+### Decision 3.4 — Zero-padding for missing projects
+
+- **Choice:** If `read_group` returns fewer than 3 projects (e.g.,
+  one project has zero late records), the service pads the result
+  with explicit zero entries. The API consumer always sees exactly
+  3 projects.
+- **Rationale:** Strategic Q3 (MVP Design §8) requires always
+  showing all 3 projects. Backend enforcement prevents frontend
+  edge-case bugs.
+
+### Decision 3.5 — Cache key constants refactor explicitly deferred
+
+- **Choice:** Continue the per-KPI constant pattern
+  (`_CACHE_KEY_PREFIX`, `_CACHE_KEY_PREFIX_KPI1`,
+  `_CACHE_KEY_PREFIX_KPI5`). Do NOT refactor to a dict or
+  per-function locals in this session.
+- **Rationale:** Scope discipline. Mixing a refactor commit with
+  new-feature commits would (a) entangle review boundaries,
+  (b) risk regressions on the verified KPI 1 and KPI 2 services,
+  and (c) inflate session wall time.
+- **Future trigger:** A dedicated refactor session, scheduled
+  AFTER KPI 3, KPI 4, and KPI 6 backends are complete. At that
+  point we will see the full pattern across 5-6 KPIs and can
+  make a more informed refactor choice.
+- **Supersedes:** Decision 2.3's forward-looking statement that
+  "Session 3 will refactor." Decision 2.3 itself remains as
+  historical record but its forward-looking statement is overridden
+  by this decision.
+
+### Decision 3.6 — Drill-down fields deferred to frontend session
+
+- **Note:** Odoo's per-project Late view exposes Amount, Paid
+  Amount, Actual Paid Amount in addition to Due Amount. The KPI 5
+  drill-down design (MVP Design §3.2 KPI 5 "Drill-Down Target")
+  references these.
+- **Choice:** Session 3 returns only `late_uncollected`
+  (= SUM(due_amount)) and `record_count` per project. The
+  additional fields are deferred until the frontend session
+  builds the drill-down panel.
+- **Rationale:** Backend should not return data the frontend has
+  not been designed for. When the drill-down session begins, the
+  service will be extended (additive — no breaking change).
+- **Future extension:** When extended, the per-project entry
+  shape will become:
+  ```python
+  {
+      "project_id": int,
+      "project_name": str,
+      "late_uncollected": float,
+      "record_count": int,
+      # Future additions:
+      "amount": float,
+      "paid_amount": float,
+      "actual_paid_amount": float,
+  }
+  ```
+  Existing API consumers will see the new fields appear; nothing
+  breaks.
+
+### Verification Result — Session 3 KPI 5 Close
+
+**Date:** 2026-05-16
+**Method:** `scripts/verify_kpi5_live.py` against live Odoo via
+the running backend, cross-checked manually against Odoo
+Collections Mgmt → Late Installments tab (Group By Project) at
+the D0 discovery step.
+
+| Project | Backend | Odoo UI | Delta |
+|---|---|---|---|
+| New Capital (id=1) | 164,017,258.40 EGP / 1,472 records | 164,017,258.40 / 1,472 | **0.00 / 0** |
+| Cassette (id=2) | 151,019,442.00 EGP / 488 records | 151,019,442.00 / 488 | **0.00 / 0** |
+| La puerta (id=3) | 3,589,500.00 EGP / 21 records | 3,589,500.00 / 21 | **0.00 / 0** |
+| **TOTAL** | **318,626,200.40 / 1,981** | **318,626,200.40 / 1,981** | **0.00 / 0** |
+
+**Cross-check vs KPI 2 standalone:**
+- KPI 5 total = 318,626,200.40 EGP
+- KPI 2 standalone = 318,626,200.40 EGP
+- Delta = **0.00 EGP** (mathematical proof that grouped aggregation
+  reproduces the verified KPI 2 value exactly)
+
+**Conclusion:** The `read_group` by `project_id` over the verified
+three-clause Candidate C Late domain produces identity-equal
+results with Odoo's Collections Mgmt Late Installments view,
+grouped by Project, at every project and at the total. KPI 5
+backend is production-ready from a numeric-correctness standpoint.
+
+**Bonus drill-down evidence (out of scope, for the future):**
+The Odoo per-project Late view also exposes Amount, Paid Amount,
+and Actual Paid Amount fields. Per Decision 3.6, these are
+deferred to the frontend drill-down session. Notable: La puerta
+shows zero Paid Amount and zero Actual Paid Amount across its
+21 late records — a data point the Board will likely discuss but
+not an implementation concern.
+
+**Caveats:**
+- Same Board launch deferral as KPIs 1 and 2 (Decision 1.3).
+- Daily delta of 2-3M EGP on KPI 2 (and proportionally on KPI 5's
+  total) is expected during the historical data entry period.
+- The KPI 5 Collection Rate per-project sub-metric remains
+  unimplemented (Decision 3.1) — to be built alongside KPI 4.
+
+---
