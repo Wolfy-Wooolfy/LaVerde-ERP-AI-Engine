@@ -19,7 +19,7 @@ import csv
 import io
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 from dotenv import load_dotenv
@@ -159,12 +159,12 @@ def main() -> int:
 
     if not _check("value >= MIN_VALUE_EGP",
                   value >= MIN_VALUE_EGP,
-                  f"{value:,.2f} < {MIN_VALUE_EGP:,.2f}"):
+                  f"{value:,.2f} >= {MIN_VALUE_EGP:,.2f}"):
         failures.append("value_below_min")
 
     if not _check("value <= MAX_VALUE_EGP",
                   value <= MAX_VALUE_EGP,
-                  f"{value:,.2f} > {MAX_VALUE_EGP:,.2f}"):
+                  f"{value:,.2f} <= {MAX_VALUE_EGP:,.2f}"):
         failures.append("value_above_max")
 
     if not _check("record_count >= MIN_RECORD_COUNT",
@@ -198,6 +198,21 @@ def main() -> int:
                domain[1] == ["payment_state", "in", ["unpaid", "partial"]])
         _check("domain[2][0] == date", domain[2][0] == "date")
         _check("domain[2][1] == <", domain[2][1] == "<")
+        date_str = domain[2][2]
+        try:
+            parsed_date = date.fromisoformat(date_str)
+            today_utc = date.today()
+            delta_days = abs((parsed_date - today_utc).days)
+            if not _check(
+                "domain[2][2] is a valid recent ISO date",
+                delta_days <= 1,
+                f"got {date_str!r}",
+            ):
+                failures.append("domain_date_stale")
+                _log(_INFO, f"  delta from UTC today: {delta_days} day(s)")
+        except ValueError as exc:
+            _log(_FAIL, f"domain[2][2] is not a valid ISO date — got {date_str!r}: {exc}")
+            failures.append("domain_date_invalid")
     else:
         failures.append("domain_shape")
 
