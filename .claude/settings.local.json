@@ -1,9 +1,7 @@
-{
+﻿{
   "permissions": {
-    "defaultMode": "bypassPermissions",
-    "allow": [
-      "PowerShell(Get-Process uvicorn -ErrorAction SilentlyContinue)",
-      "Bash(python -m pytest tests/ --ignore=tests/e2e -q --tb=short)"
+    "deny": [
+      "Bash(git push *)"
     ]
   }
 }
