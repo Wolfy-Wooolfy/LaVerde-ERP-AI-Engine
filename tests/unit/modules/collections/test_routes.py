@@ -182,3 +182,93 @@ def test_kpi1_odoo_unavailable_returns_503(client: TestClient) -> None:
 def test_kpi1_post_returns_405(client: TestClient) -> None:
     r = client.post(_URL_KPI1, auth=_AUTH)
     assert r.status_code == 405
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 5 — Late Uncollected by Project endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_KPI5 = "/api/v1/collections/kpi/late-uncollected-by-project"
+
+_MOCK_DATA_KPI5 = {
+    "projects": [
+        {"project_id": 1, "project_name": "New Capital", "late_uncollected": 164_017_258.40, "record_count": 1472},
+        {"project_id": 2, "project_name": "Cassette",    "late_uncollected": 151_019_442.00, "record_count": 488},
+        {"project_id": 3, "project_name": "La puerta",   "late_uncollected":   3_589_500.00, "record_count": 21},
+    ],
+    "total_late_uncollected": 318_626_200.40,
+    "total_record_count": 1981,
+    "currency": "EGP",
+    "as_of": "2026-05-16T16:51:26+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 79,
+    "domain": [
+        ["state", "=", "post"],
+        ["payment_state", "in", ["unpaid", "partial"]],
+        ["date", "<", "2026-05-16"],
+    ],
+}
+
+
+# ── Test K5-8a — 200 + JSON shape ────────────────────────────────────────────
+
+
+def test_kpi5_get_returns_200_and_all_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_uncollected_by_project",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI5),
+    ):
+        r = client.get(_URL_KPI5, auth=_AUTH)
+
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("projects", "total_late_uncollected", "total_record_count",
+                "currency", "as_of", "cache_status", "rpc_duration_ms", "domain"):
+        assert key in body, f"Response missing key: {key!r}"
+
+    assert isinstance(body["projects"], list)
+    assert len(body["projects"]) == 3
+    for proj in body["projects"]:
+        for k in ("project_id", "project_name", "late_uncollected", "record_count"):
+            assert k in proj, f"Project entry missing key: {k!r}"
+
+
+# ── Test K5-8b — Response headers ────────────────────────────────────────────
+
+
+def test_kpi5_response_has_cache_control_and_x_cache_status(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_uncollected_by_project",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI5),
+    ):
+        r = client.get(_URL_KPI5, auth=_AUTH)
+
+    assert r.status_code == 200
+    assert "private" in r.headers.get("cache-control", "")
+    assert "max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+# ── Test K5-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_kpi5_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_uncollected_by_project",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_KPI5, auth=_AUTH)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+
+
+# ── Test K5-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_kpi5_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_KPI5, auth=_AUTH)
+    assert r.status_code == 405
