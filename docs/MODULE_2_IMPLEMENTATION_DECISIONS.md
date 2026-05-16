@@ -239,6 +239,37 @@ is production-ready from a numeric-correctness standpoint.
   its output in the decisions doc tell the full story. Disk
   cost is negligible; clarity benefit is large.
 
+### Decision 2.6 — Auto-push incident and prevention
+
+- **Incident:** During Session 2, the Claude Code IDE auto-pushed
+  commits to `origin/main` before Khaled's explicit "push"
+  instruction. Affected commits: D0 (verify_kpi2 fixes), D1
+  (KPI 1 service with the original `domain=[]`), D2 (endpoint),
+  D3 (verify script), and the investigation script. The KPI 1
+  domain fix, unit tests, and Decision 2.4 documentation were
+  withheld until explicit approval, but the buggy initial
+  KPI 1 implementation was on `origin/main` for approximately
+  one hour before the fix landed.
+- **External impact:** None. The Collections module has no
+  frontend yet (Pillar 1 not built), the Board has no access
+  (Decision 1.3), and no production deployment pulls from
+  `origin/main` automatically. The bug existed only in the git
+  history during a development window.
+- **Audit trail:** The git history preserves the full sequence:
+  initial commit with `domain=[]`, investigation script with
+  evidence, fix commit with `state='post'`. A future reviewer
+  can trace the discovery and correction in commit order.
+- **Mitigation for future sessions:** Disable auto-push in the
+  Claude Code IDE settings before starting any subsequent
+  session. The "Push to origin/main only after Khaled's explicit
+  push instruction" rule in session prompts is operationally
+  meaningless if the IDE pushes anyway.
+- **Action item for Khaled:** Locate and disable the Claude
+  Code IDE auto-push setting before Session 3 begins.
+
+This decision documents the incident; it does not require any
+code change.
+
 ### Verification Result — Session 2 KPI 1 Close
 
 **Date:** 2026-05-16
