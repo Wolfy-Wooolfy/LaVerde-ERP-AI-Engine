@@ -120,4 +120,29 @@
   add a method to `ALLOWED_METHODS` belongs to Khaled — escalate
   before silently falling back.
 
+### Verification Result — Session 1 Close
+
+**Date:** 2026-05-16
+**Method:** `scripts/verify_kpi2_live.py` against live Odoo via
+the running backend, cross-checked manually against Odoo
+Collections Mgmt → Late Installments tab.
+
+| Metric | Backend | Odoo UI | Delta |
+|---|---|---|---|
+| Due Amount (EGP) | 318,626,200.40 | 318,626,200.40 | **0.00** |
+| Record count | 1,981 | 1,981 | **0** |
+
+**Conclusion:** The three-clause Candidate C Late domain
+(`state=post` AND `payment_state IN [unpaid, partial]` AND
+`date < today`) reproduces Odoo's native Late Installments view
+identity-equal at the EGP level on 2026-05-16. KPI 2 backend
+is production-ready from a numeric-correctness standpoint.
+
+**Caveats preserved from Decision 1.3:**
+- Board launch remains deferred until La Verde's historical
+  data entry effort completes.
+- Ongoing daily verification is the only acceptable proof of
+  continued correctness — a 2026-05-16 match does not guarantee
+  a 2026-06-16 match if domain semantics change in Odoo.
+
 ---
