@@ -216,7 +216,7 @@ Paid Amount − Actual Paid Amount
 
 **Data Source**
 Model: `rs.installment`
-Domain: none
+Domain: `[('state', '=', 'post')]` — ~42,443 posted installments.
 Fields: `paid_amount` (native) and `x_studio_actual_paid_amount`
 (Odoo Studio field, confirmed in `MODULE_2_DISCOVERY_PHASE_1.md` §3
 and `MODULE_2_BUSINESS_CONTEXT.md` §8)
@@ -247,14 +247,27 @@ to filter on `check_pending_amount > 0` directly. Until then, the
 derived formula is the canonical source.]
 
 **Open Questions / Phase 2 Dependencies**
-[PHASE 2 VERIFICATION REQUIRED] Discovery Phase 1 §3 reveals two
-native check-related fields on `rs.installment`: `check_pending_amount`
-and `check_approved_amount`. Whether `check_pending_amount` gives the
-same aggregate as the `paid_amount − x_studio_actual_paid_amount`
-subtraction — or a finer-grained breakdown — requires field-level
-verification against a sample installment with known payment history
-(Phase 1 Gap #5). Until confirmed, the derived formula is the
-canonical source for both the KPI value and the drill-down filter.
+Phase 2 Dependency #7 resolved — see
+`MODULE_2_IMPLEMENTATION_DECISIONS.md` Decision 4.5.
+`check_pending_amount` aggregate at `state='post'` = 518,235,384.10 EGP,
+identity-equal (delta = 0.00 EGP) to the derived formula. The derived
+formula remains canonical because it exposes component sums in the
+response payload. The drill-down filter
+(`paid_amount − x_studio_actual_paid_amount > 0`) is confirmed correct.
+
+> **Implementation note (2026-05-16):** Session 4 implements KPI 3.
+> The original design specified "no domain filter"; live D0 discovery
+> revealed that 508 cancelled installments carry ghost `paid_amount`
+> from pre-cancellation postdated cheques, inflating the aggregate by
+> 2.47M EGP. The corrected domain is `[('state', '=', 'post')]`.
+> The baseline 518,235,384.10 EGP (derived from the 2026-05-14
+> snapshot) is confirmed at identity-equal precision.
+> See `MODULE_2_IMPLEMENTATION_DECISIONS.md` Decision 4.1.
+>
+> Response includes KPI 3-specific fields:
+> `paid_amount_sum`, `actual_paid_sum`, `derivation_note`,
+> `data_quality_warning` (null normally; "value_is_negative" if anomaly).
+> See Decisions 4.3 and 4.4.
 
 ---
 

@@ -433,3 +433,149 @@ not an implementation concern.
   unimplemented (Decision 3.1) — to be built alongside KPI 4.
 
 ---
+
+## Session 4 — 2026-05-16 — KPI 3 Backend (Pending Check Exposure)
+
+### Decision 4.1 — KPI 3 domain: `state='post'`, not empty
+
+- **Choice:** Pending Check Exposure uses domain `[('state', '=', 'post')]`
+  and aggregates both `SUM(paid_amount)` and
+  `SUM(x_studio_actual_paid_amount)` across all posted `rs.installment`
+  records (~42,443 records). The MVP Design originally specified
+  "no domain filter" for KPI 3.
+- **Discovery (D0):** `scripts/discover_kpi3_domain.py` revealed that 508
+  cancelled installments carry `paid_amount = 2,470,884.00 EGP` and
+  `x_studio_actual_paid_amount = 0.00 EGP`, yielding a derived exposure
+  of 2,470,884.00 EGP. These are postdated cheques submitted before
+  contract cancellation whose `paid_amount` was never reversed. Including
+  them inflates the KPI by 2.47M EGP relative to Odoo's own calculation.
+- **Confirmation:** Odoo's native `check_pending_amount` stored field
+  (Decision 4.5) computes `518,235,384.10 EGP` at `state='post'`, which
+  is identity-equal to the derived formula at the same domain. The
+  cancelled-state records are excluded from `check_pending_amount` by
+  Odoo's own logic — confirming `state='post'` is the correct semantic.
+- **Cross-module consistency:** All four implemented KPIs (1, 2, 3, 5)
+  now use `state='post'` as the base clause. This is the correct business
+  semantic: "posted installments are the real portfolio".
+- **Implementation:** Single-clause domain `[("state", "=", "post")]`
+  passed as the first positional argument to `read_group`.
+- **Supersedes:** "Domain: none" in MVP Design §3.2 KPI 3.
+
+### Decision 4.2 — KPI 3 aggregation: two-field read_group in one RPC
+
+- **Choice:** A single `read_group` call with
+  `fields=["paid_amount", "x_studio_actual_paid_amount"]` retrieves both
+  aggregation sums in one round-trip. The result row contains both field
+  keys plus `__count`.
+- **Rationale:** Two separate RPC calls would double network overhead for
+  no benefit. Odoo's `read_group` API supports multiple aggregation fields
+  natively; this is the first KPI in the codebase to exercise that
+  capability.
+- **kwargs:** `lazy=False` (same pattern as KPI 5's project grouping)
+  is passed to prevent lazy evaluation — the grouped result is consumed
+  as a flat list with one row (no grouping clause in this call).
+- **Edge case:** If `rows` is empty (no posted installments exist),
+  both sums default to `0.0` via `row.get("paid_amount") or 0.0`.
+
+### Decision 4.3 — derivation_note: fixed string in every response
+
+- **Choice:** Every KPI 3 response includes
+  `"derivation_note": "value = paid_amount_sum - actual_paid_sum"` as an
+  explicit field. This string is a constant — it does not vary by
+  request.
+- **Rationale:** KPI 3's value is not a native Odoo field; it is derived.
+  Future consumers (frontend, AI chat, audit log) must know the formula
+  without reading this document. Embedding it in the payload makes the
+  derivation self-documenting and machine-readable.
+- **Decision scope:** The exact string is locked at D3 verification.
+  Any change to the formula requires a new decision superseding this one.
+
+### Decision 4.4 — Negative derived value: Option A (return as-is + warn)
+
+- **Choice:** If `SUM(paid_amount) − SUM(x_studio_actual_paid_amount)` is
+  negative, the service:
+  1. Returns `value` as-is (the negative float).
+  2. Logs a `logger.warning(...)` using `%s` format with `paid_amount_sum`,
+     `actual_paid_sum`, and `value` as arguments.
+  3. Adds `"data_quality_warning": "value_is_negative"` to the response
+     payload.
+  4. Sets `"data_quality_warning": null` when value is non-negative.
+- **Rationale:** A negative exposure is logically impossible (checks
+  received cannot exceed "cleared checks + uncashed checks") and
+  would indicate a data quality anomaly in Odoo Studio fields — not a
+  calculation error in our backend. Hiding the anomaly or clamping to
+  zero would mask a real Odoo data problem. Returning it as-is lets the
+  frontend (and Khaled) observe the anomaly and investigate in Odoo.
+- **Why not raise an exception:** This is not an Odoo connectivity failure
+  — the query succeeded. A 503 would confuse the caller into thinking
+  the service is down. The `data_quality_warning` field is the correct
+  channel for data-level anomalies.
+- **Why not Option B (return zero):** Clamping silently removes the
+  signal that something is wrong in Odoo. The warning field achieves the
+  same "safe display" goal without information loss.
+- **Unit test:** `test_kpi3_negative_derived_value_option_a` covers all
+  three behaviors: `value == approx(-100.0)`, `logger.warning` called
+  once, `data_quality_warning == "value_is_negative"`.
+
+### Decision 4.5 — Phase 2 Dependency #7 resolved: derived formula = check_pending_amount
+
+- **Resolution:** `MODULE_2_MVP_DESIGN.md §7 Dependency #7` asked whether
+  `paid_amount − x_studio_actual_paid_amount` equals Odoo's native
+  `check_pending_amount` field on `rs.installment`. D0 discovery resolved
+  this: at `state='post'` domain, `check_pending_amount` aggregate =
+  518,235,384.10 EGP, which is identity-equal (delta = 0.00 EGP) to the
+  derived formula.
+- **Choice:** Continue using the derived formula (not `check_pending_amount`)
+  as the canonical source for KPI 3. Both give identical results, but the
+  derived formula makes the two component sums (`paid_amount_sum`,
+  `actual_paid_sum`) visible in the response payload, enabling the
+  frontend drill-down panel and the AI chat to display them without an
+  additional query.
+- **Phase 2 Dependency #7 status:** Closed. The formulas agree. The
+  drill-down filter (`paid_amount − x_studio_actual_paid_amount > 0`)
+  noted in MVP Design §3.4 remains the correct approach; simplifying to
+  `check_pending_amount > 0` is equivalent but provides less detail.
+
+### Verification Result — Session 4 KPI 3 Close
+
+**Date:** 2026-05-16
+**Method:** `scripts/verify_kpi3_live.py` against live Odoo via
+the running backend, cross-checked against Odoo's `check_pending_amount`
+aggregate in D0 discovery script (`scripts/discover_kpi3_domain.py`).
+
+| Metric | Backend | Odoo (D0 check_pending_amount) | Delta |
+|---|---|---|---|
+| Pending Check Exposure (EGP) | 518,235,384.10 | 518,235,384.10 | **0.00** |
+| paid_amount_sum (EGP) | 3,488,834,648.95 | 3,488,834,648.95 | **0.00** |
+| actual_paid_sum (EGP) | 2,970,599,264.85 | 2,970,599,264.85 | **0.00** |
+| Record count | 42,443 | 42,443 | **0** |
+
+**Assertions:** 16 assertions — all PASS. Includes: all 11 response
+keys, value in [400M, 700M] range, domain = `[['state','=','post']]`,
+`paid_amount_sum > actual_paid_sum`, derivation math
+(|paid−actual−value| < 0.01 EGP), `derivation_note` exact string,
+`data_quality_warning` is None, response headers
+(`Cache-Control: private, max-age=60`, `X-Cache-Status: fresh`),
+and cache hit on second request
+(`cache_status == 'cached'`, `rpc_duration_ms == 0`).
+
+**Cross-module confirmation:**
+This is the fourth consecutive identity-equal verification in Module 2
+(KPI 1 on 2026-05-16, KPI 2 on 2026-05-16, KPI 5 on 2026-05-16,
+KPI 3 on 2026-05-16). All four KPIs match Odoo at the cent level.
+
+**Conclusion:** The single-clause `state='post'` domain with two-field
+`read_group` aggregation reproduces Odoo's `check_pending_amount` sum
+identity-equal. KPI 3 backend is production-ready from a
+numeric-correctness standpoint.
+
+**Caveats:**
+- Same Board launch deferral as KPIs 1, 2, and 5 (Decision 1.3).
+- Daily drift is expected as treasury processes checks in RS Accounting.
+  The pending exposure should decrease as checks clear and
+  `x_studio_actual_paid_amount` is updated.
+- The D0 verification date was 2026-05-16. Subsequent verification runs
+  (`scripts/verify_kpi3_live.py`) will show daily drift; the [400M, 700M]
+  sanity bounds allow ±100M of realistic drift from the D0 baseline.
+
+---
