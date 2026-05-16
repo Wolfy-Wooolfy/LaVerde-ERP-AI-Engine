@@ -70,7 +70,33 @@ Candidate C produces the closest match to the Business Context Late snapshot. Th
 Candidate D was skipped with the following log entry:
 `state 'partial' not confirmed to exist on rs.installment — Candidate D skipped`
 
-**Status: RESOLVED** — Use Candidate C: `[('date', '<', today), ('due_amount', '>', 0)]`
+**Status: RESOLVED** — Use Candidate C. The validated implementation form executed
+in the discovery script is the three-clause domain:
+
+```python
+[
+    ('state', '=', 'post'),
+    ('payment_state', 'in', ['unpaid', 'partial']),
+    ('date', '<', today),
+]
+```
+
+**Important correction:** The Candidate C row in the candidates table above lists
+the domain as `[('date', '<', today), ('due_amount', '>', 0)]`. This does not
+match what the discovery script actually executed. The script's Candidate C tested
+the three-clause domain shown above (`state` + `payment_state` + `date`), and that
+is the form which produced the validated 1,971-record / 313.6M EGP result against
+the baseline. The candidates table is preserved unchanged for historical accuracy;
+the three-clause form here is the authoritative implementation specification.
+
+> **Notation correction (2026-05-16):** The §3 candidates table and the §9
+> dependency summary previously described Candidate C with a two-clause form
+> (`date` + `due_amount > 0`). The actual script execution used the three-clause
+> form (`state` + `payment_state` + `date`), as documented in
+> `scripts/discover_collections_phase2.py` Section 2 and
+> `scripts/discover_collections_phase2_output.txt`. §9 has been updated; the §3
+> candidates table is preserved as-is for historical accuracy with this note
+> clarifying the discrepancy.
 
 ---
 
@@ -214,7 +240,7 @@ Hypothesized result based on snapshot evidence: The 2026-05-14 Late snapshot sho
 |---|-----------|--------|------------|
 | 1 | Installment due-date field | **RESOLVED** | `rs.installment.date` (type: `date`) |
 | 2 | Payment posting-date field | **PARTIAL** | `rs.account.payment.installment.date` (type: `datetime`); join field unknown (U1) |
-| 3 | Late domain candidate | **RESOLVED** | Candidate C: `[('date', '<', today), ('due_amount', '>', 0)]` |
+| 3 | Late domain candidate | **RESOLVED** | Candidate C: `[('state','=','post'), ('payment_state','in',['unpaid','partial']), ('date','<',today)]` |
 | 4 | Pending check exposure formula | **RESOLVED** | Use derived formula; `check_pending_amount` differs by 2.47M EGP |
 | 5 | Installment types / penalty type | **RESOLVED** | 13 types (not 8); Penalty = ID 8, code `PNT` |
 | 6 | Active projects and IDs | **RESOLVED** | 3 projects: New Capital=1, Cassette=2, La puerta=3 |

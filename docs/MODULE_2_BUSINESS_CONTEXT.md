@@ -329,7 +329,50 @@ In Egyptian real estate, **checks are the primary payment channel**, not bank tr
 
 ---
 
-## 15. Open Questions — Discovery Status
+## 15. Reconcile — Customer Wallet Concept
+
+**Definition:** Reconcile is a per-customer balance holding funds paid to La Verde
+that are not yet allocated to a specific unit's installment. Conceptually a customer
+wallet — cash received and recorded in the system, but not yet applied to any
+installment line.
+
+### Two Scenarios Where Reconcile Occurs
+
+**1. Initial reservation without a chosen unit (حجز مبدئي / إثبات جدية)**
+
+The customer pays before selecting a unit. Funds sit in reconcile until the unit is
+chosen and a payment plan is created, at which point the reconcile balance is applied
+toward the Down Payment of the new plan.
+
+**2. Ownership transfer (نقل ملكية)**
+
+When a unit is transferred from customer س to customer ص:
+
+1. The funds previously paid by customer س are first removed from the unit — moved
+   into reconcile — so the unit becomes free for transfer.
+2. The reconcile balance then represents funds belonging to customer ص (who paid
+   customer س outside the system to acquire those funds).
+3. That reconcile balance is applied toward customer ص's new payment plan's Down
+   Payment.
+
+### Why It Matters for the Intelligence Layer
+
+- Reconcile balances are **NOT** `rs.installment` records.
+- **KPI 2 (Late Uncollected) is unaffected** — reconcile is not a late installment
+  and does not enter the Late domain.
+- Any future KPI or AI intent that answers "total cash received from customer X"
+  must sum paid `rs.installment` records **PLUS** the customer's current reconcile
+  balance. Treating only installments as "cash received" will undercount.
+- This has no effect on the 6 MVP KPIs as currently specified, but is a known
+  dependency for future KPIs.
+
+**Discovery status:** The Odoo model name, field names, and state machine for
+reconcile are **not yet discovered**. See Open Questions §16
+(Unanswered — Phase 3 Discovery Required).
+
+---
+
+## 16. Open Questions — Discovery Status
 
 ### Answered by Phase 1 Discovery (2026-05-14)
 
@@ -477,9 +520,16 @@ In Egyptian real estate, **checks are the primary payment channel**, not bank tr
   `rs.installment.state → post`, or vice versa? Which model holds
   the most current truth at any given moment?
 
+### Unanswered — Phase 3 Discovery Required
+
+- [ ] **Reconcile model and balance fields** — The Odoo model backing the reconcile
+  concept (likely under `rs.account.*` based on Phase 1 inventory) has not been
+  identified. Required before any KPI or AI intent involving customer-level total
+  cash received. Phase 3 discovery target.
+
 ---
 
-## 16. Out of Scope (Explicit)
+## 17. Out of Scope (Explicit)
 
 This module will NOT do:
 
