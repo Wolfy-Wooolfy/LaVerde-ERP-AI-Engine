@@ -26,6 +26,7 @@ _MODEL = "rs.installment"
 _CACHE_KEY_PREFIX = "kpi:late_uncollected"
 _CACHE_KEY_PREFIX_KPI1 = "kpi:total_portfolio_value"
 _CACHE_KEY_PREFIX_KPI5 = "kpi:late_uncollected_by_project"
+_CACHE_KEY_PREFIX_KPI3 = "kpi:pending_check_exposure"
 
 # Phase 2 confirmed project IDs and clean display names (MODULE_2_DISCOVERY_PHASE_2.md §6).
 # Odoo returns "Project#New Capital" etc.; we expose clean names to API consumers.
@@ -209,6 +210,110 @@ async def get_total_portfolio_value(client: Optional[OdooClient] = None) -> dict
         "cache_status": "fresh",
         "rpc_duration_ms": rpc_ms,
         "domain": domain,
+    }
+
+    _cache.set(cache_key, result)
+    return result
+
+
+async def get_pending_check_exposure(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI 3 — Pending Check Exposure.
+
+    Queries rs.installment filtered to state='post' and aggregates both
+    SUM(paid_amount) and SUM(x_studio_actual_paid_amount) in a single
+    read_group call. The derived value (paid - actual) represents checks
+    received from customers not yet cashed by the bank.
+
+    Domain: [('state', '=', 'post')] — excludes draft and cancelled
+    installments. Cancelled records carry historical paid_amount from
+    pre-cancellation cheque submissions; those pending amounts are not
+    part of the active collection pipeline. See Decision 4.1.
+
+    Return shape::
+
+        {
+            "value":                float,       # EGP, paid_amount_sum - actual_paid_sum
+            "currency":             "EGP",
+            "record_count":         int,         # posted installments matched (~42,443)
+            "as_of":                str,         # ISO 8601 UTC datetime
+            "cache_status":         str,         # "fresh" | "cached"
+            "rpc_duration_ms":      int,         # 0 if served from cache
+            "domain":               list,        # [('state', '=', 'post')]
+            "paid_amount_sum":      float,       # SUM(paid_amount)
+            "actual_paid_sum":      float,       # SUM(x_studio_actual_paid_amount)
+            "derivation_note":      str,         # "value = paid_amount_sum - actual_paid_sum"
+            "data_quality_warning": str | None,  # "value_is_negative" or None (Decision 4.4)
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated with a write method.
+        OdooQueryError: if the Odoo RPC fails for any reason (network, auth, RPC error).
+    """
+    _assert_read_only()
+
+    domain: list = [("state", "=", "post")]
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI3)
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        rows = await _client.execute_kw(
+            _MODEL,
+            "read_group",
+            args=[domain, ["paid_amount", "x_studio_actual_paid_amount"], []],
+            kwargs={"lazy": False},
+        )
+    except Exception as exc:
+        raise OdooQueryError(
+            f"read_group on {_MODEL} failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(f"Odoo read_group on {_MODEL} in {rpc_ms}ms | cache_key={cache_key}")
+
+    row = rows[0] if rows else {}
+    paid_amount_sum = float(row.get("paid_amount") or 0.0)
+    actual_paid_sum = float(row.get("x_studio_actual_paid_amount") or 0.0)
+    count = int(row.get("__count") or 0)
+    value = paid_amount_sum - actual_paid_sum
+
+    data_quality_warning: Optional[str] = None
+    if value < 0:
+        # Decision 4.4 (Option A): return as-is, log warning, set flag.
+        # A negative derived value indicates x_studio_actual_paid_amount exceeds
+        # paid_amount — a Studio field computation anomaly (Phase 2 §8 Finding 8b).
+        logger.warning(
+            "KPI 3 derived value is negative: paid_amount_sum=%s, "
+            "actual_paid_sum=%s, value=%s. This indicates a data "
+            "quality anomaly in Odoo Studio fields — see Decision 1.4 "
+            "and Phase 2 §8 Finding 8b.",
+            paid_amount_sum, actual_paid_sum, value,
+        )
+        data_quality_warning = "value_is_negative"
+
+    result: dict = {
+        "value": value,
+        "currency": "EGP",
+        "record_count": count,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "cache_status": "fresh",
+        "rpc_duration_ms": rpc_ms,
+        "domain": domain,
+        "paid_amount_sum": paid_amount_sum,
+        "actual_paid_sum": actual_paid_sum,
+        "derivation_note": "value = paid_amount_sum - actual_paid_sum",
+        "data_quality_warning": data_quality_warning,
     }
 
     _cache.set(cache_key, result)
