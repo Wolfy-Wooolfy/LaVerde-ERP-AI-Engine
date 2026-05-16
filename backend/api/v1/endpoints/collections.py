@@ -4,6 +4,7 @@ Collections KPI endpoints.
 GET /api/v1/collections/kpi/late-uncollected              — KPI 2: Late Uncollected
 GET /api/v1/collections/kpi/total-portfolio-value         — KPI 1: Total Portfolio Value
 GET /api/v1/collections/kpi/late-uncollected-by-project   — KPI 5: Late Uncollected per project
+GET /api/v1/collections/kpi/pending-check-exposure        — KPI 3: Pending Check Exposure
 """
 
 from fastapi import APIRouter, Request
@@ -15,6 +16,7 @@ from backend.core.limiter import limiter
 from backend.modules.collections.services.kpi_service import (
     get_late_uncollected,
     get_late_uncollected_by_project,
+    get_pending_check_exposure,
     get_total_portfolio_value,
 )
 
@@ -116,6 +118,46 @@ async def late_uncollected_by_project(request: Request) -> JSONResponse:
         )
     except Exception:
         logger.error("KPI 5 — unexpected error", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_error",
+                    "message": "An unexpected error occurred.",
+                }
+            },
+        )
+
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": "private, max-age=60",
+            "X-Cache-Status": str(data.get("cache_status", "fresh")),
+        },
+    )
+
+
+@router.get(
+    "/kpi/pending-check-exposure",
+    summary="KPI 3 — Pending Check Exposure (checks received, not yet cashed)",
+)
+@limiter.limit("60/minute")
+async def pending_check_exposure(request: Request) -> JSONResponse:
+    try:
+        data = await get_pending_check_exposure()
+    except OdooQueryError:
+        logger.warning("KPI 3 — Odoo query failed", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "odoo_unavailable",
+                    "message": "Odoo is unavailable or the query failed. Try again shortly.",
+                }
+            },
+        )
+    except Exception:
+        logger.error("KPI 3 — unexpected error", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={
