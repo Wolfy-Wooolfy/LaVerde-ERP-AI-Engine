@@ -1,8 +1,9 @@
 """
 Collections KPI endpoints.
 
-GET /api/v1/collections/kpi/late-uncollected       — KPI 2: Late Uncollected
-GET /api/v1/collections/kpi/total-portfolio-value  — KPI 1: Total Portfolio Value
+GET /api/v1/collections/kpi/late-uncollected              — KPI 2: Late Uncollected
+GET /api/v1/collections/kpi/total-portfolio-value         — KPI 1: Total Portfolio Value
+GET /api/v1/collections/kpi/late-uncollected-by-project   — KPI 5: Late Uncollected per project
 """
 
 from fastapi import APIRouter, Request
@@ -13,6 +14,7 @@ from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.collections.services.kpi_service import (
     get_late_uncollected,
+    get_late_uncollected_by_project,
     get_total_portfolio_value,
 )
 
@@ -74,6 +76,46 @@ async def total_portfolio_value(request: Request) -> JSONResponse:
         )
     except Exception:
         logger.error("KPI 1 — unexpected error", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_error",
+                    "message": "An unexpected error occurred.",
+                }
+            },
+        )
+
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": "private, max-age=60",
+            "X-Cache-Status": str(data.get("cache_status", "fresh")),
+        },
+    )
+
+
+@router.get(
+    "/kpi/late-uncollected-by-project",
+    summary="KPI 5 — Late Uncollected per project (New Capital, Cassette, La puerta)",
+)
+@limiter.limit("60/minute")
+async def late_uncollected_by_project(request: Request) -> JSONResponse:
+    try:
+        data = await get_late_uncollected_by_project()
+    except OdooQueryError:
+        logger.warning("KPI 5 — Odoo query failed", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "odoo_unavailable",
+                    "message": "Odoo is unavailable or the query failed. Try again shortly.",
+                }
+            },
+        )
+    except Exception:
+        logger.error("KPI 5 — unexpected error", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={
