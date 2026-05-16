@@ -20,3 +20,7 @@ class ReadOnlyViolationError(LaVerdeERPError):
 
 class StageResolutionError(LaVerdeERPError):
     """Raised when stage names cannot be fetched or resolved from Odoo."""
+
+
+class UnknownProjectError(LaVerdeERPError):
+    """Raised when read_group returns a project_id not in _PROJECT_NAMES."""
