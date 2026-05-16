@@ -197,10 +197,16 @@ def main() -> int:
     xcs = r.headers.get("x-cache-status", "")
     _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
 
-    # ── Step 8: Domain shape (must be empty list) ─────────────────────────────
+    # ── Step 8: Domain shape — must be single state='post' clause ───────────────
+    # Decision 2.4: KPI 1 uses state='post' to match Odoo "All Installments" view.
+    expected_domain = [["state", "=", "post"]]
     domain: list = body.get("domain", None)
-    if not _check("domain is empty list []", domain == [], f"got {domain!r}"):
-        failures.append("domain_not_empty")
+    if not _check(
+        "domain == [['state','=','post']]",
+        domain == expected_domain,
+        f"got {domain!r}",
+    ):
+        failures.append("domain_wrong")
 
     # ── Step 9: Second request — cache hit ───────────────────────────────────
     _log(_INFO, "Issuing second request to verify cache hit ...")
@@ -237,10 +243,11 @@ def main() -> int:
     print("Next step (manual):")
     print("  1. Open Odoo → Collections Mgmt → All Installments")
     print("  2. Set Measures: Amount")
-    print("  3. Compare the \"Amount\" aggregate (top of the pivot or list view)")
+    print("  3. Compare the \"Amount\" aggregate (pivot or list total)")
     print("     to the Backend value above.")
-    print(f"  4. Expected match: identity-equal at EGP level (Khaled confirmed")
-    print(f"     the All Installments Amount total = baseline on 2026-05-16).")
+    print("  4. Expected match: identity-equal at EGP level.")
+    print("     The Odoo UI 'All Installments' view filters to state='post',")
+    print("     which is exactly the domain this backend uses (Decision 2.4).")
     return 0
 
 

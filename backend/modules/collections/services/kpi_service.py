@@ -130,19 +130,23 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
 async def get_total_portfolio_value(client: Optional[OdooClient] = None) -> dict:
     """Return KPI 1 — Total Portfolio Value.
 
-    Queries rs.installment with an empty domain (all records) and returns
-    SUM(amount) via read_group.
+    Queries rs.installment filtered to state='post' (posted installments only)
+    and returns SUM(amount) via read_group.
+
+    Domain: [('state', '=', 'post')] — excludes draft (19 records) and
+    cancelled (508 records) installments that exist in rs.installment but
+    are excluded by Odoo's "All Installments" view. See Decision 2.4.
 
     Return shape::
 
         {
-            "value":           float,  # EGP total amount across all installments
+            "value":           float,  # EGP total amount across posted installments
             "currency":        "EGP",
-            "record_count":    int,    # total installment count (~42,970)
+            "record_count":    int,    # posted installment count (~42,443)
             "as_of":           str,    # ISO 8601 UTC datetime of the query
             "cache_status":    str,    # "fresh" or "cached"
             "rpc_duration_ms": int,    # 0 if served from cache
-            "domain":          list,   # always [] for this KPI
+            "domain":          list,   # [('state', '=', 'post')]
         }
 
     Raises:
@@ -151,7 +155,7 @@ async def get_total_portfolio_value(client: Optional[OdooClient] = None) -> dict
     """
     _assert_read_only()
 
-    domain: list = []
+    domain: list = [("state", "=", "post")]
     cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI1)
 
     cached = _cache.get(cache_key)
