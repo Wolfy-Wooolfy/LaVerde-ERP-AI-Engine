@@ -926,24 +926,28 @@ async def test_kpi3_negative_derived_value_option_a(
 # The "5 of 6 months are zero" scenario is an explicit test case.
 # ��═════════════════════════════════════════════════════════════════════════════
 
-# D0 Part 1 discovery baseline — December 2025 only.
-# Odoo returns groupby keys as English full-month names.
+# search_read format: individual records with date (UTC string, "YYYY-MM-DD HH:MM:SS") and amount.
+# Python-side grouping converts each UTC datetime to Egypt local time before bucketing.
+#
+# December 2025 only — 3 records all in Egypt-local December.
+#   id=3869: "2025-11-30 22:00:00" UTC = "2025-12-01 00:00:00" Egypt (UTC+2 winter) → Dec
+#   mid-month and late-month records stay clearly in December.
 _MOCK_RESPONSE_KPI6_DEC_ONLY = [
-    {
-        "date:month": "December 2025",
-        "__count": 431,
-        "amount": 47_465_098.00,
-    }
+    {"date": "2025-11-30 22:00:00", "amount":  99_114.00},  # Dec 1 midnight Egypt (UTC+2)
+    {"date": "2025-12-15 10:00:00", "amount": 100_000.00},  # Dec 15 midday Egypt
+    {"date": "2025-12-20 08:00:00", "amount": 200_000.00},  # Dec 20 morning Egypt
 ]
+# Egypt-local totals: December 2025 = 399,114.00 EGP / 3 records
 
 # Simulates a future state where all 6 months have data (all non-zero).
+# One record per month; May uses UTC+3 (Egypt summer DST).
 _MOCK_RESPONSE_KPI6_ALL_6 = [
-    {"date:month": "December 2025", "__count": 431, "amount": 47_465_098.00},
-    {"date:month": "January 2026",  "__count": 120, "amount": 15_000_000.00},
-    {"date:month": "February 2026", "__count": 98,  "amount": 12_000_000.00},
-    {"date:month": "March 2026",    "__count": 210, "amount": 22_000_000.00},
-    {"date:month": "April 2026",    "__count": 185, "amount": 19_000_000.00},
-    {"date:month": "May 2026",      "__count": 55,  "amount":  5_000_000.00},
+    {"date": "2025-12-15 10:00:00", "amount": 47_465_098.00},  # Dec (UTC+2) → Dec 2025
+    {"date": "2026-01-15 10:00:00", "amount": 15_000_000.00},  # Jan (UTC+2) → Jan 2026
+    {"date": "2026-02-15 10:00:00", "amount": 12_000_000.00},  # Feb (UTC+2) → Feb 2026
+    {"date": "2026-03-15 10:00:00", "amount": 22_000_000.00},  # Mar (UTC+2) → Mar 2026
+    {"date": "2026-04-15 10:00:00", "amount": 19_000_000.00},  # Apr (UTC+2) → Apr 2026
+    {"date": "2026-05-15 07:00:00", "amount":  5_000_000.00},  # May (UTC+3) 10:00 Egypt → May 2026
 ]
 
 _MOCK_RESPONSE_KPI6_EMPTY = []   # no payment records in window at all
@@ -1028,12 +1032,14 @@ async def test_kpi6_domain_boundaries_are_utc_offset(
     )
 
 
-# ── Test K6-2 — Uses HEADER model with date:month groupby ────────────────────
+# ── Test K6-2 — Uses HEADER model via search_read with date+amount fields ─────
 
 
-async def test_kpi6_uses_header_model_with_date_month_groupby(
+async def test_kpi6_uses_header_model_search_read_with_correct_fields(
     mock_client_kpi6: MagicMock,
 ) -> None:
+    """Decision 5.10: search_read replaces read_group so Python can regroup
+    records by Egypt local month rather than Odoo's UTC-based date:month key."""
     with patch(
         "backend.modules.collections.services.cache.today_str",
         return_value=_KPI6_TODAY,
@@ -1044,9 +1050,13 @@ async def test_kpi6_uses_header_model_with_date_month_groupby(
     assert call_args.args[0] == _PAYMENT_HEADER_MODEL, (
         f"Expected model {_PAYMENT_HEADER_MODEL!r}, got {call_args.args[0]!r}"
     )
-    assert call_args.args[1] == "read_group"
-    groupby = call_args.kwargs["args"][2]
-    assert groupby == ["date:month"], f"Expected groupby=['date:month'], got {groupby!r}"
+    assert call_args.args[1] == "search_read", (
+        f"Must use search_read (not read_group) per Decision 5.10, got {call_args.args[1]!r}"
+    )
+    fields = call_args.kwargs["args"][1]
+    assert set(fields) == {"date", "amount"}, (
+        f"search_read must request exactly ['date', 'amount'], got {fields!r}"
+    )
 
 
 # ── Test K6-3 — Return shape: all top-level keys present ───────��─────────────
@@ -1116,8 +1126,8 @@ async def test_kpi6_five_of_six_months_zero_current_operational_state(
 
     dec = months[0]
     assert dec["month"] == "2025-12"
-    assert dec["amount"] == pytest.approx(47_465_098.00)
-    assert dec["record_count"] == 431
+    assert dec["amount"] == pytest.approx(399_114.00)   # 99_114 + 100_000 + 200_000
+    assert dec["record_count"] == 3
 
     for entry in months[1:]:
         assert entry["amount"] == 0.0, (
@@ -1347,3 +1357,82 @@ async def test_kpi6_all_zero_when_no_payment_records_in_window(
     for entry in result["months"]:
         assert entry["amount"] == 0.0
         assert entry["record_count"] == 0
+
+
+# ── Test K6-15 — Egypt-local regrouping of UTC midnight boundary records ──────
+
+
+async def test_kpi6_utc_midnight_records_bucketed_by_egypt_local_month() -> None:
+    """Records stored at UTC midnight that correspond to Egypt-local-midnight of
+    the next calendar day must land in the Egypt local month, not the UTC month.
+
+    Decision 5.10: Python-side regrouping using Africa/Cairo timezone.
+      "2025-11-30 22:00:00" UTC = "2025-12-01 00:00:00" Egypt (UTC+2) → December 2025
+      "2025-12-31 22:00:00" UTC = "2026-01-01 00:00:00" Egypt (UTC+2) → January 2026
+      "2025-12-15 10:00:00" UTC = "2025-12-15 12:00:00" Egypt            → December 2025
+    """
+    boundary_records = [
+        {"date": "2025-11-30 22:00:00", "amount": 10_000.00},  # Dec 1 midnight Egypt → Dec
+        {"date": "2025-12-31 22:00:00", "amount": 20_000.00},  # Jan 1 midnight Egypt → Jan
+        {"date": "2025-12-15 10:00:00", "amount": 30_000.00},  # Dec 15 midday Egypt  → Dec
+    ]
+    mock_c = MagicMock()
+    mock_c.execute_kw = AsyncMock(return_value=boundary_records)
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,  # 2026-05-17 → window: 2025-12 … 2026-05
+    ):
+        result = await get_collection_trend_6m(client=mock_c)
+
+    by_key = {e["month"]: e for e in result["months"]}
+
+    # Record 1 and 3 → Egypt local December → bucketed to 2025-12
+    assert by_key["2025-12"]["amount"] == pytest.approx(40_000.00), (
+        "2025-11-30 22:00 UTC and 2025-12-15 10:00 UTC must both land in December 2025"
+    )
+    assert by_key["2025-12"]["record_count"] == 2
+
+    # Record 2 → Egypt local January → bucketed to 2026-01
+    assert by_key["2026-01"]["amount"] == pytest.approx(20_000.00), (
+        "2025-12-31 22:00 UTC = 2026-01-01 00:00 Egypt must land in January 2026"
+    )
+    assert by_key["2026-01"]["record_count"] == 1
+
+
+# ── Test K6-16 — Summer DST boundary uses UTC+3 (Africa/Cairo May–Oct) ───────
+
+
+async def test_kpi6_summer_dst_midnight_bucketed_to_next_local_day() -> None:
+    """In summer (May–Oct), Egypt is UTC+3 per tzdata 2025.2.
+    A record at "2026-06-30 21:00:00" UTC = "2026-07-01 00:00:00" Egypt (UTC+3)
+    must land in July 2026, not June 2026.
+
+    Uses today=2026-07-31 so the 6-month window is 2026-02 … 2026-07.
+    """
+    summer_records = [
+        {"date": "2026-06-30 21:00:00", "amount": 50_000.00},  # Jul 1 midnight Egypt (UTC+3)
+        {"date": "2026-06-15 10:00:00", "amount": 25_000.00},  # Jun 15 13:00 Egypt → June
+    ]
+    mock_c = MagicMock()
+    mock_c.execute_kw = AsyncMock(return_value=summer_records)
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value="2026-07-31",  # window: 2026-02 … 2026-07
+    ):
+        result = await get_collection_trend_6m(client=mock_c)
+
+    by_key = {e["month"]: e for e in result["months"]}
+
+    # "2026-06-30 21:00:00 UTC" → Egypt UTC+3 = 2026-07-01 00:00:00 → July 2026
+    assert by_key["2026-07"]["amount"] == pytest.approx(50_000.00), (
+        "2026-06-30 21:00 UTC must land in July 2026 (UTC+3 summer offset)"
+    )
+    assert by_key["2026-07"]["record_count"] == 1
+
+    # "2026-06-15 10:00:00 UTC" → Egypt UTC+3 = 2026-06-15 13:00:00 → June 2026
+    assert by_key["2026-06"]["amount"] == pytest.approx(25_000.00), (
+        "2026-06-15 10:00 UTC must stay in June 2026"
+    )
+    assert by_key["2026-06"]["record_count"] == 1
