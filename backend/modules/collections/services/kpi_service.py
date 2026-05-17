@@ -9,8 +9,9 @@ Session 1 scope: get_late_uncollected() (KPI 2 — Late Uncollected).
 KPIs 1, 3, 4, 5, 6 are implemented in future sessions.
 """
 
+import calendar
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from loguru import logger
@@ -27,6 +28,26 @@ _CACHE_KEY_PREFIX = "kpi:late_uncollected"
 _CACHE_KEY_PREFIX_KPI1 = "kpi:total_portfolio_value"
 _CACHE_KEY_PREFIX_KPI5 = "kpi:late_uncollected_by_project"
 _CACHE_KEY_PREFIX_KPI3 = "kpi:pending_check_exposure"
+_CACHE_KEY_PREFIX_KPI6 = "kpi:collection_trend_6m"
+
+# KPI 6 uses the payment installment header model (Decision 5.6).
+# The HEADER.date field is user-entered (cash receipt date); HEADER.amount
+# is proven identity-equal to SUM(LINE.amount) — D0 Part 2 Finding B.
+_PAYMENT_HEADER_MODEL = "rs.account.payment.installment"
+_CACHE_TTL_KPI6 = 3600  # 1 hour — trend data is stable within a session
+
+# Arabic month labels (Decision 5.5 — hardcoded, no babel dependency).
+_ARABIC_MONTHS: dict[int, str] = {
+    1: "يناير",   2: "فبراير",  3: "مارس",    4: "أبريل",
+    5: "مايو",    6: "يونيو",   7: "يوليو",   8: "أغسطس",
+    9: "سبتمبر", 10: "أكتوبر", 11: "نوفمبر", 12: "ديسمبر",
+}
+
+# Odoo returns date:month groupby values as English month names (e.g. "December 2025").
+# Reverse-index calendar.month_name so we can parse them back to a month number.
+_MONTH_NAME_TO_NUM: dict[str, int] = {
+    name: i for i, name in enumerate(calendar.month_name) if name
+}
 
 # Phase 2 confirmed project IDs and clean display names (MODULE_2_DISCOVERY_PHASE_2.md §6).
 # Odoo returns "Project#New Capital" etc.; we expose clean names to API consumers.
@@ -448,4 +469,177 @@ async def get_late_uncollected_by_project(client: Optional[OdooClient] = None) -
     }
 
     _cache.set(cache_key, result)
+    return result
+
+
+async def get_collection_trend_6m(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI 6 — 6-Month Collection Trend.
+
+    Queries rs.account.payment.installment (HEADER model) for posted payment
+    records whose user-entered date falls within the trailing 6 calendar months,
+    grouped by date:month. Returns exactly 6 entries oldest-first, zero-padding
+    months with no data (Decision 3.4 zero-padding extended to KPI 6).
+
+    Architecture note (Decision 5.6): the LINE model (rs.account.payment.
+    installment.line) cannot be used because Odoo's ORM does not support
+    :month granularity groupby on related fields (payment_id.date:month).
+    HEADER.amount is identity-equal to SUM(LINE.amount) — D0 Part 2 Finding B.
+
+    Empty months in the current data period are expected (Decision 5.7):
+    operations staff are entering historical payments retroactively. Zero bars
+    are truthful, not bugs.
+
+    Return shape::
+
+        {
+            "months": [
+                {
+                    "month":        str,    # YYYY-MM, oldest first
+                    "label_en":     str,    # e.g. "Dec 2025"
+                    "label_ar":     str,    # e.g. "ديسمبر"  (Decision 5.5)
+                    "amount":       float,  # EGP collected this month
+                    "record_count": int,    # payment header count
+                },
+                # ... exactly 6 entries
+            ],
+            "total_6m":           float,   # EGP, sum across all 6 months
+            "total_record_count": int,
+            "average_monthly":    float,   # total_6m / 6 (includes zero months)
+            "period_start":       str,     # YYYY-MM-DD (first day of oldest month)
+            "period_end":         str,     # YYYY-MM-DD (today)
+            "currency":           "EGP",
+            "as_of":              str,     # ISO 8601 UTC datetime
+            "cache_status":       str,     # "fresh" | "cached"
+            "cache_ttl_seconds":  int,     # 3600
+            "rpc_duration_ms":    int,     # 0 if cached
+            "domain":             list,    # exact domain used
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated with a write method.
+        OdooQueryError: if the Odoo RPC fails for any reason (network, auth, RPC error).
+    """
+    _assert_read_only()
+
+    today = date.fromisoformat(_cache.today_str())
+
+    # Trailing 6 calendar months (stdlib only — Decision 5.4, no python-dateutil).
+    # Example: today = 2026-05-17 → start_month = 0 → wraps → period_start = 2025-12-01
+    start_month = today.month - 5
+    start_year = today.year
+    if start_month <= 0:
+        start_month += 12
+        start_year -= 1
+    period_start = date(start_year, start_month, 1)
+    period_end = today
+
+    domain: list = [
+        ("state", "=", "post"),
+        ("date", ">=", period_start.isoformat()),
+        ("date", "<=", period_end.isoformat() + " 23:59:59"),
+    ]
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI6)
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        rows = await _client.execute_kw(
+            _PAYMENT_HEADER_MODEL,
+            "read_group",
+            args=[domain, ["amount"], ["date:month"]],
+            kwargs={"lazy": False},
+        )
+    except Exception as exc:
+        raise OdooQueryError(
+            f"read_group on {_PAYMENT_HEADER_MODEL} (groupby date:month) failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"Odoo read_group on {_PAYMENT_HEADER_MODEL} (date:month) in {rpc_ms}ms"
+        f" | cache_key={cache_key}"
+    )
+
+    if rpc_ms > 5000:
+        logger.warning(
+            "KPI 6 read_group on %s took %dms — exceeds 5s performance threshold (Decision 5.4)",
+            _PAYMENT_HEADER_MODEL, rpc_ms,
+        )
+
+    # Parse Odoo rows into YYYY-MM keyed lookup.
+    # Odoo returns date:month groupby value as e.g. "December 2025" (English full name + year).
+    by_month: dict[str, dict] = {}
+    for row in rows:
+        odoo_key = row.get("date:month")
+        if not odoo_key:
+            continue
+        parts = str(odoo_key).rsplit(" ", 1)
+        if len(parts) != 2:
+            logger.warning("KPI 6: unexpected date:month key format %r — skipping row", odoo_key)
+            continue
+        month_name, year_str = parts
+        month_num = _MONTH_NAME_TO_NUM.get(month_name)
+        if month_num is None:
+            logger.warning("KPI 6: unrecognised month name %r in key %r — skipping", month_name, odoo_key)
+            continue
+        try:
+            year = int(year_str)
+        except ValueError:
+            logger.warning("KPI 6: non-integer year %r in key %r — skipping", year_str, odoo_key)
+            continue
+        ym = f"{year:04d}-{month_num:02d}"
+        by_month[ym] = {
+            "amount": float(row.get("amount") or 0.0),
+            "count":  int(row.get("__count") or 0),
+        }
+
+    # Build ordered 6-entry list, zero-padding months absent from Odoo response.
+    month_entries: list[dict] = []
+    y, m = period_start.year, period_start.month
+    while (y, m) <= (period_end.year, period_end.month):
+        ym   = f"{y:04d}-{m:02d}"
+        data = by_month.get(ym, {"amount": 0.0, "count": 0})
+        month_entries.append({
+            "month":        ym,
+            "label_en":     f"{calendar.month_abbr[m]} {y}",
+            "label_ar":     _ARABIC_MONTHS[m],
+            "amount":       data["amount"],
+            "record_count": data["count"],
+        })
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+    total_6m        = sum(e["amount"]       for e in month_entries)
+    total_count     = sum(e["record_count"] for e in month_entries)
+    average_monthly = total_6m / 6  # always 6 entries
+
+    result: dict = {
+        "months":             month_entries,
+        "total_6m":           total_6m,
+        "total_record_count": total_count,
+        "average_monthly":    average_monthly,
+        "period_start":       period_start.isoformat(),
+        "period_end":         period_end.isoformat(),
+        "currency":           "EGP",
+        "as_of":              datetime.now(timezone.utc).isoformat(),
+        "cache_status":       "fresh",
+        "cache_ttl_seconds":  _CACHE_TTL_KPI6,
+        "rpc_duration_ms":    rpc_ms,
+        "domain":             domain,
+    }
+
+    _cache.set(cache_key, result, ttl=_CACHE_TTL_KPI6)
     return result

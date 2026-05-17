@@ -5,6 +5,7 @@ GET /api/v1/collections/kpi/late-uncollected              — KPI 2: Late Uncoll
 GET /api/v1/collections/kpi/total-portfolio-value         — KPI 1: Total Portfolio Value
 GET /api/v1/collections/kpi/late-uncollected-by-project   — KPI 5: Late Uncollected per project
 GET /api/v1/collections/kpi/pending-check-exposure        — KPI 3: Pending Check Exposure
+GET /api/v1/collections/kpi/collection-trend-6m           — KPI 6: 6-Month Collection Trend
 """
 
 from fastapi import APIRouter, Request
@@ -14,6 +15,7 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.collections.services.kpi_service import (
+    get_collection_trend_6m,
     get_late_uncollected,
     get_late_uncollected_by_project,
     get_pending_check_exposure,
@@ -172,6 +174,47 @@ async def pending_check_exposure(request: Request) -> JSONResponse:
         content=data,
         headers={
             "Cache-Control": "private, max-age=60",
+            "X-Cache-Status": str(data.get("cache_status", "fresh")),
+        },
+    )
+
+
+@router.get(
+    "/kpi/collection-trend-6m",
+    summary="KPI 6 — 6-Month Collection Trend (payment installment headers, state=post)",
+)
+@limiter.limit("60/minute")
+async def collection_trend_6m(request: Request) -> JSONResponse:
+    try:
+        data = await get_collection_trend_6m()
+    except OdooQueryError:
+        logger.warning("KPI 6 — Odoo query failed", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "odoo_unavailable",
+                    "message": "Odoo is unavailable or the query failed. Try again shortly.",
+                }
+            },
+        )
+    except Exception:
+        logger.error("KPI 6 — unexpected error", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_error",
+                    "message": "An unexpected error occurred.",
+                }
+            },
+        )
+
+    ttl = data.get("cache_ttl_seconds", 3600)
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": f"private, max-age={ttl}",
             "X-Cache-Status": str(data.get("cache_status", "fresh")),
         },
     )
