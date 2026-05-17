@@ -11,6 +11,7 @@ KPIs 1, 3, 4, 5, 6 are implemented in future sessions.
 
 import calendar
 import time
+from collections import defaultdict
 from datetime import date, datetime, time as dt_time, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -42,12 +43,6 @@ _ARABIC_MONTHS: dict[int, str] = {
     1: "يناير",   2: "فبراير",  3: "مارس",    4: "أبريل",
     5: "مايو",    6: "يونيو",   7: "يوليو",   8: "أغسطس",
     9: "سبتمبر", 10: "أكتوبر", 11: "نوفمبر", 12: "ديسمبر",
-}
-
-# Odoo returns date:month groupby values as English month names (e.g. "December 2025").
-# Reverse-index calendar.month_name so we can parse them back to a month number.
-_MONTH_NAME_TO_NUM: dict[str, int] = {
-    name: i for i, name in enumerate(calendar.month_name) if name
 }
 
 # La Verde operates in Egypt (Africa/Cairo — UTC+2 Nov-Apr, UTC+3 May-Oct per
@@ -564,6 +559,7 @@ async def get_collection_trend_6m(client: Optional[OdooClient] = None) -> dict:
         ("date", ">=", start_utc_str),   # Decision 5.9: UTC boundary for Egypt UTC+2
         ("date", "<=", end_utc_str),
     ]
+
     cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI6)
 
     cached = _cache.get(cache_key)
@@ -575,17 +571,21 @@ async def get_collection_trend_6m(client: Optional[OdooClient] = None) -> dict:
 
     _client = client if client is not None else OdooClient()
 
+    # Note: Odoo's read_group groups by raw stored UTC value, which places
+    # Egypt-local-midnight records in the previous UTC month. We use search_read
+    # + Python regrouping in Egypt local time to produce identity-equal results
+    # with the Odoo UI. See Decision 5.10.
     t0 = time.monotonic()
     try:
-        rows = await _client.execute_kw(
+        records = await _client.execute_kw(
             _PAYMENT_HEADER_MODEL,
-            "read_group",
-            args=[domain, ["amount"], ["date:month"]],
-            kwargs={"lazy": False},
+            "search_read",
+            args=[domain, ["date", "amount"]],
+            kwargs={},
         )
     except Exception as exc:
         raise OdooQueryError(
-            f"read_group on {_PAYMENT_HEADER_MODEL} (groupby date:month) failed: {exc}"
+            f"search_read on {_PAYMENT_HEADER_MODEL} failed: {exc}"
         ) from exc
     finally:
         if client is None:
@@ -593,42 +593,32 @@ async def get_collection_trend_6m(client: Optional[OdooClient] = None) -> dict:
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
-        f"Odoo read_group on {_PAYMENT_HEADER_MODEL} (date:month) in {rpc_ms}ms"
-        f" | cache_key={cache_key}"
+        f"Odoo search_read on {_PAYMENT_HEADER_MODEL} returned {len(records)} records "
+        f"in {rpc_ms}ms | cache_key={cache_key}"
     )
 
     if rpc_ms > 5000:
         logger.warning(
-            "KPI 6 read_group on %s took %dms — exceeds 5s performance threshold (Decision 5.4)",
+            "KPI 6 search_read on %s took %dms — exceeds 5s performance threshold (Decision 5.4)",
             _PAYMENT_HEADER_MODEL, rpc_ms,
         )
 
-    # Parse Odoo rows into YYYY-MM keyed lookup.
-    # Odoo returns date:month groupby value as e.g. "December 2025" (English full name + year).
-    by_month: dict[str, dict] = {}
-    for row in rows:
-        odoo_key = row.get("date:month")
-        if not odoo_key:
-            continue
-        parts = str(odoo_key).rsplit(" ", 1)
-        if len(parts) != 2:
-            logger.warning("KPI 6: unexpected date:month key format %r — skipping row", odoo_key)
-            continue
-        month_name, year_str = parts
-        month_num = _MONTH_NAME_TO_NUM.get(month_name)
-        if month_num is None:
-            logger.warning("KPI 6: unrecognised month name %r in key %r — skipping", month_name, odoo_key)
+    # Group records by Egypt local month. Odoo returns date as "YYYY-MM-DD HH:MM:SS" UTC.
+    by_month: defaultdict = defaultdict(lambda: {"amount": 0.0, "count": 0})
+    for rec in records:
+        raw_date = rec.get("date")
+        if not raw_date:
+            logger.warning("KPI 6: record missing date — skipping: id=%s", rec.get("id"))
             continue
         try:
-            year = int(year_str)
+            utc_dt = datetime.strptime(str(raw_date), "%Y-%m-%d %H:%M:%S").replace(tzinfo=_UTC_TZ)
         except ValueError:
-            logger.warning("KPI 6: non-integer year %r in key %r — skipping", year_str, odoo_key)
+            logger.warning("KPI 6: unparseable date %r — skipping", raw_date)
             continue
-        ym = f"{year:04d}-{month_num:02d}"
-        by_month[ym] = {
-            "amount": float(row.get("amount") or 0.0),
-            "count":  int(row.get("__count") or 0),
-        }
+        local_dt = utc_dt.astimezone(_LA_VERDE_TZ)
+        ym = local_dt.strftime("%Y-%m")
+        by_month[ym]["amount"] += float(rec.get("amount") or 0.0)
+        by_month[ym]["count"]  += 1
 
     # Build ordered 6-entry list, zero-padding months absent from Odoo response.
     month_entries: list[dict] = []
