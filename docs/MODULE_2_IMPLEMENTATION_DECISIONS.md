@@ -955,3 +955,35 @@ and paste output for sign-off._
   for Session 6).
 
 ---
+
+### Decision 6.4 — Uvicorn --reload stale bytecode caveat
+
+**Identified:** Session 6 Checkpoint 2, 2026-05-17
+
+During Session 6 Checkpoint 2, the KPI 4 endpoint returned HTTP 404
+despite being correctly defined in `collections.py` and committed. Root cause:
+uvicorn's `--reload` mode cached the old compiled `.pyc` of `collections.py`
+before the new endpoint's changes were applied, and the file-watcher failed to
+trigger a recompile. The Python 3 `__pycache__` directory retained the stale
+bytecode. The router inclusion in `router.py` and the endpoint definition itself
+were both correct — the only fault was stale bytecode on the running process.
+
+**Resolution:** Full process termination + `__pycache__` purge + clean uvicorn
+restart (without `--reload`) resolved the issue immediately. No code change
+was required.
+
+**Standard going forward:** When running `verify_kpi*_live.py` scripts, restart
+the server cleanly before verification:
+
+1. Stop all python processes:
+   `Get-Process -Name python -ErrorAction SilentlyContinue | Stop-Process -Force`
+2. Purge all `__pycache__` directories:
+   `Get-ChildItem -Path . -Filter __pycache__ -Recurse -Directory | Remove-Item -Recurse -Force`
+3. Start uvicorn **without** `--reload`:
+   `C:\Python310\python.exe -m uvicorn backend.main:app`
+4. Re-run the verify script.
+
+The `--reload` flag is acceptable during active development, but must be disabled
+(with a clean restart) before any identity-equal verification gate.
+
+---
