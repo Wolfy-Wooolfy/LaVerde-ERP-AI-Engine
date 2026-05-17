@@ -579,3 +579,161 @@ numeric-correctness standpoint.
   sanity bounds allow ±100M of realistic drift from the D0 baseline.
 
 ---
+
+## Session 5 — KPI 6: 6-Month Collection Trend
+
+**Session date:** 2026-05-17  
+**Scope:** Pre-D1 cache refactor, D1 (service), D2 (endpoint), D3 (verification script), D4 (unit tests)
+
+---
+
+### Decision 5.1 — State filter required for payment headers
+
+**Status:** Approved  
+**Context:** D0 Part 1 side-by-side comparison (Section 5) found +83,000 EGP delta between
+unfiltered and `state='post'` filtered results on `rs.account.payment.installment`.  
+**Decision:** Apply `("state", "=", "post")` to the KPI 6 domain. The delta is material
+(83K EGP from non-post records in December 2025 alone) and state filtering is consistent
+with every other KPI in this module.
+
+---
+
+### Decision 5.2 — Cache TTL Option A: per-key parameter
+
+**Status:** Approved (pre-session)  
+**Context:** KPI 6 requires a 3600s (hourly) TTL, while KPIs 1, 2, 3, 5 use 60s. A single
+module-level `_TTL_SECONDS = 60` global cannot serve both.  
+**Decision:** Option A — extend `cache.set(key, value, ttl: int = 60)` with a `ttl` parameter
+defaulting to `_TTL_SECONDS`. The internal store becomes a 3-tuple `(value, stored_at, ttl)`.
+All existing callers are unaffected; KPI 6 calls `_cache.set(cache_key, result, ttl=3600)`.  
+**Rejected alternatives:**  
+- Option B (separate module): unnecessary complexity for a single extra parameter.  
+- Option C (Redis): premature; Redis is a future migration path (Decision 1.1).
+
+---
+
+### Decision 5.3 — Always return exactly 6 month entries (zero-padding)
+
+**Status:** Approved (pre-session, extension of Decision 3.4)  
+**Context:** Odoo's `read_group` only returns groups with matching records. Months with no
+posted payment headers are absent from the response.  
+**Decision:** Zero-pad absent months to always return exactly 6 entries oldest-first. This
+is the same pattern as KPI 5's project zero-padding (Decision 3.4), extended to KPI 6.
+The frontend must render zero bars without special treatment.
+
+---
+
+### Decision 5.4 — Performance warning threshold: 5000ms
+
+**Status:** Approved (pre-session)  
+**Context:** KPI 6 queries `rs.account.payment.installment` (~4,437 line records, 431 header
+records in the 6-month window). Expected RPC time is well under 5s.  
+**Decision:** Log a `WARNING` if `rpc_duration_ms > 5000`. No hard timeout is applied.
+The 3600s cache TTL means a slow first fetch is amortized across 1 hour of requests.
+
+---
+
+### Decision 5.5 — Arabic month labels: hardcoded dict
+
+**Status:** Approved (pre-session)  
+**Context:** The frontend label system requires Arabic month names. Alternatives considered:
+(a) `babel` library, (b) `python-dateutil`, (c) hardcoded dict.  
+**Decision:** Hardcoded `_ARABIC_MONTHS: dict[int, str]` in `kpi_service.py`.  
+**Rationale:** Neither `babel` nor `python-dateutil` is in `requirements.txt`; adding a
+dependency for 12 string literals is disproportionate. The mapping is stable (month names
+do not change).  
+**Mapping:**
+
+```python
+_ARABIC_MONTHS = {
+    1: "يناير",   2: "فبراير",  3: "مارس",    4: "أبريل",
+    5: "مايو",    6: "يونيو",   7: "يوليو",   8: "أغسطس",
+    9: "سبتمبر", 10: "أكتوبر", 11: "نوفمبر", 12: "ديسمبر",
+}
+```
+
+---
+
+### Decision 5.6 — Architecture: HEADER model + user-entered date
+
+**Status:** Approved (session — replaces Phase 2 §6.4 LINE model approach)  
+**Context:** D0 Part 1 discovery confirmed that Odoo's ORM does NOT support `:month`
+granularity `groupby` on related fields (`payment_id.date:month` raises `ValueError` in
+`_read_group_get_annotated_groupby`). The Phase 2 §6.4 approach of querying the LINE model
+grouped by `payment_id.date:month` is therefore blocked at the ORM layer.
+
+D0 Part 2 discovery confirmed (Findings A and B):
+- **Finding A:** `HEADER.date` is a user-entered field (distinct from both `create_date`
+  and `write_date` in 10/10 sampled records). It represents the cash receipt date.
+- **Finding B:** `HEADER.amount` == `SUM(LINE.amount)` in 10/10 sampled records (identity-equal,
+  delta = ±0.00 for all). The HEADER model carries the correct value.
+- **Finding D:** `rs.installment.write_date` is UNUSABLE as a trend axis — a bulk data migration
+  in April 2026 wrote 26,110 records (≈ the entire database) on a single day, making
+  `write_date:month` groupby return 2.97B EGP in April 2026 alone.
+
+**Decision:**  
+- **Model:** `rs.account.payment.installment` (HEADER, not LINE)  
+- **Date axis:** `HEADER.date` (user-entered cash receipt date)  
+- **Amount field:** `HEADER.amount` (proven = SUM(LINE.amount))  
+- **Groupby:** `["date:month"]` (direct field — no ORM limitation)  
+- **State filter:** `("state", "=", "post")` (Decision 5.1)  
+- **Odoo groupby key format:** `"date:month": "December 2025"` (English full month name + year).
+  Parsed via `_MONTH_NAME_TO_NUM` reverse-lookup of `calendar.month_name`.
+
+---
+
+### Decision 5.7 — Empty months during data entry period are expected
+
+**Status:** Approved  
+**Context:** D0 Part 1 found only December 2025 has data in the 6-month window
+(2025-12-01 → 2026-05-17). January–May 2026 return zero records.  
+**Root cause:** The operations team is entering historical payment data retroactively.
+All 10 most-recent header records (Section A, D0 Part 2) were created in April–May 2026
+but carry `HEADER.date` values in 2025, confirming the data is being back-entered.  
+**Decision:** Zero months are truthful data, not bugs. The service zero-pads them (Decision 5.3).
+The verification script (`verify_kpi6_live.py`) explicitly notes this with a `[WARN]` label —
+not a `[FAIL]` — and the manual cross-check instructions state the same.  
+**Implication for frontend:** Zero bars must be rendered normally. A "no data" placeholder
+would mislead users into thinking the KPI is broken.
+
+---
+
+### Decision 5.8 — Board launch criteria for KPI 6
+
+**Status:** Approved  
+**Context:** Decision 1.3 defers all KPI Board exposure until data entry is complete.
+KPI 6 has an additional data-density requirement.  
+**Decision:** KPI 6 must NOT be shown to the Board until BOTH conditions hold:
+1. La Verde confirms historical data entry is complete (Decision 1.3 baseline).
+2. At least 5 of the trailing 6 calendar months have non-zero payment records.
+
+Condition 1 alone is insufficient: if data entry completes but only December 2025 has
+records, the trend chart shows a single bar — misleading.  
+Condition 2 alone is insufficient: if months have data but entry is still in progress,
+the chart numbers are incomplete.
+
+---
+
+### KPI 6 — Implementation summary
+
+| Item | Value |
+|---|---|
+| Endpoint | `GET /api/v1/collections/kpi/collection-trend-6m` |
+| Model | `rs.account.payment.installment` |
+| Amount field | `amount` (= SUM of LINE amounts, Decision 5.6 Finding B) |
+| Date axis | `date` (user-entered cash receipt date, Decision 5.6 Finding A) |
+| Groupby | `date:month` |
+| State filter | `state = 'post'` (Decision 5.1) |
+| Cache TTL | 3600s (Decision 5.2) |
+| Cache-Control | `private, max-age=3600` |
+| Response months | Always 6, zero-padded, oldest-first (Decision 5.3) |
+| Arabic labels | Hardcoded dict (Decision 5.5) |
+| Verification | `scripts/verify_kpi6_live.py` — Checkpoint 2: manual cross-check Dec 2025 = 47,465,098 EGP / 431 records |
+
+**Caveats:**
+- Board launch deferred per Decisions 1.3 and 5.8.
+- The D0 verification baseline is December 2025: 47,465,098.00 EGP, 431 records.
+  This number reflects live Odoo data as of 2026-05-17 and will drift as data entry progresses.
+- Jan-May 2026 show zero until back-entry of 2026 payment records is complete.
+
+---
