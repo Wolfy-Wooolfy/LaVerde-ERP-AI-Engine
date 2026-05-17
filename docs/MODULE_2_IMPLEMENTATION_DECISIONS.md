@@ -728,12 +728,50 @@ the chart numbers are incomplete.
 | Cache-Control | `private, max-age=3600` |
 | Response months | Always 6, zero-padded, oldest-first (Decision 5.3) |
 | Arabic labels | Hardcoded dict (Decision 5.5) |
-| Verification | `scripts/verify_kpi6_live.py` — Checkpoint 2: manual cross-check Dec 2025 = 47,465,098 EGP / 431 records |
+| Verification | `scripts/verify_kpi6_live.py` — Checkpoint 2: manual cross-check Dec 2025 = 47,481,212 EGP / 430 records (state='post' + timezone-aware) |
 
 **Caveats:**
 - Board launch deferred per Decisions 1.3 and 5.8.
-- The D0 verification baseline is December 2025: 47,465,098.00 EGP, 431 records.
-  This number reflects live Odoo data as of 2026-05-17 and will drift as data entry progresses.
+- The December 2025 baseline is 47,481,212.00 EGP / 430 records (state='post', Decision 5.1;
+  timezone-aware UTC boundaries, Decision 5.9). Earlier D0 figures (431 records /
+  47,465,098 EGP unfiltered; 429 records / 47,382,098 EGP state='post' naive) are superseded.
 - Jan-May 2026 show zero until back-entry of 2026 payment records is complete.
+
+---
+
+### Decision 5.9 — Timezone-aware datetime filters for KPI 6
+
+**Status:** Approved  
+**Identified:** Checkpoint 2 manual cross-check, 2026-05-17  
+**Root cause:** `rs.account.payment.installment.date` is a `datetime` field stored in UTC by
+Odoo. The naive domain boundary `("date", ">=", "2025-12-01")` is interpreted by Odoo's ORM
+as UTC midnight, which excludes any record whose Egypt-local timestamp on December 1 is stored
+earlier than `2025-12-01 00:00:00 UTC`. The first ascending record had `date: 01/12/2025
+00:00:00` in the Egypt-local Odoo UI — stored as `2025-11-30 22:00:00 UTC` — and was silently
+excluded by the naive filter. Delta: 1 record / 99,114 EGP.
+
+**Egypt timezone:**  
+Egypt observes Africa/Cairo, which per tzdata 2025.2 is:
+- **UTC+2 (EET):** approximately November through April
+- **UTC+3 (EEST):** approximately May through October (DST re-introduced ~2023)
+
+`ZoneInfo("Africa/Cairo")` handles DST transitions automatically with no hardcoded offset.
+
+**Fix applied:** Added `_tz_period_bounds(period_start, period_end)` helper to
+`backend/modules/collections/services/kpi_service.py`. The helper converts period start
+(local midnight) and period end (local 23:59:59) to UTC datetime strings using
+`ZoneInfo("Africa/Cairo")` before constructing the Odoo domain. `zoneinfo` is Python 3.9+
+stdlib; `tzdata` package (already in `requirements.txt`) provides the IANA timezone database
+on Windows.
+
+**Impact audit:** Only KPI 6 is affected. KPIs 1, 2, 3, and 5 use `rs.installment`
+(`date` field is a plain `date` type, not `datetime`) with relative comparisons
+(e.g., `< today`). No timezone conversion is needed for date-type fields.
+
+**Future standard:** Any new KPI or endpoint that filters on a `datetime` field in Odoo
+**must** convert boundaries to UTC using `_tz_period_bounds()` or an equivalent pattern.
+Do not use `.isoformat()` or naive date strings for `datetime` domain clauses.
+
+**Baseline update:** December 2025 correct baseline after fix: **47,481,212.00 EGP / 430 records**.
 
 ---
