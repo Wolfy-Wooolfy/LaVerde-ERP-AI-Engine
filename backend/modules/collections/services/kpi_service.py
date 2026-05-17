@@ -31,7 +31,8 @@ _CACHE_KEY_PREFIX_KPI1 = "kpi:total_portfolio_value"
 _CACHE_KEY_PREFIX_KPI5 = "kpi:late_uncollected_by_project"
 _CACHE_KEY_PREFIX_KPI3 = "kpi:pending_check_exposure"
 _CACHE_KEY_PREFIX_KPI6 = "kpi:collection_trend_6m"
-_CACHE_KEY_PREFIX_KPI4 = "kpi:collection_rate"
+_CACHE_KEY_PREFIX_KPI4  = "kpi:collection_rate"
+_CACHE_KEY_PREFIX_KPI5B = "kpi:collection_rate_by_project"
 
 # KPI 6 uses the payment installment header model (Decision 5.6).
 # The HEADER.date field is user-entered (cash receipt date); HEADER.amount
@@ -851,6 +852,239 @@ async def get_collection_rate_mtd_ytd(client: Optional[OdooClient] = None) -> di
             "record_count_num": ytd_num_count,
             "record_count_den": ytd_den_count,
         },
+        "ytd_period_assumption": "calendar_year",
+        "currency":              "EGP",
+        "as_of":                 datetime.now(timezone.utc).isoformat(),
+        "cache_status":          "fresh",
+        "rpc_duration_ms":       rpc_ms,
+    }
+
+    _cache.set(cache_key, result)
+    return result
+
+
+async def get_collection_rate_by_project(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI 5b — Collection Rate per Project (MTD & YTD).
+
+    Branch A architecture (Decision 7.1): project_id is a direct field on
+    rs.account.payment.installment. Four read_group RPCs grouped by project_id:
+      Q1 — MTD numerator  : HEADER, state='post', UTC datetime bounds, groupby project_id
+      Q2 — MTD denominator: rs.installment, state='post', ISO date bounds, groupby project_id
+      Q3 — YTD numerator  : HEADER, state='post', UTC datetime bounds, groupby project_id
+      Q4 — YTD denominator: rs.installment, state='post', ISO date bounds, groupby project_id
+
+    Always returns all 3 projects, zero-padding missing ones (Decision 3.4 extended).
+    Zero denominator per project → rate_percent: None (Decision 6.3).
+    YTD: calendar year Jan 1 → today (Decision 6.2).
+
+    Return shape::
+
+        {
+            "mtd": {
+                "projects": [
+                    {
+                        "project_id":        int,
+                        "project_name":      str,
+                        "numerator_egp":     float,
+                        "denominator_egp":   float,
+                        "rate_percent":      float | None,
+                        "record_count_num":  int,
+                        "record_count_den":  int,
+                    },
+                    # 3 entries, ordered by project_id ascending: 1, 2, 3
+                ],
+                "total_numerator_egp":   float,
+                "total_denominator_egp": float,
+                "total_rate_percent":    float | None,
+                "period_start":          str,   # YYYY-MM-DD
+                "period_end":            str,   # YYYY-MM-DD
+            },
+            "ytd": { ... same shape ... },
+            "ytd_period_assumption": "calendar_year",
+            "currency":              "EGP",
+            "as_of":                 str,    # ISO 8601 UTC datetime
+            "cache_status":          str,    # "fresh" | "cached"
+            "rpc_duration_ms":       int,    # total across 4 RPCs, 0 if cached
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any of the 4 Odoo RPCs fails.
+        UnknownProjectError: if read_group returns a project_id not in _PROJECT_NAMES.
+    """
+    _assert_read_only()
+
+    today = date.fromisoformat(_cache.today_str())
+
+    mtd_start = date(today.year, today.month, 1)
+    mtd_end   = today
+    ytd_start = date(today.year, 1, 1)
+    ytd_end   = today
+
+    mtd_start_utc, mtd_end_utc = _tz_period_bounds(mtd_start, mtd_end)
+    ytd_start_utc, ytd_end_utc = _tz_period_bounds(ytd_start, ytd_end)
+    mtd_start_iso = mtd_start.isoformat()
+    mtd_end_iso   = mtd_end.isoformat()
+    ytd_start_iso = ytd_start.isoformat()
+    ytd_end_iso   = ytd_end.isoformat()
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI5B)
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (4 RPCs)")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # Q1 — MTD numerator per project (HEADER, UTC datetime bounds)
+        q1_domain: list = [
+            ("state", "=", "post"),
+            ("date",  ">=", mtd_start_utc),
+            ("date",  "<=", mtd_end_utc),
+        ]
+        q1_rows = await _client.execute_kw(
+            _PAYMENT_HEADER_MODEL, "read_group",
+            args=[q1_domain, ["amount"], ["project_id"]],
+            kwargs={"lazy": False},
+        )
+
+        # Q2 — MTD denominator per project (rs.installment, ISO date bounds)
+        q2_domain: list = [
+            ("state", "=", "post"),
+            ("date",  ">=", mtd_start_iso),
+            ("date",  "<=", mtd_end_iso),
+        ]
+        q2_rows = await _client.execute_kw(
+            _MODEL, "read_group",
+            args=[q2_domain, ["amount"], ["project_id"]],
+            kwargs={"lazy": False},
+        )
+
+        # Q3 — YTD numerator per project (HEADER, UTC datetime bounds)
+        q3_domain: list = [
+            ("state", "=", "post"),
+            ("date",  ">=", ytd_start_utc),
+            ("date",  "<=", ytd_end_utc),
+        ]
+        q3_rows = await _client.execute_kw(
+            _PAYMENT_HEADER_MODEL, "read_group",
+            args=[q3_domain, ["amount"], ["project_id"]],
+            kwargs={"lazy": False},
+        )
+
+        # Q4 — YTD denominator per project (rs.installment, ISO date bounds)
+        q4_domain: list = [
+            ("state", "=", "post"),
+            ("date",  ">=", ytd_start_iso),
+            ("date",  "<=", ytd_end_iso),
+        ]
+        q4_rows = await _client.execute_kw(
+            _MODEL, "read_group",
+            args=[q4_domain, ["amount"], ["project_id"]],
+            kwargs={"lazy": False},
+        )
+
+    except Exception as exc:
+        raise OdooQueryError(
+            f"KPI 5b read_group failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"KPI 5b: 4 read_group RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
+    )
+    if rpc_ms > 5000:
+        logger.warning(
+            "KPI 5b: total RPC time %dms exceeds 5s performance threshold", rpc_ms
+        )
+
+    def _parse_rows(rows: list) -> dict[int, tuple[float, int]]:
+        """Parse groupby-project_id rows → {project_id: (amount, count)}.
+
+        Skips null project_id rows (project_id=False).
+        Raises UnknownProjectError for IDs absent from _PROJECT_NAMES.
+        """
+        out: dict[int, tuple[float, int]] = {}
+        for row in rows:
+            proj_raw = row.get("project_id")
+            if not proj_raw or proj_raw is False:
+                continue
+            if isinstance(proj_raw, (list, tuple)) and len(proj_raw) == 2:
+                proj_id = int(proj_raw[0])
+            else:
+                proj_id = int(proj_raw)
+            if proj_id not in _PROJECT_NAMES:
+                raise UnknownProjectError(
+                    f"KPI 5b read_group returned unexpected project_id={proj_id}. "
+                    "A new Odoo project has appeared. Add it to _PROJECT_NAMES and re-deploy."
+                )
+            out[proj_id] = (
+                float(row.get("amount") or 0.0),
+                int(row.get("__count") or 0),
+            )
+        return out
+
+    def _build_period(
+        num_map: dict[int, tuple[float, int]],
+        den_map: dict[int, tuple[float, int]],
+        period_start: date,
+        period_end: date,
+    ) -> dict:
+        projects = []
+        for pid in sorted(_PROJECT_NAMES.keys()):
+            num_amt, num_ct = num_map.get(pid, (0.0, 0))
+            den_amt, den_ct = den_map.get(pid, (0.0, 0))
+            if pid not in num_map:
+                logger.info(
+                    "KPI 5b: project %d (%s) absent from numerator read_group — zero-padded",
+                    pid, _PROJECT_NAMES[pid],
+                )
+            if pid not in den_map:
+                logger.info(
+                    "KPI 5b: project %d (%s) absent from denominator read_group — zero-padded",
+                    pid, _PROJECT_NAMES[pid],
+                )
+            rate_val: Optional[float] = (
+                None if den_amt == 0.0 else num_amt / den_amt * 100
+            )
+            projects.append({
+                "project_id":       pid,
+                "project_name":     _PROJECT_NAMES[pid],
+                "numerator_egp":    num_amt,
+                "denominator_egp":  den_amt,
+                "rate_percent":     rate_val,
+                "record_count_num": num_ct,
+                "record_count_den": den_ct,
+            })
+
+        total_num = sum(p["numerator_egp"]   for p in projects)
+        total_den = sum(p["denominator_egp"] for p in projects)
+
+        return {
+            "projects":              projects,
+            "total_numerator_egp":   total_num,
+            "total_denominator_egp": total_den,
+            "total_rate_percent":    None if total_den == 0.0 else total_num / total_den * 100,
+            "period_start":          period_start.isoformat(),
+            "period_end":            period_end.isoformat(),
+        }
+
+    mtd_num_map = _parse_rows(q1_rows)
+    mtd_den_map = _parse_rows(q2_rows)
+    ytd_num_map = _parse_rows(q3_rows)
+    ytd_den_map = _parse_rows(q4_rows)
+
+    result: dict = {
+        "mtd":                   _build_period(mtd_num_map, mtd_den_map, mtd_start, mtd_end),
+        "ytd":                   _build_period(ytd_num_map, ytd_den_map, ytd_start, ytd_end),
         "ytd_period_assumption": "calendar_year",
         "currency":              "EGP",
         "as_of":                 datetime.now(timezone.utc).isoformat(),
