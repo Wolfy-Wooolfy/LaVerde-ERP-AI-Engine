@@ -31,6 +31,7 @@ _CACHE_KEY_PREFIX_KPI1 = "kpi:total_portfolio_value"
 _CACHE_KEY_PREFIX_KPI5 = "kpi:late_uncollected_by_project"
 _CACHE_KEY_PREFIX_KPI3 = "kpi:pending_check_exposure"
 _CACHE_KEY_PREFIX_KPI6 = "kpi:collection_trend_6m"
+_CACHE_KEY_PREFIX_KPI4 = "kpi:collection_rate"
 
 # KPI 6 uses the payment installment header model (Decision 5.6).
 # The HEADER.date field is user-entered (cash receipt date); HEADER.amount
@@ -658,4 +659,204 @@ async def get_collection_trend_6m(client: Optional[OdooClient] = None) -> dict:
     }
 
     _cache.set(cache_key, result, ttl=_CACHE_TTL_KPI6)
+    return result
+
+
+async def get_collection_rate_mtd_ytd(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI 4 — Collection Rate MTD & YTD.
+
+    Four sequential read_group RPCs (2 per period):
+      Q1 — MTD numerator  : rs.account.payment.installment, state='post', UTC datetime bounds
+      Q2 — MTD denominator: rs.installment, state='post', ISO date bounds
+      Q3 — YTD numerator  : rs.account.payment.installment, state='post', UTC datetime bounds
+      Q4 — YTD denominator: rs.installment, state='post', ISO date bounds
+
+    Formula (Decision 6.1):
+      rate_percent = SUM(HEADER.amount) / SUM(rs.installment.amount) * 100
+
+    Denominator uses rs.installment.amount (contractual face value), NOT due_amount
+    (remaining balance). Using due_amount would make the ratio self-referential and
+    time-unstable: the numerator's own success would shrink the denominator, making the
+    rate artificially high as more payments are received.
+
+    Zero denominator → rate_percent: None (Decision 6.3). Frontend renders "—".
+    YTD period: calendar year Jan 1 to today (Decision 6.2, pending Finance confirmation).
+
+    Return shape::
+
+        {
+            "mtd": {
+                "numerator_egp":    float,        # SUM(HEADER.amount) in MTD period
+                "denominator_egp":  float,        # SUM(rs.installment.amount) in MTD period
+                "rate_percent":     float | None, # None if denominator == 0 (Decision 6.3)
+                "period_start":     str,          # YYYY-MM-DD (first day of month)
+                "period_end":       str,          # YYYY-MM-DD (today)
+                "record_count_num": int,          # HEADER records in period
+                "record_count_den": int,          # rs.installment records in period
+            },
+            "ytd": {
+                "numerator_egp":    float,
+                "denominator_egp":  float,
+                "rate_percent":     float | None,
+                "period_start":     str,          # YYYY-01-01 (Jan 1, calendar year)
+                "period_end":       str,          # YYYY-MM-DD (today)
+                "record_count_num": int,
+                "record_count_den": int,
+            },
+            "ytd_period_assumption": str,   # "calendar_year" (Decision 6.2)
+            "currency":             "EGP",
+            "as_of":                str,    # ISO 8601 UTC datetime
+            "cache_status":         str,    # "fresh" | "cached"
+            "rpc_duration_ms":      int,    # total across 4 RPCs, 0 if cached
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated with a write method.
+        OdooQueryError: if any of the 4 Odoo RPCs fails.
+    """
+    _assert_read_only()
+
+    today = date.fromisoformat(_cache.today_str())
+
+    # MTD: first day of current month → today
+    mtd_start = date(today.year, today.month, 1)
+    mtd_end = today
+
+    # YTD: Jan 1 of current calendar year → today (Decision 6.2)
+    ytd_start = date(today.year, 1, 1)
+    ytd_end = today
+
+    # Numerator: HEADER.date is datetime in UTC → convert Egypt-local bounds to UTC (Decision 5.9)
+    mtd_start_utc, mtd_end_utc = _tz_period_bounds(mtd_start, mtd_end)
+    ytd_start_utc, ytd_end_utc = _tz_period_bounds(ytd_start, ytd_end)
+
+    # Denominator: rs.installment.date is a plain date field — ISO strings only, no conversion
+    mtd_start_iso = mtd_start.isoformat()
+    mtd_end_iso   = mtd_end.isoformat()
+    ytd_start_iso = ytd_start.isoformat()
+    ytd_end_iso   = ytd_end.isoformat()
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI4)
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (4 RPCs)")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # Q1 — MTD numerator (HEADER, UTC datetime bounds)
+        mtd_num_domain: list = [
+            ("state", "=", "post"),
+            ("date", ">=", mtd_start_utc),
+            ("date", "<=", mtd_end_utc),
+        ]
+        mtd_num_rows = await _client.execute_kw(
+            _PAYMENT_HEADER_MODEL,
+            "read_group",
+            args=[mtd_num_domain, ["amount"], []],
+            kwargs={"lazy": False},
+        )
+
+        # Q2 — MTD denominator (rs.installment, plain date bounds)
+        mtd_den_domain: list = [
+            ("state", "=", "post"),
+            ("date", ">=", mtd_start_iso),
+            ("date", "<=", mtd_end_iso),
+        ]
+        mtd_den_rows = await _client.execute_kw(
+            _MODEL,
+            "read_group",
+            args=[mtd_den_domain, ["amount"], []],
+            kwargs={"lazy": False},
+        )
+
+        # Q3 — YTD numerator (HEADER, UTC datetime bounds)
+        ytd_num_domain: list = [
+            ("state", "=", "post"),
+            ("date", ">=", ytd_start_utc),
+            ("date", "<=", ytd_end_utc),
+        ]
+        ytd_num_rows = await _client.execute_kw(
+            _PAYMENT_HEADER_MODEL,
+            "read_group",
+            args=[ytd_num_domain, ["amount"], []],
+            kwargs={"lazy": False},
+        )
+
+        # Q4 — YTD denominator (rs.installment, plain date bounds)
+        ytd_den_domain: list = [
+            ("state", "=", "post"),
+            ("date", ">=", ytd_start_iso),
+            ("date", "<=", ytd_end_iso),
+        ]
+        ytd_den_rows = await _client.execute_kw(
+            _MODEL,
+            "read_group",
+            args=[ytd_den_domain, ["amount"], []],
+            kwargs={"lazy": False},
+        )
+
+    except Exception as exc:
+        raise OdooQueryError(
+            f"KPI 4 read_group failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"KPI 4: 4 read_group RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
+    )
+    if rpc_ms > 5000:
+        logger.warning(
+            "KPI 4: total RPC time %dms exceeds 5s performance threshold", rpc_ms
+        )
+
+    def _extract(rows: list) -> tuple[float, int]:
+        row = rows[0] if rows else {}
+        return float(row.get("amount") or 0.0), int(row.get("__count") or 0)
+
+    def _rate(num: float, den: float) -> Optional[float]:
+        if den == 0.0:
+            return None  # Decision 6.3: zero denominator → None, frontend renders "—"
+        return num / den * 100
+
+    mtd_num, mtd_num_count = _extract(mtd_num_rows)
+    mtd_den, mtd_den_count = _extract(mtd_den_rows)
+    ytd_num, ytd_num_count = _extract(ytd_num_rows)
+    ytd_den, ytd_den_count = _extract(ytd_den_rows)
+
+    result: dict = {
+        "mtd": {
+            "numerator_egp":    mtd_num,
+            "denominator_egp":  mtd_den,
+            "rate_percent":     _rate(mtd_num, mtd_den),
+            "period_start":     mtd_start.isoformat(),
+            "period_end":       mtd_end.isoformat(),
+            "record_count_num": mtd_num_count,
+            "record_count_den": mtd_den_count,
+        },
+        "ytd": {
+            "numerator_egp":    ytd_num,
+            "denominator_egp":  ytd_den,
+            "rate_percent":     _rate(ytd_num, ytd_den),
+            "period_start":     ytd_start.isoformat(),
+            "period_end":       ytd_end.isoformat(),
+            "record_count_num": ytd_num_count,
+            "record_count_den": ytd_den_count,
+        },
+        "ytd_period_assumption": "calendar_year",
+        "currency":              "EGP",
+        "as_of":                 datetime.now(timezone.utc).isoformat(),
+        "cache_status":          "fresh",
+        "rpc_duration_ms":       rpc_ms,
+    }
+
+    _cache.set(cache_key, result)
     return result
