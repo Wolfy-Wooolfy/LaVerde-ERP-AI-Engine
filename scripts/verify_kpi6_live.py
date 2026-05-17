@@ -16,8 +16,8 @@ Appends one tab-separated row to logs/kpi6_verification.log on each run.
 NOTE — Empty months in 2026 are EXPECTED (Decision 5.7):
 Operations staff are entering historical payment data retroactively.
 Zero-amount months are truthful data, not bugs to investigate.
-The manual cross-check target is December 2025 (47,465,098 EGP, 431 records)
-as established in D0 Part 1. Khaled must confirm this value against
+The manual cross-check target is December 2025 (47,481,212 EGP, 430 records)
+after the timezone fix (Decision 5.9). Khaled must confirm this value against
 Odoo → RS Accounting → Payment Installments, filtered to December 2025,
 state=posted, SUM(amount).
 """
@@ -44,12 +44,12 @@ PASSWORD    = os.environ.get("VERIFY_PASSWORD", "password")
 ENDPOINT    = "/api/v1/collections/kpi/collection-trend-6m"
 LOG_FILE    = "logs/kpi6_verification.log"
 
-# December 2025 baseline values reflect the state='post' filter mandated by
-# Decision 5.1. The unfiltered baseline from D0 Part 1 (431 records /
-# 47,465,098 EGP) included 2 non-post records totaling 83,000 EGP, which are
-# excluded from the production KPI 6 query per Decision 5.1.
-_DEC_2025_BASELINE_AMOUNT    = 47_382_098.00  # state='post' filtered
-_DEC_2025_BASELINE_RECORDS   = 429            # state='post' filtered
+# December 2025 baseline values reflect Decision 5.1 (state='post') and
+# Decision 5.9 (timezone-aware UTC boundaries). The naive pre-fix baseline
+# was 429 records / 47,382,098 EGP. The timezone fix captures 1 additional
+# record (01/12/2025 00:00:00 Egypt = 2025-11-30 22:00:00 UTC) worth 99,114 EGP.
+_DEC_2025_BASELINE_AMOUNT    = 47_481_212.00  # state='post' + timezone-aware
+_DEC_2025_BASELINE_RECORDS   = 430            # state='post' + timezone-aware
 _DEC_2025_BASELINE_TOLERANCE = 0.01   # EGP — identity-equal expected
 
 _EXPECTED_MONTHS = 6
@@ -333,13 +333,13 @@ def main() -> int:
 
     print("  ─── MANUAL CROSS-CHECK (REQUIRED for Checkpoint 2) ──────────────")
     print()
-    print("  Target: December 2025 — 47,382,098.00 EGP, 429 records (state='post' only)")
+    print("  Target: December 2025 — 47,481,212.00 EGP, 430 records (state='post', timezone-aware)")
     print()
     print("  Steps:")
     print("    1. Open Odoo → RS Accounting → Payment Installments")
     print("    2. Filter: date >= 2025-12-01 AND date <= 2025-12-31, state = Posted")
     print("    3. Sum the 'Amount' column (Posted records only)")
-    print("    4. Compare to 47,382,098.00 EGP shown above")
+    print("    4. Compare to 47,481,212.00 EGP shown above")
     print("    5. Identity-equal match expected (or explain any delta)")
     print()
     print("  NOTE: Jan-May 2026 showing zero is EXPECTED (Decision 5.7).")
