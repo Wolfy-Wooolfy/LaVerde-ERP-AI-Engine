@@ -44,10 +44,12 @@ PASSWORD    = os.environ.get("VERIFY_PASSWORD", "password")
 ENDPOINT    = "/api/v1/collections/kpi/collection-trend-6m"
 LOG_FILE    = "logs/kpi6_verification.log"
 
-# D0 Part 1 baseline: December 2025, confirmed by discovery run 2026-05-17.
-# Khaled must manually cross-check this value in Odoo before accepting D3.
-_DEC_2025_BASELINE_AMOUNT    = 47_465_098.00
-_DEC_2025_BASELINE_RECORDS   = 431
+# December 2025 baseline values reflect the state='post' filter mandated by
+# Decision 5.1. The unfiltered baseline from D0 Part 1 (431 records /
+# 47,465,098 EGP) included 2 non-post records totaling 83,000 EGP, which are
+# excluded from the production KPI 6 query per Decision 5.1.
+_DEC_2025_BASELINE_AMOUNT    = 47_382_098.00  # state='post' filtered
+_DEC_2025_BASELINE_RECORDS   = 429            # state='post' filtered
 _DEC_2025_BASELINE_TOLERANCE = 0.01   # EGP — identity-equal expected
 
 _EXPECTED_MONTHS = 6
@@ -331,13 +333,13 @@ def main() -> int:
 
     print("  ─── MANUAL CROSS-CHECK (REQUIRED for Checkpoint 2) ──────────────")
     print()
-    print("  Target: December 2025 — 47,465,098.00 EGP, 431 records")
+    print("  Target: December 2025 — 47,382,098.00 EGP, 429 records (state='post' only)")
     print()
     print("  Steps:")
     print("    1. Open Odoo → RS Accounting → Payment Installments")
     print("    2. Filter: date >= 2025-12-01 AND date <= 2025-12-31, state = Posted")
-    print("    3. Sum the 'Amount' column")
-    print("    4. Compare to 47,465,098.00 EGP shown above")
+    print("    3. Sum the 'Amount' column (Posted records only)")
+    print("    4. Compare to 47,382,098.00 EGP shown above")
     print("    5. Identity-equal match expected (or explain any delta)")
     print()
     print("  NOTE: Jan-May 2026 showing zero is EXPECTED (Decision 5.7).")
