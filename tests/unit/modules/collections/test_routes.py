@@ -4,6 +4,7 @@ Endpoint integration tests for Collections KPI endpoints.
 GET /api/v1/collections/kpi/late-uncollected       — KPI 2
 GET /api/v1/collections/kpi/total-portfolio-value  — KPI 1
 GET /api/v1/collections/kpi/pending-check-exposure — KPI 3
+GET /api/v1/collections/kpi/collection-trend-6m    — KPI 6
 
 Uses FastAPI TestClient with service functions patched — no Odoo connection.
 """
@@ -355,4 +356,125 @@ def test_kpi3_odoo_unavailable_returns_503(client: TestClient) -> None:
 
 def test_kpi3_post_returns_405(client: TestClient) -> None:
     r = client.post(_URL_KPI3, auth=_AUTH)
+    assert r.status_code == 405
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 6 — 6-Month Collection Trend endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_KPI6 = "/api/v1/collections/kpi/collection-trend-6m"
+
+_MOCK_DATA_KPI6 = {
+    "months": [
+        {"month": "2025-12", "label_en": "Dec 2025", "label_ar": "ديسمبر",
+         "amount": 47_465_098.00, "record_count": 431},
+        {"month": "2026-01", "label_en": "Jan 2026", "label_ar": "يناير",
+         "amount": 0.0, "record_count": 0},
+        {"month": "2026-02", "label_en": "Feb 2026", "label_ar": "فبراير",
+         "amount": 0.0, "record_count": 0},
+        {"month": "2026-03", "label_en": "Mar 2026", "label_ar": "مارس",
+         "amount": 0.0, "record_count": 0},
+        {"month": "2026-04", "label_en": "Apr 2026", "label_ar": "أبريل",
+         "amount": 0.0, "record_count": 0},
+        {"month": "2026-05", "label_en": "May 2026", "label_ar": "مايو",
+         "amount": 0.0, "record_count": 0},
+    ],
+    "total_6m": 47_465_098.00,
+    "total_record_count": 431,
+    "average_monthly": 47_465_098.00 / 6,
+    "period_start": "2025-12-01",
+    "period_end": "2026-05-17",
+    "currency": "EGP",
+    "as_of": "2026-05-17T10:00:00+00:00",
+    "cache_status": "fresh",
+    "cache_ttl_seconds": 3600,
+    "rpc_duration_ms": 85,
+    "domain": [
+        ["state", "=", "post"],
+        ["date", ">=", "2025-12-01"],
+        ["date", "<=", "2026-05-17 23:59:59"],
+    ],
+}
+
+
+# ── Test K6-8a — 200 + JSON shape ────────────────────────────────────────────
+
+
+def test_kpi6_get_returns_200_and_all_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_trend_6m",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI6),
+    ):
+        r = client.get(_URL_KPI6, auth=_AUTH)
+
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "months", "total_6m", "total_record_count", "average_monthly",
+        "period_start", "period_end", "currency", "as_of",
+        "cache_status", "cache_ttl_seconds", "rpc_duration_ms", "domain",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+
+    assert isinstance(body["months"], list)
+    assert len(body["months"]) == 6
+    for entry in body["months"]:
+        for k in ("month", "label_en", "label_ar", "amount", "record_count"):
+            assert k in entry, f"Month entry missing key: {k!r}"
+
+
+# ── Test K6-8b — Response headers: max-age=3600 (NOT 60) ─────────────────────
+
+
+def test_kpi6_response_has_cache_control_max_age_3600(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_trend_6m",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI6),
+    ):
+        r = client.get(_URL_KPI6, auth=_AUTH)
+
+    assert r.status_code == 200
+    cc = r.headers.get("cache-control", "")
+    assert "private" in cc,      f"Cache-Control must contain 'private', got: {cc!r}"
+    assert "max-age=3600" in cc, f"Cache-Control must contain 'max-age=3600', got: {cc!r}"
+    assert "max-age=60"  not in cc, "KPI 6 must NOT use max-age=60 (that is for 60s KPIs)"
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_kpi6_x_cache_status_reflects_cached_when_served_from_cache(
+    client: TestClient,
+) -> None:
+    cached_data = {**_MOCK_DATA_KPI6, "cache_status": "cached", "rpc_duration_ms": 0}
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_trend_6m",
+        new=AsyncMock(return_value=cached_data),
+    ):
+        r = client.get(_URL_KPI6, auth=_AUTH)
+
+    assert r.headers.get("x-cache-status") == "cached"
+
+
+# ── Test K6-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_kpi6_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_trend_6m",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_KPI6, auth=_AUTH)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+
+
+# ── Test K6-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_kpi6_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_KPI6, auth=_AUTH)
     assert r.status_code == 405

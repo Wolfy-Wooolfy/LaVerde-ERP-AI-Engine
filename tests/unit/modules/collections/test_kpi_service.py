@@ -15,6 +15,9 @@ from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX,
     _CACHE_KEY_PREFIX_KPI1,
+    _CACHE_KEY_PREFIX_KPI6,
+    _PAYMENT_HEADER_MODEL,
+    get_collection_trend_6m,
     get_late_uncollected,
     get_pending_check_exposure,
     get_total_portfolio_value,
@@ -908,3 +911,406 @@ async def test_kpi3_negative_derived_value_option_a(
     # Operands preserved for traceability
     assert result["paid_amount_sum"] == pytest.approx(100.0)
     assert result["actual_paid_sum"] == pytest.approx(200.0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 6 — 6-Month Collection Trend (get_collection_trend_6m)
+# ════════════════════════���═════════════════════════════════════════════════════
+#
+# Architecture (Decision 5.6): queries rs.account.payment.installment (HEADER)
+# grouped by date:month. Always returns 6 entries oldest-first, zero-padding
+# months Odoo doesn't return. TTL = 3600s (Decision 5.2 / 5.4).
+#
+# Operational context (Decision 5.7): during the current data-entry period,
+# only December 2025 has payment data. Jan-May 2026 are legitimately zero.
+# The "5 of 6 months are zero" scenario is an explicit test case.
+# ��═════════════════════════════════════════════════════════════════════════════
+
+# D0 Part 1 discovery baseline — December 2025 only.
+# Odoo returns groupby keys as English full-month names.
+_MOCK_RESPONSE_KPI6_DEC_ONLY = [
+    {
+        "date:month": "December 2025",
+        "__count": 431,
+        "amount": 47_465_098.00,
+    }
+]
+
+# Simulates a future state where all 6 months have data (all non-zero).
+_MOCK_RESPONSE_KPI6_ALL_6 = [
+    {"date:month": "December 2025", "__count": 431, "amount": 47_465_098.00},
+    {"date:month": "January 2026",  "__count": 120, "amount": 15_000_000.00},
+    {"date:month": "February 2026", "__count": 98,  "amount": 12_000_000.00},
+    {"date:month": "March 2026",    "__count": 210, "amount": 22_000_000.00},
+    {"date:month": "April 2026",    "__count": 185, "amount": 19_000_000.00},
+    {"date:month": "May 2026",      "__count": 55,  "amount":  5_000_000.00},
+]
+
+_MOCK_RESPONSE_KPI6_EMPTY = []   # no payment records in window at all
+
+# Fixed date for deterministic period computation: 2026-05-17
+# → period_start = 2025-12-01, months = 2025-12 … 2026-05 (6 entries)
+_KPI6_TODAY = "2026-05-17"
+_KPI6_EXPECTED_MONTHS = [
+    "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05",
+]
+
+# For year-wrap test: today = 2026-03-10
+# → period_start = 2025-10-01, months = 2025-10 … 2026-03
+_KPI6_TODAY_MAR = "2026-03-10"
+_KPI6_EXPECTED_MONTHS_MAR = [
+    "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03",
+]
+
+
+@pytest.fixture
+def mock_client_kpi6() -> MagicMock:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI6_DEC_ONLY)
+    return client
+
+
+# ── Test K6-1 — Domain: 3-clause with state=post and date range ───────────────
+
+
+async def test_kpi6_domain_has_state_post_and_date_range(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        await get_collection_trend_6m(client=mock_client_kpi6)
+
+    call_args = mock_client_kpi6.execute_kw.call_args
+    domain = call_args.kwargs["args"][0]
+
+    assert len(domain) == 3, f"Expected 3-clause domain, got {len(domain)}: {domain}"
+    assert domain[0] == ("state", "=", "post")
+    assert domain[1][0] == "date"
+    assert domain[1][1] == ">="
+    assert domain[1][2] == "2025-12-01"   # period_start for 2026-05-17
+    assert domain[2][0] == "date"
+    assert domain[2][1] == "<="
+    assert domain[2][2].startswith("2026-05-17")  # period_end + " 23:59:59"
+
+
+# ── Test K6-2 — Uses HEADER model with date:month groupby ────────────────────
+
+
+async def test_kpi6_uses_header_model_with_date_month_groupby(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        await get_collection_trend_6m(client=mock_client_kpi6)
+
+    call_args = mock_client_kpi6.execute_kw.call_args
+    assert call_args.args[0] == _PAYMENT_HEADER_MODEL, (
+        f"Expected model {_PAYMENT_HEADER_MODEL!r}, got {call_args.args[0]!r}"
+    )
+    assert call_args.args[1] == "read_group"
+    groupby = call_args.kwargs["args"][2]
+    assert groupby == ["date:month"], f"Expected groupby=['date:month'], got {groupby!r}"
+
+
+# ── Test K6-3 — Return shape: all top-level keys present ───────��─────────────
+
+
+async def test_kpi6_return_shape_has_all_required_keys(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    expected = {
+        "months", "total_6m", "total_record_count", "average_monthly",
+        "period_start", "period_end", "currency", "as_of",
+        "cache_status", "cache_ttl_seconds", "rpc_duration_ms", "domain",
+    }
+    assert set(result.keys()) == expected
+
+    assert isinstance(result["months"], list)
+    assert result["currency"] == "EGP"
+    assert result["cache_ttl_seconds"] == 3600
+    assert result["cache_status"] in {"fresh", "cached"}
+    assert isinstance(result["rpc_duration_ms"], int)
+
+    for entry in result["months"]:
+        assert set(entry.keys()) == {"month", "label_en", "label_ar", "amount", "record_count"}
+
+
+# ── Test K6-4 — Always exactly 6 month entries ───────��───────────────────────
+
+
+async def test_kpi6_always_returns_exactly_6_month_entries(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    assert len(result["months"]) == 6, (
+        f"Must always return 6 entries regardless of Odoo response, got {len(result['months'])}"
+    )
+
+
+# ── Test K6-5 — 5-of-6-zero scenario (Decision 5.7) ─────────────────────────
+
+
+async def test_kpi6_five_of_six_months_zero_current_operational_state(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    """Operational state as of 2026-05-17: only December 2025 has data.
+    Remaining 5 months must be zero-padded, not omitted or errored.
+    Decision 5.7: zero months are truthful data, not bugs.
+    """
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    months = result["months"]
+    assert len(months) == 6
+
+    dec = months[0]
+    assert dec["month"] == "2025-12"
+    assert dec["amount"] == pytest.approx(47_465_098.00)
+    assert dec["record_count"] == 431
+
+    for entry in months[1:]:
+        assert entry["amount"] == 0.0, (
+            f"Month {entry['month']} should be zero-padded, got {entry['amount']}"
+        )
+        assert entry["record_count"] == 0
+
+
+# ── Test K6-6 — Months ordered oldest-first, correct YYYY-MM keys ────────────
+
+
+async def test_kpi6_months_ordered_oldest_first_with_correct_ym_keys(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    actual_months = [e["month"] for e in result["months"]]
+    assert actual_months == _KPI6_EXPECTED_MONTHS, (
+        f"Expected {_KPI6_EXPECTED_MONTHS}, got {actual_months}"
+    )
+
+
+async def test_kpi6_period_wraps_correctly_across_year_boundary() -> None:
+    """today = 2026-03-10: period must span Oct 2025 – Mar 2026 (year wrap)."""
+    mock_c = MagicMock()
+    mock_c.execute_kw = AsyncMock(return_value=[])
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY_MAR,
+    ):
+        result = await get_collection_trend_6m(client=mock_c)
+
+    actual_months = [e["month"] for e in result["months"]]
+    assert actual_months == _KPI6_EXPECTED_MONTHS_MAR, (
+        f"Expected {_KPI6_EXPECTED_MONTHS_MAR}, got {actual_months}"
+    )
+    assert result["period_start"] == "2025-10-01"
+    assert result["period_end"] == "2026-03-10"
+
+
+# ── Test K6-7 — Aggregation math ─────────────────────────────────────────────
+
+
+async def test_kpi6_total_6m_equals_sum_of_month_amounts(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    mock_client_kpi6.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI6_ALL_6)
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    computed = sum(e["amount"] for e in result["months"])
+    assert result["total_6m"] == pytest.approx(computed)
+    assert result["total_record_count"] == sum(e["record_count"] for e in result["months"])
+
+
+async def test_kpi6_average_monthly_equals_total_divided_by_6(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    """average_monthly must always divide by 6 — even months with zero amount count."""
+    mock_client_kpi6.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI6_DEC_ONLY)
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    expected_avg = result["total_6m"] / 6
+    assert result["average_monthly"] == pytest.approx(expected_avg), (
+        "average_monthly must be total_6m / 6 (denominator is always 6, including zero months)"
+    )
+
+
+# ── Test K6-8 — Month entry labels ────────────���──────────────────────────────
+
+
+async def test_kpi6_month_labels_are_correct_for_december_2025(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    dec = result["months"][0]
+    assert dec["label_en"] == "Dec 2025"
+    assert dec["label_ar"] == "ديسمبر"
+
+    jan = result["months"][1]
+    assert jan["label_en"] == "Jan 2026"
+    assert jan["label_ar"] == "يناير"
+
+
+# ── Test K6-9 — cache_ttl_seconds == 3600 ────────────────────────────────────
+
+
+async def test_kpi6_cache_ttl_seconds_is_3600(mock_client_kpi6: MagicMock) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    assert result["cache_ttl_seconds"] == 3600, (
+        f"KPI 6 must report cache_ttl_seconds=3600 (hourly), got {result['cache_ttl_seconds']}"
+    )
+
+
+# ─�� Test K6-10 — Cache hit ───────────────────��────────────────────────────────
+
+
+async def test_kpi6_second_call_is_served_from_cache(mock_client_kpi6: MagicMock) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result1 = await get_collection_trend_6m(client=mock_client_kpi6)
+        result2 = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    assert mock_client_kpi6.execute_kw.call_count == 1
+    assert result1["cache_status"] == "fresh"
+    assert result2["cache_status"] == "cached"
+    assert result2["rpc_duration_ms"] == 0
+    assert result2["total_6m"] == result1["total_6m"]
+    assert result2["cache_ttl_seconds"] == 3600
+
+
+# ── Test K6-11 — Cache key independence from other KPIs ──────────────────────
+
+
+async def test_kpi6_cache_key_does_not_collide_with_other_kpis() -> None:
+    mock_k2 = MagicMock()
+    mock_k2.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE)
+    mock_k6 = MagicMock()
+    mock_k6.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI6_DEC_ONLY)
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        r2  = await get_late_uncollected(client=mock_k2)
+        r6  = await get_collection_trend_6m(client=mock_k6)
+        r2b = await get_late_uncollected(client=mock_k2)
+        r6b = await get_collection_trend_6m(client=mock_k6)
+
+    assert r2["cache_status"]  == "fresh"
+    assert r6["cache_status"]  == "fresh"
+    assert r2b["cache_status"] == "cached"
+    assert r6b["cache_status"] == "cached"
+    assert mock_k2.execute_kw.call_count == 1
+    assert mock_k6.execute_kw.call_count == 1
+
+
+# ── Test K6-12 — RPC failure ──────────────────���───────────────────────────────
+
+
+async def test_kpi6_rpc_failure_raises_odoo_query_error(mock_client_kpi6: MagicMock) -> None:
+    mock_client_kpi6.execute_kw.side_effect = RuntimeError("connection refused")
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        with pytest.raises(OdooQueryError):
+            await get_collection_trend_6m(client=mock_client_kpi6)
+
+
+async def test_kpi6_rpc_failure_writes_no_cache_entry(mock_client_kpi6: MagicMock) -> None:
+    mock_client_kpi6.execute_kw.side_effect = RuntimeError("timeout")
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        with pytest.raises(OdooQueryError):
+            await get_collection_trend_6m(client=mock_client_kpi6)
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI6)
+    assert _cache.get(cache_key) is None, "A failed RPC must not leave a cache entry"
+
+
+# ── Test K6-13 — period_start and period_end in response ─────────────────────
+
+
+async def test_kpi6_period_start_and_end_in_response(mock_client_kpi6: MagicMock) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    assert result["period_start"] == "2025-12-01"
+    assert result["period_end"]   == "2026-05-17"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", result["period_start"])
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", result["period_end"])
+
+
+# ── Test K6-14 — Empty window: all 6 entries zero ────────────────────────────
+
+
+async def test_kpi6_all_zero_when_no_payment_records_in_window(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    """Odoo returns empty list (no payments in window) — all 6 months must be zero."""
+    mock_client_kpi6.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI6_EMPTY)
+
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY,
+    ):
+        result = await get_collection_trend_6m(client=mock_client_kpi6)
+
+    assert len(result["months"]) == 6
+    assert result["total_6m"] == 0.0
+    assert result["total_record_count"] == 0
+    assert result["average_monthly"] == 0.0
+    for entry in result["months"]:
+        assert entry["amount"] == 0.0
+        assert entry["record_count"] == 0
