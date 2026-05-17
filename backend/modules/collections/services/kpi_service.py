@@ -11,7 +11,8 @@ KPIs 1, 3, 4, 5, 6 are implemented in future sessions.
 
 import calendar
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as dt_time, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from loguru import logger
@@ -48,6 +49,10 @@ _ARABIC_MONTHS: dict[int, str] = {
 _MONTH_NAME_TO_NUM: dict[str, int] = {
     name: i for i, name in enumerate(calendar.month_name) if name
 }
+
+# La Verde operates in Egypt (UTC+2, Africa/Cairo, no DST since 2014). Decision 5.9.
+_LA_VERDE_TZ = ZoneInfo("Africa/Cairo")
+_UTC_TZ = ZoneInfo("UTC")
 
 # Phase 2 confirmed project IDs and clean display names (MODULE_2_DISCOVERY_PHASE_2.md §6).
 # Odoo returns "Project#New Capital" etc.; we expose clean names to API consumers.
@@ -472,6 +477,23 @@ async def get_late_uncollected_by_project(client: Optional[OdooClient] = None) -
     return result
 
 
+def _tz_period_bounds(period_start: date, period_end: date) -> tuple[str, str]:
+    """Convert local-time period boundaries to UTC datetime strings for Odoo domain.
+
+    Egypt is UTC+2 (Africa/Cairo). A record displayed as "01/12/2025 00:00:00"
+    Egypt time is stored as "2025-11-30 22:00:00" UTC — a naive >= '2025-12-01'
+    filter would exclude it. Decision 5.9.
+    """
+    start_local = datetime.combine(period_start, dt_time.min, tzinfo=_LA_VERDE_TZ)
+    end_local   = datetime.combine(period_end, dt_time(23, 59, 59), tzinfo=_LA_VERDE_TZ)
+    start_utc = start_local.astimezone(_UTC_TZ)
+    end_utc   = end_local.astimezone(_UTC_TZ)
+    return (
+        start_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        end_utc.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
 async def get_collection_trend_6m(client: Optional[OdooClient] = None) -> dict:
     """Return KPI 6 — 6-Month Collection Trend.
 
@@ -533,10 +555,11 @@ async def get_collection_trend_6m(client: Optional[OdooClient] = None) -> dict:
     period_start = date(start_year, start_month, 1)
     period_end = today
 
+    start_utc_str, end_utc_str = _tz_period_bounds(period_start, period_end)
     domain: list = [
         ("state", "=", "post"),
-        ("date", ">=", period_start.isoformat()),
-        ("date", "<=", period_end.isoformat() + " 23:59:59"),
+        ("date", ">=", start_utc_str),   # Decision 5.9: UTC boundary for Egypt UTC+2
+        ("date", "<=", end_utc_str),
     ]
     cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI6)
 
