@@ -15,8 +15,10 @@ from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX,
     _CACHE_KEY_PREFIX_KPI1,
+    _CACHE_KEY_PREFIX_KPI4,
     _CACHE_KEY_PREFIX_KPI6,
     _PAYMENT_HEADER_MODEL,
+    get_collection_rate_mtd_ytd,
     get_collection_trend_6m,
     get_late_uncollected,
     get_pending_check_exposure,
@@ -1436,3 +1438,344 @@ async def test_kpi6_summer_dst_midnight_bucketed_to_next_local_day() -> None:
         "2026-06-15 10:00 UTC must stay in June 2026"
     )
     assert by_key["2026-06"]["record_count"] == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 4 — Collection Rate MTD & YTD (get_collection_rate_mtd_ytd)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Architecture (Decision 6.1): 4 sequential read_group RPCs.
+#   Q1 — MTD numerator  : rs.account.payment.installment, UTC datetime bounds
+#   Q2 — MTD denominator: rs.installment, ISO date bounds
+#   Q3 — YTD numerator  : rs.account.payment.installment, UTC datetime bounds
+#   Q4 — YTD denominator: rs.installment, ISO date bounds
+#
+# Zero denominator → rate_percent: None (Decision 6.3).
+# YTD period: calendar year Jan 1 → today (Decision 6.2).
+# UTC boundaries: _tz_period_bounds() via Africa/Cairo ZoneInfo (Decision 5.9).
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Four sequential read_group calls → four entries in side_effect.
+# Happy-path values chosen to produce simple round rates (50%, 40%).
+_MOCK_KPI4_Q1 = [{"amount": 10_000_000.00, "__count":  5}]   # MTD num
+_MOCK_KPI4_Q2 = [{"amount": 20_000_000.00, "__count": 50}]   # MTD den
+_MOCK_KPI4_Q3 = [{"amount": 80_000_000.00, "__count": 30}]   # YTD num
+_MOCK_KPI4_Q4 = [{"amount": 200_000_000.00, "__count": 200}]  # YTD den
+
+_KPI4_TODAY = "2026-05-17"  # Fixed date for deterministic period computation
+
+
+@pytest.fixture
+def mock_client_kpi4() -> MagicMock:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(side_effect=[
+        _MOCK_KPI4_Q1, _MOCK_KPI4_Q2, _MOCK_KPI4_Q3, _MOCK_KPI4_Q4,
+    ])
+    return client
+
+
+# ── Test K4-01 — Happy path: full return shape + correct rates ────────────────
+
+
+async def test_kpi4_happy_path_full_shape_and_rates(mock_client_kpi4: MagicMock) -> None:
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        result = await get_collection_rate_mtd_ytd(client=mock_client_kpi4)
+
+    # Exactly 4 RPCs on first call
+    assert mock_client_kpi4.execute_kw.call_count == 4
+
+    # Top-level keys
+    expected_top = {"mtd", "ytd", "ytd_period_assumption", "currency",
+                    "as_of", "cache_status", "rpc_duration_ms"}
+    assert set(result.keys()) == expected_top
+
+    # Inner shape (both periods have identical key sets)
+    inner_keys = {"numerator_egp", "denominator_egp", "rate_percent",
+                  "period_start", "period_end", "record_count_num", "record_count_den"}
+    assert set(result["mtd"].keys()) == inner_keys
+    assert set(result["ytd"].keys()) == inner_keys
+
+    # Fixed-value assertions
+    assert result["currency"] == "EGP"
+    assert result["ytd_period_assumption"] == "calendar_year"
+    assert result["cache_status"] == "fresh"
+    assert isinstance(result["rpc_duration_ms"], int)
+    assert result["rpc_duration_ms"] >= 0
+
+    # Period dates
+    assert result["mtd"]["period_start"] == "2026-05-01"
+    assert result["mtd"]["period_end"]   == _KPI4_TODAY
+    assert result["ytd"]["period_start"] == "2026-01-01"
+    assert result["ytd"]["period_end"]   == _KPI4_TODAY
+
+    # Numeric correctness
+    assert result["mtd"]["numerator_egp"]   == pytest.approx(10_000_000.00)
+    assert result["mtd"]["denominator_egp"] == pytest.approx(20_000_000.00)
+    assert result["mtd"]["rate_percent"]    == pytest.approx(50.0)
+    assert result["mtd"]["record_count_num"] == 5
+    assert result["mtd"]["record_count_den"] == 50
+
+    assert result["ytd"]["numerator_egp"]   == pytest.approx(80_000_000.00)
+    assert result["ytd"]["denominator_egp"] == pytest.approx(200_000_000.00)
+    assert result["ytd"]["rate_percent"]    == pytest.approx(40.0)
+    assert result["ytd"]["record_count_num"] == 30
+    assert result["ytd"]["record_count_den"] == 200
+
+
+# ── Test K4-02 — Zero denominator → rate_percent: None (Decision 6.3) ─────────
+
+
+async def test_kpi4_zero_denominator_returns_none_rate() -> None:
+    """When denominator (rs.installment.amount) = 0, rate_percent must be None.
+    Zero denominator means no installments were due in the period.
+    Frontend renders "—" (Decision 6.3).
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        [{"amount": 5_000.00, "__count": 1}],   # MTD num — non-zero
+        [{"amount": 0.00,     "__count": 0}],   # MTD den — zero → None
+        [{"amount": 5_000.00, "__count": 1}],   # YTD num
+        [{"amount": 0.00,     "__count": 0}],   # YTD den — zero → None
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        result = await get_collection_rate_mtd_ytd(client=mock)
+
+    assert result["mtd"]["rate_percent"] is None, (
+        "rate_percent must be None when denominator == 0 (Decision 6.3)"
+    )
+    assert result["ytd"]["rate_percent"] is None
+
+
+# ── Test K4-03 — Zero numerator → rate_percent == 0.0 ────────────────────────
+
+
+async def test_kpi4_zero_numerator_returns_zero_rate() -> None:
+    """Zero numerator (no payments posted) + non-zero denominator → rate 0.0%.
+    This is the expected current state during the data-entry phase (Decision 5.7 analog).
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        [{"amount": 0.00,          "__count": 0}],    # MTD num = 0
+        [{"amount": 43_653_133.00, "__count": 263}],  # MTD den (D0 baseline)
+        [{"amount": 0.00,          "__count": 0}],    # YTD num = 0
+        [{"amount": 302_882_977.00,"__count": 1861}], # YTD den (D0 baseline)
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        result = await get_collection_rate_mtd_ytd(client=mock)
+
+    assert result["mtd"]["rate_percent"] == pytest.approx(0.0), (
+        "Zero numerator with non-zero denominator must yield rate_percent=0.0, not None"
+    )
+    assert result["ytd"]["rate_percent"] == pytest.approx(0.0)
+    assert result["mtd"]["numerator_egp"] == pytest.approx(0.0)
+    assert result["ytd"]["numerator_egp"] == pytest.approx(0.0)
+
+
+# ── Test K4-04 — Prepayment: numerator > denominator → rate > 100% ────────────
+
+
+async def test_kpi4_prepayment_rate_exceeds_100_percent() -> None:
+    """When payments collected exceed installments due (prepayment scenario),
+    rate_percent must exceed 100%. This is valid business behavior, not a bug.
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        [{"amount": 150_000.00,   "__count":  3}],   # MTD num > den
+        [{"amount": 100_000.00,   "__count":  2}],   # MTD den
+        [{"amount": 1_500_000.00, "__count": 15}],   # YTD num > den
+        [{"amount": 1_000_000.00, "__count": 10}],   # YTD den
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        result = await get_collection_rate_mtd_ytd(client=mock)
+
+    assert result["mtd"]["rate_percent"] == pytest.approx(150.0), (
+        "Prepayment (num > den) must yield rate_percent > 100, got "
+        f"{result['mtd']['rate_percent']}"
+    )
+    assert result["ytd"]["rate_percent"] == pytest.approx(150.0)
+
+
+# ── Test K4-05 — MTD UTC boundary: Egypt summer DST (UTC+3, May 2026) ─────────
+
+
+async def test_kpi4_mtd_numerator_domain_uses_summer_dst_utc_boundaries() -> None:
+    """MTD period start/end UTC boundaries use Egypt DST-aware conversion.
+
+    today = 2026-05-01 (first day of May — Egypt summer, UTC+3):
+      MTD start Egypt : 2026-05-01 00:00:00 Africa/Cairo (UTC+3) = 2026-04-30 21:00:00 UTC
+      MTD end Egypt   : 2026-05-01 23:59:59 Africa/Cairo (UTC+3) = 2026-05-01 20:59:59 UTC
+
+    A naive boundary ("2026-05-01 00:00:00") would exclude receipts recorded
+    at Egypt midnight that are stored at "2026-04-30 21:00:00" UTC.
+    Decision 5.9.
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(return_value=[{"amount": 0.0, "__count": 0}])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value="2026-05-01"):
+        await get_collection_rate_mtd_ytd(client=mock)
+
+    # Q1 = call index 0 (MTD numerator on HEADER model)
+    call_q1 = mock.execute_kw.call_args_list[0]
+    assert call_q1.args[0] == _PAYMENT_HEADER_MODEL, (
+        f"Q1 must query {_PAYMENT_HEADER_MODEL!r}, got {call_q1.args[0]!r}"
+    )
+    domain = call_q1.kwargs["args"][0]
+    assert domain[0] == ("state", "=", "post")
+    assert domain[1] == ("date", ">=", "2026-04-30 21:00:00"), (
+        f"MTD start UTC wrong: {domain[1][2]!r} — expected '2026-04-30 21:00:00' "
+        "(2026-05-01 00:00:00 Africa/Cairo UTC+3)"
+    )
+    assert domain[2] == ("date", "<=", "2026-05-01 20:59:59"), (
+        f"MTD end UTC wrong: {domain[2][2]!r} — expected '2026-05-01 20:59:59' "
+        "(2026-05-01 23:59:59 Africa/Cairo UTC+3)"
+    )
+
+
+# ── Test K4-06 — YTD UTC boundary: Egypt winter (UTC+2, Jan 1) ────────────────
+
+
+async def test_kpi4_ytd_numerator_domain_uses_winter_utc2_boundary() -> None:
+    """YTD period start (Jan 1) UTC boundary uses Egypt winter offset (UTC+2).
+
+    today = 2026-05-17 (Egypt summer, UTC+3):
+      YTD start Egypt : 2026-01-01 00:00:00 Africa/Cairo (UTC+2 winter) = 2025-12-31 22:00:00 UTC
+      YTD end Egypt   : 2026-05-17 23:59:59 Africa/Cairo (UTC+3 summer) = 2026-05-17 20:59:59 UTC
+
+    A naive boundary ("2026-01-01 00:00:00") would exclude any receipts
+    recorded at Egypt midnight on Jan 1 — stored at "2025-12-31 22:00:00" UTC.
+    Decision 5.9.
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(return_value=[{"amount": 0.0, "__count": 0}])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        await get_collection_rate_mtd_ytd(client=mock)
+
+    # Q3 = call index 2 (YTD numerator on HEADER model)
+    call_q3 = mock.execute_kw.call_args_list[2]
+    assert call_q3.args[0] == _PAYMENT_HEADER_MODEL, (
+        f"Q3 must query {_PAYMENT_HEADER_MODEL!r}, got {call_q3.args[0]!r}"
+    )
+    domain = call_q3.kwargs["args"][0]
+    assert domain[0] == ("state", "=", "post")
+    assert domain[1] == ("date", ">=", "2025-12-31 22:00:00"), (
+        f"YTD start UTC wrong: {domain[1][2]!r} — expected '2025-12-31 22:00:00' "
+        "(2026-01-01 00:00:00 Africa/Cairo UTC+2 winter)"
+    )
+    assert domain[2] == ("date", "<=", "2026-05-17 20:59:59"), (
+        f"YTD end UTC wrong: {domain[2][2]!r} — expected '2026-05-17 20:59:59' "
+        "(2026-05-17 23:59:59 Africa/Cairo UTC+3 summer)"
+    )
+
+
+# ── Test K4-07 — Both denominators zero → both rate_percent: None ─────────────
+
+
+async def test_kpi4_both_denominators_zero_both_rates_none() -> None:
+    """When both MTD and YTD denominators are zero, both rate_percent values
+    must be None. This would occur if no installments are due in either period.
+    Decision 6.3.
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        [{"amount": 100_000.00, "__count": 2}],  # MTD num
+        [{"amount": 0.00,       "__count": 0}],  # MTD den = 0
+        [{"amount": 500_000.00, "__count": 5}],  # YTD num
+        [{"amount": 0.00,       "__count": 0}],  # YTD den = 0
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        result = await get_collection_rate_mtd_ytd(client=mock)
+
+    assert result["mtd"]["rate_percent"] is None, (
+        "MTD rate_percent must be None when MTD denominator == 0"
+    )
+    assert result["ytd"]["rate_percent"] is None, (
+        "YTD rate_percent must be None when YTD denominator == 0"
+    )
+    # Numerators are preserved even when rate is None
+    assert result["mtd"]["numerator_egp"] == pytest.approx(100_000.00)
+    assert result["ytd"]["numerator_egp"] == pytest.approx(500_000.00)
+
+
+# ── Test K4-08 — Cache hit: second call served from cache ─────────────────────
+
+
+async def test_kpi4_second_call_is_served_from_cache(mock_client_kpi4: MagicMock) -> None:
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        result1 = await get_collection_rate_mtd_ytd(client=mock_client_kpi4)
+        result2 = await get_collection_rate_mtd_ytd(client=mock_client_kpi4)
+
+    # First call: 4 RPCs (Q1–Q4). Second call: 0 RPCs (cache hit).
+    assert mock_client_kpi4.execute_kw.call_count == 4, (
+        "execute_kw must be called exactly 4 times total (first call only)"
+    )
+    assert result1["cache_status"] == "fresh"
+    assert result2["cache_status"] == "cached"
+    assert result2["rpc_duration_ms"] == 0
+    # Numeric values preserved through cache round-trip
+    assert result2["mtd"]["rate_percent"] == result1["mtd"]["rate_percent"]
+    assert result2["ytd"]["denominator_egp"] == result1["ytd"]["denominator_egp"]
+
+
+# ── Test K4-09 — OdooQueryError raised on any RPC failure ────────────────────
+
+
+async def test_kpi4_rpc_failure_raises_odoo_query_error() -> None:
+    """Any failure in any of the 4 sequential RPCs must raise OdooQueryError."""
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=RuntimeError("connection refused"))
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        with pytest.raises(OdooQueryError):
+            await get_collection_rate_mtd_ytd(client=mock)
+
+
+async def test_kpi4_rpc_failure_mid_sequence_raises_odoo_query_error() -> None:
+    """Failure on Q3 (after Q1 and Q2 succeed) must also raise OdooQueryError."""
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        _MOCK_KPI4_Q1,                          # Q1 succeeds
+        _MOCK_KPI4_Q2,                          # Q2 succeeds
+        RuntimeError("timeout on Q3"),           # Q3 fails
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        with pytest.raises(OdooQueryError):
+            await get_collection_rate_mtd_ytd(client=mock)
+
+
+# ── Test K4-10 — RPC failure writes no cache entry ───────────────────────────
+
+
+async def test_kpi4_rpc_failure_writes_no_cache_entry() -> None:
+    """A failed RPC must not leave a partial or empty cache entry.
+    A subsequent fresh call must still hit Odoo.
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=RuntimeError("timeout"))
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI4_TODAY):
+        with pytest.raises(OdooQueryError):
+            await get_collection_rate_mtd_ytd(client=mock)
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI4)
+    assert _cache.get(cache_key) is None, (
+        "A failed RPC must not write any cache entry — "
+        "a subsequent call must re-query Odoo rather than serving stale/empty data"
+    )
