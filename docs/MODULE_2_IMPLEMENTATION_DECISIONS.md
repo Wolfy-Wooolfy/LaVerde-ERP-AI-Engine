@@ -807,3 +807,151 @@ Do not use `.isoformat()` or naive date strings for `datetime` domain clauses.
 **Baseline update:** December 2025 correct baseline after fix: **47,481,212.00 EGP / 430 records**.
 
 ---
+
+## Session 6 — 2026-05-17 — KPI 4 Backend (Collection Rate MTD & YTD)
+
+**Scope:** D0 (discovery), D1 (service), D2 (endpoint), D3 (verification script),
+D4 (unit tests), D5 (this decisions entry).
+
+---
+
+### Decision 6.1 — KPI 4 formula: HEADER amount ÷ rs.installment amount
+
+**Status:** Approved (Checkpoint 0)
+
+**Formula:**
+```
+Collection Rate = SUM(rs.account.payment.installment.amount WHERE date IN period AND state='post')
+                ÷ SUM(rs.installment.amount              WHERE date IN period AND state='post')
+                × 100
+```
+
+**Numerator model:** `rs.account.payment.installment` (HEADER), `amount` field,
+`date` field (UTC `datetime`, user-entered cash receipt date — Decision 5.6 Finding A).
+
+**Denominator model:** `rs.installment`, `amount` field (contractual face value),
+`date` field (plain `date`, no timezone).
+
+**Why `amount`, not `due_amount`, for the denominator:**
+`rs.installment.amount` is the contractual face value — fixed at contract signing and
+independent of payment history. `rs.installment.due_amount` is the remaining balance
+(amount − paid_amount), which changes as payments are received. Using `due_amount`
+would create a self-referential ratio: as the numerator's own success increases
+`paid_amount`, it shrinks `due_amount` (the denominator), making the rate appear
+artificially high. The formula becomes time-unstable — the same payment events
+produce different rates depending on when you query. `amount` avoids this by
+remaining constant for the life of the contract.
+
+**Why two different models:**
+The two events have different temporal semantics. Cash receipts are recorded on the
+HEADER model with `date` as a UTC `datetime` (so timezone-aware UTC bounds are required
+per Decision 5.9). Installment due dates are on `rs.installment` with `date` as a
+plain `date` field (ISO string comparison is correct and sufficient).
+
+**State filter:** `state='post'` applied to both sides — consistent with all other
+KPIs in this module.
+
+---
+
+### Decision 6.2 — YTD period: calendar year (Jan 1 to today)
+
+**Status:** Approved (Checkpoint 0, pending Finance team confirmation)
+
+**Choice:** YTD = Jan 1 of the current calendar year to today (inclusive).
+The `ytd_period_assumption: "calendar_year"` field in the API response makes this
+explicit so consumers know the definition.
+
+**Alternative considered:** Fiscal year start (La Verde's fiscal year). Deferred
+because the fiscal year boundary was not confirmed by Finance at the time of
+implementation. If Finance specifies a different fiscal year start, update the
+`ytd_start` computation in `get_collection_rate_mtd_ytd()` and bump to Decision 6.2b.
+
+**Future action:** Finance team to confirm whether collection rate should be reported
+on a calendar-year or fiscal-year basis. No code change needed if calendar year is
+confirmed.
+
+---
+
+### Decision 6.3 — Zero denominator → rate_percent: None
+
+**Status:** Approved (Checkpoint 0)
+
+**Choice:** When `SUM(rs.installment.amount)` for a period is zero (no installments
+due), `rate_percent` is returned as `None` (JSON `null`). The frontend renders "—".
+
+**Why not 0%:** A 0% rate implies installments were due and none were paid. None implies
+the question "what fraction was collected?" is undefined for that period — no
+installments were scheduled. These are different business situations and must be
+distinguished clearly.
+
+**Why not raise an exception:** Zero denominator is not an Odoo error. It is a valid
+business state (e.g., on Jan 1 before any installments are due in the new year).
+Raising would cause a 503 that misleads the caller into thinking the service is down.
+
+**Unit test:** `test_kpi4_zero_denominator_returns_none_rate` (K4-02) and
+`test_kpi4_both_denominators_zero_both_rates_none` (K4-07) cover this behavior.
+
+---
+
+### KPI 4 — Implementation summary
+
+| Item | Value |
+|---|---|
+| Endpoint | `GET /api/v1/collections/kpi/collection-rate` |
+| Numerator model | `rs.account.payment.installment` (HEADER) |
+| Denominator model | `rs.installment` |
+| Numerator amount field | `amount` (= SUM of LINE amounts, Decision 5.6 Finding B) |
+| Denominator amount field | `amount` (contractual face value, NOT `due_amount` — Decision 6.1) |
+| Numerator date filter | UTC datetime bounds via `_tz_period_bounds()` (Decision 5.9) |
+| Denominator date filter | ISO date string bounds (plain `date` field, no timezone) |
+| State filter | `state = 'post'` on both sides (Decision 5.1 extended) |
+| MTD period | First day of current month → today |
+| YTD period | Jan 1 (calendar year) → today (Decision 6.2) |
+| Zero denominator | `rate_percent: None` (Decision 6.3) |
+| Cache TTL | 60s (default — Decision 5.2) |
+| Cache-Control | `private, max-age=60` |
+| RPCs per call | 4 sequential `read_group` calls (Q1–Q4) |
+| Performance warning | Log WARNING if total `rpc_duration_ms > 5000` |
+| Verification | `scripts/verify_kpi4_live.py` — Checkpoint 2: identity-equal match on 4 manual Odoo checks |
+| Discovery | `scripts/discover_kpi4_architecture.py` — Checkpoint 1: identity-equal match confirmed 2026-05-17 |
+| Unit tests | K4-01 through K4-10 + 1 extra (mid-sequence failure) = 11 tests, all passing |
+
+**Operational note (Decision 5.7 analog):**
+As of 2026-05-17, both MTD and YTD rates compute as 0.00% because
+`rs.account.payment.installment` has no posted records in 2026 — payments are being
+back-entered retroactively. When the operations team completes back-entry,
+rates will populate automatically without any code change.
+
+---
+
+### Verification Result — Session 6 KPI 4 Close
+
+**Date:** 2026-05-17
+**Checkpoint 1 (D0 discovery — manual Odoo cross-check):**
+
+| Check | Backend | Odoo UI | Delta |
+|---|---|---|---|
+| MTD Numerator | 0.00 EGP / 0 records | 0.00 EGP / 0 records | **0.00 / 0** |
+| MTD Denominator | 43,653,133.00 EGP / 263 records | 43,653,133.00 EGP / 263 records | **0.00 / 0** |
+| YTD Numerator | 0.00 EGP / 0 records | 0.00 EGP / 0 records | **0.00 / 0** |
+| YTD Denominator | 302,882,977.00 EGP / 1,861 records | 302,882,977.00 EGP / 1,861 records | **0.00 / 0** |
+
+**Conclusion:** The two-model architecture (HEADER numerator + rs.installment
+denominator), with UTC-aware datetime bounds on the numerator and plain ISO date
+bounds on the denominator, reproduces Odoo's native data identity-equal at the
+EGP level on 2026-05-17. KPI 4 backend is architecturally validated.
+
+**Checkpoint 2 (D3 verify script — live endpoint):**
+_Pending. Run `python scripts/verify_kpi4_live.py` against the running backend
+and paste output for sign-off._
+
+**Caveats:**
+- Both rates are 0.00% as of 2026-05-17 (zero numerators — data entry phase).
+  This is correct business behavior, not a bug (Decision 5.7 analog).
+- Board launch deferred per Decision 1.3 until historical data entry is complete.
+- Denominator values will grow daily as new installments are posted. The D0
+  baselines (43,653,133 MTD / 302,882,977 YTD) are snapshots, not targets.
+- KPI 5b (Collection Rate per project) is deferred to Session 7 (out of scope
+  for Session 6).
+
+---
