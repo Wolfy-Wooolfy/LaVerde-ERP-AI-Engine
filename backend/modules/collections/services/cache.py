@@ -17,13 +17,13 @@ from datetime import date, timezone
 from typing import Any, Optional
 
 _lock = threading.Lock()
-_store: dict[str, tuple[Any, float]] = {}
+_store: dict[str, tuple[Any, float, int]] = {}  # (value, stored_at, ttl)
 
 _TTL_SECONDS = 60
 
 
-def _is_expired(stored_at: float) -> bool:
-    return (time.monotonic() - stored_at) > _TTL_SECONDS
+def _is_expired(stored_at: float, ttl: int) -> bool:
+    return (time.monotonic() - stored_at) > ttl
 
 
 def today_str() -> str:
@@ -41,16 +41,16 @@ def get(key: str) -> Optional[Any]:
         entry = _store.get(key)
         if entry is None:
             return None
-        value, stored_at = entry
-        if _is_expired(stored_at):
+        value, stored_at, ttl = entry
+        if _is_expired(stored_at, ttl):
             del _store[key]
             return None
         return value
 
 
-def set(key: str, value: Any) -> None:
+def set(key: str, value: Any, ttl: int = _TTL_SECONDS) -> None:
     with _lock:
-        _store[key] = (value, time.monotonic())
+        _store[key] = (value, time.monotonic(), ttl)
 
 
 def invalidate(key: str) -> None:
