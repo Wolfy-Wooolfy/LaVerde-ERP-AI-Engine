@@ -133,6 +133,19 @@ def _parse_month_key(row: dict) -> str | None:
     return None
 
 
+def _parse_month_key_header(row: dict) -> str | None:
+    """Extract the month group key from a HEADER model read_group row.
+
+    For groupby=['date:month'] on rs.account.payment.installment,
+    Odoo returns the key under 'date:month' or 'date'.
+    """
+    for candidate in ("date:month", "date"):
+        val = row.get(candidate)
+        if val is not None and val is not False:
+            return str(val)
+    return None
+
+
 # ── TSV log ───────────────────────────────────────────────────────────────────
 
 def _append_tsv(rows: list[dict]) -> None:
@@ -216,7 +229,7 @@ async def run() -> None:
                 flags.append(f"field_{fname}_wrong_relation_{frel}")
             print(
                 f"    {status} {fname}: type={ftype!r}, "
-                f"relation={frel!r or '(none)'}, string={fstr!r}{detail}"
+                f"relation={(frel or '(none)')!r}, string={fstr!r}{detail}"
             )
 
         # Additional amount / relational fields (informational only)
@@ -290,112 +303,205 @@ async def run() -> None:
                     f"{str(pay_id):>10}  {amt:>18,.2f}"
                 )
 
-        # ── Section 4: KPI 6 query — unfiltered ──────────────────────────────
+        # ── Section 4: Attempt LINE MODEL read_group (expected to fail) ─────────
         print()
         print(_SEP2)
-        print("[4] KPI 6 read_group — SUM(amount) grouped by payment_id.date:month")
-        print("    (UNFILTERED — no payment_id.state clause)")
-        print(f"    Domain: payment_id.date >= {period_start}  AND  "
-              f"<= {period_end} 23:59:59")
+        print("[4] Attempt: read_group on LINE MODEL grouped by payment_id.date:month")
+        print("    This tests whether Odoo supports :month granularity on related fields.")
+        print(f"    Domain: payment_id.date >= {period_start}  AND  <= {period_end} 23:59:59")
         print(_SEP2)
 
-        domain = _build_domain(period_start, period_end)
+        domain_line = _build_domain(period_start, period_end)
+        line_groupby_works = False
 
-        raw_rows: list[dict] = await client.execute_kw(
-            _LINE_MODEL,
-            "read_group",
-            args=[domain, ["amount:sum"], ["payment_id.date:month"]],
-            kwargs={"lazy": False},
+        try:
+            raw_rows_line: list[dict] = await client.execute_kw(
+                _LINE_MODEL,
+                "read_group",
+                args=[domain_line, ["amount:sum"], ["payment_id.date:month"]],
+                kwargs={"lazy": False},
+            )
+            line_groupby_works = True
+            print(f"    {_PASS} read_group on line model SUCCEEDED — {len(raw_rows_line)} row(s)")
+            if raw_rows_line:
+                print("    Raw first row (for key-format documentation):")
+                for k, v in raw_rows_line[0].items():
+                    print(f"      {k!r}: {v!r}")
+        except Exception as exc:
+            print(f"    {_FLAG} read_group on line model FAILED with:")
+            print(f"           {type(exc).__name__}: {str(exc)[:300]}")
+            print()
+            print("    ORM LIMITATION CONFIRMED: Odoo does not support :month groupby")
+            print("    on a related field (payment_id.date). Domain filtering on")
+            print("    payment_id.date works; groupby on it does not.")
+            print()
+            print("    CONSEQUENCE FOR D1: The service must query the HEADER model")
+            print("    rs.account.payment.installment (which owns the date field)")
+            print("    rather than the line sub-model. See Section 4b and 4c.")
+            flags.append("line_model_groupby_unsupported_use_header_model")
+
+        # ── Section 4b: fields_get on HEADER model ────────────────────────────
+        _HEADER_MODEL = "rs.account.payment.installment"
+        print()
+        print(_SEP2)
+        print(f"[4b] fields_get on {_HEADER_MODEL}")
+        print("     Goal: identify the right amount field and confirm date/state fields.")
+        print(_SEP2)
+
+        header_fields: dict = await client.execute_kw(
+            _HEADER_MODEL,
+            "fields_get",
+            args=[],
+            kwargs={"attributes": ["string", "type", "relation"]},
         )
 
-        print(f"    Odoo returned {len(raw_rows)} row(s)")
+        # Confirm date and state on header
+        for fname in ("date", "state"):
+            if fname in header_fields:
+                f = header_fields[fname]
+                print(f"    {_PASS} {fname}: type={f.get('type')!r}, string={f.get('string')!r}")
+            else:
+                print(f"    {_FLAG} {fname}: NOT FOUND on header model")
+                flags.append(f"header_missing_{fname}")
 
-        # Print raw first row to document the actual key structure Odoo uses
-        if raw_rows:
-            print()
-            print("    Raw first row (all keys) — documents actual Odoo groupby key format:")
-            for k, v in raw_rows[0].items():
-                print(f"      {k!r}: {v!r}")
-
+        # List all monetary / float / selection fields (amount candidates + state)
         print()
-        print(f"    {'Month key (Odoo)':<25} {'Records':>10}  {'Amount SUM (EGP)':>26}")
-        print(f"    {'-'*25} {'-'*10}  {'-'*26}")
+        print("    Amount-candidate and selection fields on header model:")
+        header_amount_fields: list[str] = []
+        for fname, finfo in sorted(header_fields.items()):
+            ftype = finfo.get("type", "")
+            if ftype in ("monetary", "float", "selection"):
+                frel = finfo.get("relation", "")
+                fstr = finfo.get("string", "")
+                print(
+                    f"      {fname:<40} type={ftype!r:<12} "
+                    f"string={fstr!r}"
+                )
+                if ftype in ("monetary", "float"):
+                    header_amount_fields.append(fname)
+
+        # ── Section 4c: KPI 6 read_group on HEADER model ─────────────────────
+        print()
+        print(_SEP2)
+        print(f"[4c] KPI 6 read_group on HEADER MODEL: {_HEADER_MODEL}")
+        print("     groupby=['date:month'] — date is a DIRECT field, should work.")
+        print(f"     Domain (unfiltered): date >= {period_start}  AND  <= {period_end} 23:59:59")
+        print(_SEP2)
+
+        domain_header = [
+            ("date", ">=", period_start.isoformat()),
+            ("date", "<=", period_end.isoformat() + " 23:59:59"),
+        ]
+        domain_header_post = domain_header + [("state", "=", "post")]
+
+        # Determine which amount field(s) to aggregate.
+        # Try 'amount' first (most common), fallback to first monetary field found.
+        agg_candidates = [f for f in ["amount", "net_amount", "total_amount"] if f in header_fields]
+        if not agg_candidates and header_amount_fields:
+            agg_candidates = header_amount_fields[:3]
+
+        print(f"    Amount field candidates to try: {agg_candidates}")
 
         unfiltered_by_key: dict[str, dict] = {}
+        filtered_by_key:   dict[str, dict] = {}
         total_unfiltered = 0.0
         total_unfiltered_count = 0
-
-        for row in raw_rows:
-            month_key = _parse_month_key(row)
-            if month_key is None:
-                # Fallback: print all non-dunder keys so we can debug
-                non_dunder = {k: v for k, v in row.items() if not k.startswith("__")}
-                print(f"    {_FLAG} Could not parse month key from row: {non_dunder}")
-                flags.append("cannot_parse_month_key")
-                continue
-            amt   = float(row.get("amount") or 0.0)
-            count = int(row.get("__count") or 0)
-            unfiltered_by_key[month_key] = {"amount": amt, "count": count}
-            total_unfiltered       += amt
-            total_unfiltered_count += count
-            print(f"    {month_key:<25} {count:>10,}  {amt:>24,.2f} EGP")
-
-        print(f"    {'-'*25} {'-'*10}  {'-'*26}")
-        print(f"    {'TOTAL':<25} {total_unfiltered_count:>10,}  "
-              f"{total_unfiltered:>24,.2f} EGP")
-
-        # Check expected months present / missing
-        print()
-        for ym in expected_keys:
-            if ym in unfiltered_by_key:
-                print(f"    {_PASS} Month {ym} present in result")
-            else:
-                print(f"    {_INFO} Month {ym} absent — zero payments for this month (will be zero-padded in service)")
-
-        # ── Section 5: State filter test ──────────────────────────────────────
-        print()
-        print(_SEP2)
-        print("[5] State filter test — same domain + ('payment_id.state', '=', 'post')")
-        print("    Side-by-side comparison — even 1 EGP delta is reported explicitly")
-        print(_SEP2)
-
-        domain_post = _build_domain_post(period_start, period_end)
-
-        raw_rows_post: list[dict] = await client.execute_kw(
-            _LINE_MODEL,
-            "read_group",
-            args=[domain_post, ["amount:sum"], ["payment_id.date:month"]],
-            kwargs={"lazy": False},
-        )
-
-        print(f"    Odoo returned {len(raw_rows_post)} row(s) with state='post' filter")
-        print()
-
-        filtered_by_key: dict[str, dict] = {}
-        total_filtered = 0.0
+        total_filtered   = 0.0
         total_filtered_count = 0
+        chosen_field = "amount"  # default; updated below
 
-        for row in raw_rows_post:
-            month_key = _parse_month_key(row)
-            if month_key is None:
-                continue
-            amt   = float(row.get("amount") or 0.0)
-            count = int(row.get("__count") or 0)
-            filtered_by_key[month_key] = {"amount": amt, "count": count}
-            total_filtered       += amt
-            total_filtered_count += count
+        for candidate_field in agg_candidates:
+            print()
+            print(f"    --- Trying field: {candidate_field!r} ---")
+            try:
+                rg_uf: list[dict] = await client.execute_kw(
+                    _HEADER_MODEL,
+                    "read_group",
+                    args=[domain_header, [f"{candidate_field}:sum"], ["date:month"]],
+                    kwargs={"lazy": False},
+                )
+                print(f"    {_PASS} read_group with {candidate_field!r} SUCCEEDED — "
+                      f"{len(rg_uf)} row(s)")
 
-        # Side-by-side table
-        col1 = 25   # month key
-        col2 = 10   # unfiltered records
-        col3 = 18   # unfiltered amount
-        col4 = 10   # post-filtered records
-        col5 = 18   # post-filtered amount
-        col6 = 16   # delta
+                # Print raw first row to document key format
+                if rg_uf:
+                    print("    Raw first row (key-format documentation):")
+                    for k, v in rg_uf[0].items():
+                        print(f"      {k!r}: {v!r}")
 
-        header = (
-            f"    {'Month':<{col1}} {'Rec(unfiltered)':>{col2}}  "
-            f"{'Amt(unfiltered)':>{col3}}  "
+                # Parse rows
+                print()
+                print(f"    {'Month key (Odoo)':<25} {'Records':>10}  {candidate_field + ' SUM':>26}")
+                print(f"    {'-'*25} {'-'*10}  {'-'*26}")
+
+                tmp_uf: dict[str, dict] = {}
+                for row in rg_uf:
+                    mk = _parse_month_key_header(row)
+                    if mk is None:
+                        non_d = {k: v for k, v in row.items() if not k.startswith("__")}
+                        print(f"    {_FLAG} Cannot parse month key: {non_d}")
+                        flags.append("header_cannot_parse_month_key")
+                        continue
+                    amt   = float(row.get(candidate_field) or 0.0)
+                    count = int(row.get("__count") or 0)
+                    tmp_uf[mk] = {"amount": amt, "count": count}
+                    print(f"    {mk:<25} {count:>10,}  {amt:>24,.2f} EGP")
+
+                t_uf_total = sum(v["amount"] for v in tmp_uf.values())
+                t_uf_count = sum(v["count"] for v in tmp_uf.values())
+                print(f"    {'-'*25} {'-'*10}  {'-'*26}")
+                print(f"    {'TOTAL':<25} {t_uf_count:>10,}  {t_uf_total:>24,.2f} EGP")
+
+                # Use this field as the primary if it gives non-zero totals
+                if t_uf_total > 0 and not unfiltered_by_key:
+                    chosen_field = candidate_field
+                    unfiltered_by_key = tmp_uf
+                    total_unfiltered = t_uf_total
+                    total_unfiltered_count = t_uf_count
+                    print(f"    {_PASS} Field {candidate_field!r} selected as primary amount field.")
+
+            except Exception as exc:
+                print(f"    {_FLAG} read_group with {candidate_field!r} FAILED: {exc}")
+                flags.append(f"header_field_{candidate_field}_groupby_failed")
+
+        if not unfiltered_by_key:
+            flags.append("header_model_no_working_amount_field")
+            print(f"\n    {_FLAG} No working amount field found on header model.")
+            print("          Manual investigation required before D1.")
+
+        # ── Section 5: State filter test on HEADER model ──────────────────────
+        print()
+        print(_SEP2)
+        print("[5] State filter test on HEADER MODEL")
+        print(f"    Comparing unfiltered vs state='post' for field: {chosen_field!r}")
+        print("    Side-by-side — even 1 EGP delta is reported explicitly")
+        print(_SEP2)
+
+        if unfiltered_by_key:
+            try:
+                rg_post: list[dict] = await client.execute_kw(
+                    _HEADER_MODEL,
+                    "read_group",
+                    args=[domain_header_post, [f"{chosen_field}:sum"], ["date:month"]],
+                    kwargs={"lazy": False},
+                )
+                for row in rg_post:
+                    mk = _parse_month_key_header(row)
+                    if mk is None:
+                        continue
+                    amt   = float(row.get(chosen_field) or 0.0)
+                    count = int(row.get("__count") or 0)
+                    filtered_by_key[mk] = {"amount": amt, "count": count}
+                    total_filtered   += amt
+                    total_filtered_count += count
+            except Exception as exc:
+                print(f"    {_FLAG} state='post' filter query failed: {exc}")
+                flags.append("header_post_filter_query_failed")
+
+        col1, col2, col3, col4, col5, col6 = 25, 10, 18, 10, 18, 16
+        hdr_line = (
+            f"    {'Month':<{col1}} {'Rec(unfilt)':>{col2}}  "
+            f"{'Amt(unfilt)':>{col3}}  "
             f"{'Rec(post)':>{col4}}  {'Amt(post)':>{col5}}  "
             f"{'Delta EGP':>{col6}}"
         )
@@ -403,19 +509,18 @@ async def run() -> None:
             f"    {'-'*col1} {'-'*col2}  {'-'*col3}  "
             f"{'-'*col4}  {'-'*col5}  {'-'*col6}"
         )
-        print(header)
+        print(hdr_line)
         print(sep_line)
 
         all_keys = sorted(set(list(unfiltered_by_key) + list(filtered_by_key)))
-        any_delta = False
+        overall_delta = 0.0
 
         for key in all_keys:
             uf = unfiltered_by_key.get(key, {"amount": 0.0, "count": 0})
             ft = filtered_by_key.get(key, {"amount": 0.0, "count": 0})
             delta = uf["amount"] - ft["amount"]
+            overall_delta += delta
             delta_str = f"{delta:+,.2f}" if abs(delta) >= 0.005 else "0.00"
-            if abs(delta) >= 0.005:
-                any_delta = True
             print(
                 f"    {key:<{col1}} {uf['count']:>{col2},}  "
                 f"{uf['amount']:>{col3},.2f} EGP  "
@@ -423,32 +528,29 @@ async def run() -> None:
                 f"{delta_str:>{col6}}"
             )
 
-        overall_delta = total_unfiltered - total_filtered
-        overall_delta_str = f"{overall_delta:+,.2f}" if abs(overall_delta) >= 0.005 else "0.00"
+        ov_str = f"{overall_delta:+,.2f}" if abs(overall_delta) >= 0.005 else "0.00"
         print(sep_line)
         print(
             f"    {'TOTAL':<{col1}} {total_unfiltered_count:>{col2},}  "
             f"{total_unfiltered:>{col3},.2f} EGP  "
             f"{total_filtered_count:>{col4},}  {total_filtered:>{col5},.2f} EGP  "
-            f"{overall_delta_str:>{col6}}"
+            f"{ov_str:>{col6}}"
         )
-
         print()
+
         if abs(overall_delta) < 0.01:
-            print(f"    {_PASS} Delta = 0.00 EGP — all 6-month line records belong to "
-                  "posted payment headers.")
-            print(f"    {_INFO} Decision 5.1 candidate: state='post' filter has ZERO IMPACT on totals.")
-            print(f"    {_INFO} Including it adds defence-in-depth at zero cost; excluding it saves one domain clause.")
+            print(f"    {_PASS} Delta = 0.00 EGP — all header records in the 6-month window "
+                  "are in state='post'.")
+            print(f"    {_INFO} Decision 5.1: state='post' filter has ZERO IMPACT on totals.")
+            print(f"    {_INFO} Including it adds defence-in-depth at zero cost.")
         elif abs(overall_delta) < 1_000:
-            any_delta = True
             print(f"    {_FLAG} Small delta: {overall_delta:+,.2f} EGP — "
                   "a handful of non-post records in the 6-month window.")
             print(f"    {_INFO} Decision 5.1: recommend adding state='post' for correctness.")
             flags.append(f"state_filter_small_delta_{overall_delta:+.2f}_egp")
         else:
-            any_delta = True
             pct = abs(overall_delta) / max(total_unfiltered, 0.01) * 100
-            print(f"    {_FLAG} Material delta: {overall_delta:+,.2f} EGP ({pct:.2f}% of unfiltered) — "
+            print(f"    {_FLAG} Material delta: {overall_delta:+,.2f} EGP ({pct:.2f}%) — "
                   "non-post records contribute meaningfully.")
             print(f"    {_INFO} Decision 5.1: state='post' filter REQUIRED.")
             flags.append(f"state_filter_material_delta_{overall_delta:+.2f}_egp")
@@ -456,39 +558,34 @@ async def run() -> None:
         # ── Section 6: All-time sanity ratio ──────────────────────────────────
         print()
         print(_SEP2)
-        print("[6] Sanity ratio: 6-month unfiltered SUM ÷ all-time x_studio_actual_paid_amount")
+        print("[6] Sanity ratio: 6-month SUM ÷ all-time x_studio_actual_paid_amount")
         print(_SEP2)
 
         ratio_pct = (
             total_unfiltered / _ALL_TIME_ACTUAL_PAID_EGP * 100
-            if _ALL_TIME_ACTUAL_PAID_EGP else 0.0
+            if _ALL_TIME_ACTUAL_PAID_EGP and total_unfiltered > 0 else 0.0
         )
 
-        print(f"    6-month SUM (unfiltered)          : {_egp(total_unfiltered)}")
-        print(f"    6-month SUM (state='post')        : {_egp(total_filtered)}")
-        print(f"    All-time actual_paid (state=post) : {_egp(_ALL_TIME_ACTUAL_PAID_EGP)}")
-        print(f"    Ratio (unfiltered / all-time)     : {ratio_pct:.2f}%")
+        print(f"    6-month SUM (unfiltered, {chosen_field!r}): {_egp(total_unfiltered)}")
+        print(f"    6-month SUM (state='post')             : {_egp(total_filtered)}")
+        print(f"    All-time actual_paid (state=post)      : {_egp(_ALL_TIME_ACTUAL_PAID_EGP)}")
+        print(f"    Ratio (unfiltered / all-time)          : {ratio_pct:.2f}%")
         print()
 
-        if ratio_pct < 5.0:
+        if ratio_pct == 0.0 and total_unfiltered == 0.0:
+            flags.append("ratio_zero_no_data")
+            print(f"    {_FLAG} Ratio is 0.00% because no 6-month data found — check flags above.")
+        elif ratio_pct < 5.0:
             flags.append(f"ratio_low_{ratio_pct:.1f}pct")
-            print(f"    {_FLAG} Ratio {ratio_pct:.2f}% is BELOW the 5% lower bound.")
-            print("          Possible causes:")
-            print("          (a) payment_id.date is NOT the payment posting date in this Odoo instance")
-            print("          (b) La Verde entered very few payments in the last 6 months")
-            print("          (c) the line model's 'amount' field is not the collected amount")
-            print("          Investigate before proceeding to D1.")
+            print(f"    {_FLAG} Ratio {ratio_pct:.2f}% is BELOW 5% — investigate before D1.")
+            print("          The header model's amount field may not represent collected cash.")
         elif ratio_pct > 30.0:
             flags.append(f"ratio_high_{ratio_pct:.1f}pct")
-            print(f"    {_FLAG} Ratio {ratio_pct:.2f}% is ABOVE the 30% upper bound.")
-            print("          Possible causes:")
-            print("          (a) line model counts the same payment for multiple installments")
-            print("          (b) 'amount' field stores something other than per-payment collected amount")
-            print("          (c) La Verde had unusually high collections in the last 6 months")
-            print("          Investigate before proceeding to D1.")
+            print(f"    {_FLAG} Ratio {ratio_pct:.2f}% is ABOVE 30% — investigate before D1.")
+            print("          The amount field may double-count or measure something unexpected.")
         else:
             print(f"    {_PASS} Ratio {ratio_pct:.2f}% is within expected range [5%, 30%].")
-            print("          The 6-month trend query is reading the correct scale and field.")
+            print(f"          The {chosen_field!r} field on the header model reads the correct scale.")
 
         # ── Section 7: Discovery Summary ──────────────────────────────────────
         print()
@@ -496,26 +593,33 @@ async def run() -> None:
         print("DISCOVERY SUMMARY")
         print(_SEP)
         print()
-        print(f"  Model                     : {_LINE_MODEL}")
-        print(f"  Total records (all time)  : {total_records:,}")
-        print(f"  Period                    : {period_start}  →  {period_end}")
-        print(f"  6-month rows returned     : {len(raw_rows)}  (unfiltered)")
-        print(f"  6-month record count      : {total_unfiltered_count:,}  (unfiltered)")
-        print(f"  6-month total (unfiltered): {_egp(total_unfiltered)}")
-        print(f"  6-month total (post only) : {_egp(total_filtered)}")
-        print(f"  State-filter delta        : {overall_delta:+,.2f} EGP")
-        print(f"  Sanity ratio              : {ratio_pct:.2f}%  (vs all-time actual_paid)")
+        print(f"  Line model       : {_LINE_MODEL}")
+        print(f"  Header model     : {_HEADER_MODEL}")
+        print(f"  Line records (all time): {total_records:,}")
+        print(f"  Period           : {period_start}  →  {period_end}")
+        print()
+        print(f"  KEY FINDING — MODEL FOR D1:")
+        if line_groupby_works:
+            print(f"    Line model groupby WORKS — use {_LINE_MODEL} in D1")
+        else:
+            print(f"    Line model groupby FAILS — use {_HEADER_MODEL} in D1")
+            print(f"    Amount field to use: {chosen_field!r}")
+            print(f"    Groupby: ['date:month']  (date is a direct field on the header)")
+        print()
+        print(f"  6-month header records (unfiltered): {total_unfiltered_count:,}")
+        print(f"  6-month total (unfiltered)         : {_egp(total_unfiltered)}")
+        print(f"  6-month total (state='post')       : {_egp(total_filtered)}")
+        print(f"  State-filter delta                 : {overall_delta:+,.2f} EGP")
+        print(f"  Sanity ratio                       : {ratio_pct:.2f}%  (vs all-time actual_paid)")
         print()
 
         # Per-month table for manual cross-check
         col_m, col_r, col_a, col_b = 22, 12, 26, 26
         print(
-            f"  {'Month':<{col_m}} {'Unfiltered Rec':>{col_r}}  "
-            f"{'Unfiltered Amount':>{col_a}}  {'Post-filtered Amount':>{col_b}}"
+            f"  {'Month':<{col_m}} {'Header Rec (unfilt)':>{col_r}}  "
+            f"{'Amount (unfiltered)':>{col_a}}  {'Amount (post only)':>{col_b}}"
         )
-        print(
-            f"  {'-'*col_m} {'-'*col_r}  {'-'*col_a}  {'-'*col_b}"
-        )
+        print(f"  {'-'*col_m} {'-'*col_r}  {'-'*col_a}  {'-'*col_b}")
         for ym in sorted(set(list(unfiltered_by_key) + list(filtered_by_key))):
             uf = unfiltered_by_key.get(ym, {"amount": 0.0, "count": 0})
             ft = filtered_by_key.get(ym, {"amount": 0.0, "count": 0})
@@ -523,9 +627,7 @@ async def run() -> None:
                 f"  {ym:<{col_m}} {uf['count']:>{col_r},}  "
                 f"{uf['amount']:>{col_a},.2f} EGP  {ft['amount']:>{col_b},.2f} EGP"
             )
-        print(
-            f"  {'-'*col_m} {'-'*col_r}  {'-'*col_a}  {'-'*col_b}"
-        )
+        print(f"  {'-'*col_m} {'-'*col_r}  {'-'*col_a}  {'-'*col_b}")
         print(
             f"  {'TOTAL':<{col_m}} {total_unfiltered_count:>{col_r},}  "
             f"{total_unfiltered:>{col_a},.2f} EGP  {total_filtered:>{col_b},.2f} EGP"
@@ -535,30 +637,33 @@ async def run() -> None:
         # Flags summary
         if flags:
             print(f"  {_FLAG} FLAGS raised ({len(flags)}):")
-            for f in flags:
-                print(f"      - {f}")
-            print(f"  {_FLAG} DO NOT proceed to D1 until all flags are reviewed by Khaled.")
+            for fl in flags:
+                print(f"      - {fl}")
+            print()
+            if "line_model_groupby_unsupported_use_header_model" in flags:
+                print(f"  {_INFO} The line_model_groupby flag is EXPECTED and RESOLVED by Section 4c.")
+                print(f"  {_INFO} D1 will query the header model. This flag does not block D1.")
         else:
             print(f"  {_PASS} No flags raised.")
 
         print()
-        print("  ─── MANUAL CROSS-CHECK (REQUIRED before D1) ─────────────────────────")
+        print("  ─── MANUAL CROSS-CHECK (REQUIRED before D1) ──────────────────────────")
         print()
-        print("  Open Odoo → RS Accounting → Payment Installments (or the view that")
-        print("  shows rs.account.payment.installment.line records with posting dates)")
+        print("  Open Odoo → RS Accounting → Payment Installments view")
+        print("  (the view that shows rs.account.payment.installment records with date)")
         print()
-        print("  Recommended: pick the most recent COMPLETE calendar month from the")
-        print("  table above (e.g., April 2026 if today is May).")
+        print("  Recommended: pick the most recent COMPLETE calendar month")
+        print("  (e.g., April 2026 if today is May 2026).")
         print()
         print("  Steps:")
-        print("    1. Filter payment records to that month using the posting date")
-        print("    2. Sum the 'amount' column for that month's line records")
-        print("    3. Compare to the 'Unfiltered Amount' in the table above for that month")
+        print(f"    1. Filter payment records by date to that month")
+        print(f"    2. Sum the {chosen_field!r} column for that month's header records")
+        print(f"    3. Compare to the 'Amount (unfiltered)' value in the table above")
         print("    4. Identity-equal match (or explain any delta) required before D1")
         print()
         print("  After confirming:")
-        print("    - Approve Decision 5.1 (state filter: include or exclude non-post headers)")
-        print("    - Reply 'proceed with D1' to start the service implementation")
+        print("    - Approve Decision 5.1 (state filter decision)")
+        print("    - Reply 'proceed with D1' to start service implementation")
         print()
         print(_SEP)
 
