@@ -739,6 +739,38 @@ the chart numbers are incomplete.
 
 ---
 
+### Decision 5.10 — Python-side regrouping for KPI 6 month buckets
+
+- **Choice:** KPI 6's service uses `search_read` to fetch raw records within
+  the 6-month window, then groups by Egypt local month in Python. It does NOT
+  use Odoo's `read_group` with `date:month` groupby.
+- **Why:** Odoo's `date:month` groupby key is computed from the raw stored UTC
+  value. Records stored at Egypt-local-midnight (e.g., a record displayed as
+  `01/12/2025 00:00:00` in the Odoo UI, stored as `2025-11-30 22:00:00 UTC`)
+  are grouped by Odoo into the previous UTC month. This produces results that
+  disagree with the Odoo UI by one record per month boundary — 99,114 EGP for
+  the December 2025 boundary (record id=3869, confirmed by
+  `scripts/inspect_kpi6_dec1_records.py`).
+- **Trade-off accepted:** Slightly more data transfer per call (~430 rows for
+  the current 6-month window, well within FastAPI + JSON limits). The 1-hour
+  cache TTL means at most 24 RPCs per day per process. Performance is
+  negligible compared to the identity-equal correctness requirement.
+- **Discovery:** Checkpoint 2 manual cross-check against Odoo UI. The
+  diagnostic script `scripts/inspect_kpi6_dec1_records.py` (kept for the
+  audit trail) confirmed `search_count` returns 430 records under the
+  UTC-shifted domain but `read_group` returns only 429 (1 record bucketed to
+  the previous UTC month).
+- **Future KPIs:** Any KPI requiring period-bucketing on a `datetime` field
+  must follow the same pattern (`search_read` + Python-side local-time
+  grouping). KPIs 1, 2, 3, 5 are unaffected because they do not bucket by
+  period.
+- **Supersedes Decision 5.9 partially:** The timezone-aware domain boundaries
+  (Decision 5.9) remain correct and necessary — they bring record id=3869 INTO
+  the search result set. Decision 5.10 adds the Python-side regrouping that
+  places it into the correct Egypt-local month bucket.
+
+---
+
 ### Decision 5.9 — Timezone-aware datetime filters for KPI 6
 
 **Status:** Approved  
