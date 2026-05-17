@@ -987,3 +987,123 @@ The `--reload` flag is acceptable during active development, but must be disable
 (with a clean restart) before any identity-equal verification gate.
 
 ---
+
+## Session 7 — 2026-05-17 — KPI 5b: Collection Rate per Project
+
+### Decision 7.1 — Branch A: project_id is a direct field on HEADER
+
+**Open question resolved by D0 (`scripts/discover_kpi5b_architecture.py`):**
+`rs.account.payment.installment` exposes a `project_id` many2one field directly.
+The indirect join via `rs.account.payment.installment.line → rs.installment.project_id`
+(Branch B) is not needed.
+
+- **Chosen architecture (Branch A):** `get_collection_rate_by_project()` uses 4
+  `read_group` RPCs on the same two models as KPI 4, adding `groupby=["project_id"]`
+  to each query. This keeps the RPC budget identical to KPI 4 (4 RPCs, same models).
+- **Branch B (discarded):** Would have required paginated pre-fetch of installment IDs
+  per project + LINE model queries — more RPCs and more complexity. No reason to use
+  it given Branch A is available.
+- **Architectural assumption:** La Verde payment HEADERs are single-project. D0
+  cross-check confirmed SUM(per-project) == KPI 4 global with zero delta. If a future
+  HEADER spans multiple projects (multi-project bulk payment), KPI 5b per-project sums
+  will diverge from KPI 4 by the multi-project amount. This will surface in the
+  cross-KPI consistency check (Decision 7.3) rather than silently corrupting data.
+
+### Decision 7.2 — Internal consistency: totals computed from parts only
+
+`get_collection_rate_by_project()` computes `total_numerator_egp` and
+`total_denominator_egp` as `sum(p["numerator_egp"] for p in projects)` and
+`sum(p["denominator_egp"] for p in projects)` respectively. The total is never
+fetched via a separate 5th RPC — it is derived from the same 4 read_group rows.
+
+- **Rationale:** An extra RPC to compute the global total would cost latency and
+  add a failure mode for no correctness benefit. The per-project rows are the
+  authoritative data; the total is a derived convenience field.
+- **Consequence:** `total_*` fields are always internally consistent with the
+  per-project list by construction (no assertion needed). The cross-KPI check
+  against KPI 4 standalone is the correctness gate (Decision 7.3).
+- **Missing projects** (zero-padding): if Odoo returns fewer than 3 projects for a
+  period (e.g., La Puerta has no due installments in MTD), the missing project is
+  zero-padded and logged at INFO level. This is consistent with KPI 5 (Decision 3.4).
+
+### Decision 7.3 — Cross-KPI consistency check lives in the verify script
+
+`scripts/verify_kpi5b_live.py` Step 6 asserts:
+```
+abs(KPI5b.total_numerator_egp - KPI4.numerator_egp) < 0.01 EGP
+abs(KPI5b.total_denominator_egp - KPI4.denominator_egp) < 0.01 EGP
+```
+for both MTD and YTD periods. This check is performed by calling
+`GET /api/v1/collections/kpi/collection-rate` as a second HTTP request in the
+verify script.
+
+- **Rationale:** The cross-KPI check requires calling a second endpoint. In a
+  production service this would be wasteful (extra RPC + HTTP round-trip every 60s).
+  The verify script runs manually before sign-off, making the extra call cost
+  acceptable there.
+- **D0 confirmed baseline (2026-05-17):** Zero delta on both periods (no null-project
+  installments in any period). This baseline is preserved in the verify script as an
+  assertion gate.
+
+### Decision 7.4 — Multi-project payment hypothesis resolved
+
+D0 sanity check (3 RPCs: 10 HEADERs → LINEs → installment project lookup)
+confirmed that all sampled HEADER records link to installments from a single project.
+No multi-project bulk payment was detected.
+
+- **Consequence for D1:** No special handling needed in the service. Branch A
+  `groupby=["project_id"]` on HEADER produces unambiguous per-project amounts.
+- **Future guard:** If a HEADER ever links installments across multiple projects,
+  Odoo's `read_group` will place that HEADER's `amount` in whichever `project_id`
+  is stored on the HEADER record — the LINE-level project distribution is not
+  consulted. This is acceptable for the MVP, where multi-project payments do not
+  exist. Document as a known limitation; revisit if La Verde introduces cross-project
+  payment batches.
+- **No service-level RPC guard added** (per Decision 7.2 rationale): the verify script
+  cross-KPI check is the runtime guard. A service-level guard would require a 5th RPC
+  on every cache miss, which is not justified for an edge case that has never been
+  observed.
+
+### KPI 5b Implementation Summary
+
+| Aspect | Detail |
+|---|---|
+| Endpoint | `GET /api/v1/collections/kpi/collection-rate-by-project` |
+| Service function | `get_collection_rate_by_project()` in `kpi_service.py` |
+| Architecture | Branch A — direct `project_id` on HEADER (Decision 7.1) |
+| RPCs per call | 4 sequential `read_group` (same budget as KPI 4) |
+| Zero denominator | `rate_percent: None` per project; `total_rate_percent: None` if all zero |
+| Zero-padding | Always returns 3 projects (Decision 3.4 analog) |
+| Cache key | `kpi:collection_rate_by_project`, TTL 60s |
+| Cross-KPI check | KPI 5b totals == KPI 4 standalone, delta < 0.01 EGP |
+| Unit tests | K5B-01 through K5B-10 + 1 extra = 13 tests, all passing |
+| Discovery | `scripts/discover_kpi5b_architecture.py` — Checkpoint 1 confirmed 2026-05-17 |
+| Verification | `scripts/verify_kpi5b_live.py` — Checkpoint 2: pending live run |
+
+---
+
+### Verification Result — Session 7 KPI 5b Close
+
+**Date:** 2026-05-17
+**Checkpoint 1 (D0 discovery — manual Odoo cross-check):**
+
+| Project | Backend | Odoo UI | Delta |
+|---|---|---|---|
+| New Capital (id=1) | 162,112,391.00 EGP / 1,458 records | 162,112,391.00 / 1,458 | 0.00 / 0 |
+| Cassette (id=2) | 138,966,586.00 EGP / 391 records | 138,966,586.00 / 391 | 0.00 / 0 |
+| La puerta (id=3) | 1,804,000.00 EGP / 12 records | 1,804,000.00 / 12 | 0.00 / 0 |
+| **TOTAL** | **302,882,977.00 EGP / 1,861 records** | **302,882,977.00 / 1,861** | **0.00 / 0** |
+
+Branch A confirmed. Null-project records in MTD/YTD periods = 0. Cross-check delta = 0.
+
+**Checkpoint 2 (D3 verify script — live endpoint):**
+_Pending. Run `python scripts/verify_kpi5b_live.py` against the running backend
+(after Decision 6.4 clean restart) and paste output for final sign-off._
+
+**Caveats:**
+- Both MTD and YTD numerators are 0.00 EGP as of 2026-05-17 (zero payment headers
+  in 2026 — data entry phase, same as KPI 4).
+- Denominator values will grow daily as new installments are posted.
+- Board launch deferred per Decision 1.3 until historical data entry is complete.
+
+---
