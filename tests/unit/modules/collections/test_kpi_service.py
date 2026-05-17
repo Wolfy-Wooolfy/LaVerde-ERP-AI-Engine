@@ -1779,3 +1779,354 @@ async def test_kpi4_rpc_failure_writes_no_cache_entry() -> None:
         "A failed RPC must not write any cache entry — "
         "a subsequent call must re-query Odoo rather than serving stale/empty data"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 5b — Collection Rate per Project (get_collection_rate_by_project)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Architecture (Decision 7.1): Branch A — project_id is a direct field on
+# rs.account.payment.installment. Four sequential read_group RPCs:
+#   Q1 — MTD numerator  per project: HEADER, UTC datetime bounds, groupby project_id
+#   Q2 — MTD denominator per project: rs.installment, ISO date bounds, groupby project_id
+#   Q3 — YTD numerator  per project
+#   Q4 — YTD denominator per project
+#
+# Zero denominator per project → rate_percent: None (Decision 6.3).
+# Always returns 3 projects (zero-padding, Decision 3.4 analog).
+# ══════════════════════════════════════════════════════════════════════════════
+
+from backend.modules.collections.services.kpi_service import (  # noqa: E402
+    _CACHE_KEY_PREFIX_KPI5B,
+    get_collection_rate_by_project,
+)
+
+# Q1: MTD numerator per project (HEADER, groupby project_id)
+_MOCK_KPI5B_Q1 = [
+    {"project_id": [1, "Project#New Capital"], "amount":  5_000_000.00, "__count":  3},
+    {"project_id": [2, "Project#Cassette"],    "amount":  3_000_000.00, "__count":  2},
+    {"project_id": [3, "Project#La puerta"],   "amount":    500_000.00, "__count":  1},
+]
+# Q2: MTD denominator per project (rs.installment, groupby project_id)
+_MOCK_KPI5B_Q2 = [
+    {"project_id": [1, "Project#New Capital"], "amount": 20_000_000.00, "__count": 100},
+    {"project_id": [2, "Project#Cassette"],    "amount": 15_000_000.00, "__count":  80},
+    {"project_id": [3, "Project#La puerta"],   "amount":  1_000_000.00, "__count":   5},
+]
+# Q3: YTD numerator per project
+_MOCK_KPI5B_Q3 = [
+    {"project_id": [1, "Project#New Capital"], "amount": 40_000_000.00, "__count": 20},
+    {"project_id": [2, "Project#Cassette"],    "amount": 25_000_000.00, "__count": 15},
+    {"project_id": [3, "Project#La puerta"],   "amount":  3_000_000.00, "__count":  5},
+]
+# Q4: YTD denominator per project (D0 Checkpoint 1 baselines)
+_MOCK_KPI5B_Q4 = [
+    {"project_id": [1, "Project#New Capital"], "amount": 162_112_391.00, "__count": 1458},
+    {"project_id": [2, "Project#Cassette"],    "amount": 138_966_586.00, "__count":  391},
+    {"project_id": [3, "Project#La puerta"],   "amount":   1_804_000.00, "__count":   12},
+]
+
+_KPI5B_TODAY = "2026-05-17"
+
+
+@pytest.fixture
+def mock_client_kpi5b() -> MagicMock:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(side_effect=[
+        _MOCK_KPI5B_Q1, _MOCK_KPI5B_Q2, _MOCK_KPI5B_Q3, _MOCK_KPI5B_Q4,
+    ])
+    return client
+
+
+# ── Test K5B-01 — Happy path: full return shape + 3 projects + correct rates ──
+
+
+async def test_kpi5b_happy_path_full_shape_and_rates(mock_client_kpi5b: MagicMock) -> None:
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock_client_kpi5b)
+
+    # Exactly 4 RPCs on first call
+    assert mock_client_kpi5b.execute_kw.call_count == 4
+
+    # Top-level keys
+    expected_top = {"mtd", "ytd", "ytd_period_assumption", "currency",
+                    "as_of", "cache_status", "rpc_duration_ms"}
+    assert set(result.keys()) == expected_top
+
+    # Period keys
+    period_keys = {"projects", "total_numerator_egp", "total_denominator_egp",
+                   "total_rate_percent", "period_start", "period_end"}
+    assert set(result["mtd"].keys()) == period_keys
+    assert set(result["ytd"].keys()) == period_keys
+
+    # Per-project keys
+    proj_keys = {"project_id", "project_name", "numerator_egp", "denominator_egp",
+                 "rate_percent", "record_count_num", "record_count_den"}
+    for period in ("mtd", "ytd"):
+        assert len(result[period]["projects"]) == 3
+        for proj in result[period]["projects"]:
+            assert set(proj.keys()) == proj_keys
+
+    # Fixed assertions
+    assert result["currency"] == "EGP"
+    assert result["ytd_period_assumption"] == "calendar_year"
+    assert result["cache_status"] == "fresh"
+    assert isinstance(result["rpc_duration_ms"], int)
+
+    # Period dates
+    assert result["mtd"]["period_start"] == "2026-05-01"
+    assert result["mtd"]["period_end"]   == _KPI5B_TODAY
+    assert result["ytd"]["period_start"] == "2026-01-01"
+    assert result["ytd"]["period_end"]   == _KPI5B_TODAY
+
+    # MTD: NC rate = 5M/20M = 25%, Cassette = 3M/15M = 20%, LP = 0.5M/1M = 50%
+    mtd_nc = result["mtd"]["projects"][0]
+    assert mtd_nc["project_id"] == 1
+    assert mtd_nc["project_name"] == "New Capital"
+    assert mtd_nc["numerator_egp"]   == pytest.approx(5_000_000.00)
+    assert mtd_nc["denominator_egp"] == pytest.approx(20_000_000.00)
+    assert mtd_nc["rate_percent"]    == pytest.approx(25.0)
+    assert mtd_nc["record_count_num"] == 3
+    assert mtd_nc["record_count_den"] == 100
+
+    # MTD totals
+    assert result["mtd"]["total_numerator_egp"]   == pytest.approx(8_500_000.00)
+    assert result["mtd"]["total_denominator_egp"] == pytest.approx(36_000_000.00)
+    assert result["mtd"]["total_rate_percent"]    == pytest.approx(8_500_000 / 36_000_000 * 100)
+
+
+# ── Test K5B-02 — Zero denominator → rate_percent: None (Decision 6.3) ────────
+
+
+async def test_kpi5b_zero_denominator_returns_none_rate() -> None:
+    """Zero denominator for a project → rate_percent: None.
+    Zero denominator for all projects → total_rate_percent: None.
+    """
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        # Q1 MTD num: NC has payments
+        [{"project_id": [1, "Project#New Capital"], "amount": 1_000.00, "__count": 1}],
+        # Q2 MTD den: all zero — no installments due
+        [],
+        # Q3 YTD num
+        [{"project_id": [1, "Project#New Capital"], "amount": 5_000.00, "__count": 2}],
+        # Q4 YTD den: all zero
+        [],
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock)
+
+    for period in ("mtd", "ytd"):
+        for proj in result[period]["projects"]:
+            assert proj["rate_percent"] is None, (
+                f"{period} project {proj['project_id']} rate_percent must be None "
+                "when denominator == 0 (Decision 6.3)"
+            )
+        assert result[period]["total_rate_percent"] is None, (
+            f"{period} total_rate_percent must be None when all denominators == 0"
+        )
+
+
+# ── Test K5B-03 — Project order always [1, 2, 3] regardless of Odoo order ─────
+
+
+async def test_kpi5b_projects_ordered_1_2_3_regardless_of_odoo_order() -> None:
+    """Odoo returns project rows in reverse order — service must sort to 1, 2, 3."""
+    reversed_q = [
+        {"project_id": [3, "Project#La puerta"],   "amount": 500.00, "__count": 1},
+        {"project_id": [2, "Project#Cassette"],    "amount": 300.00, "__count": 1},
+        {"project_id": [1, "Project#New Capital"], "amount": 100.00, "__count": 1},
+    ]
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[reversed_q, reversed_q, reversed_q, reversed_q])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock)
+
+    for period in ("mtd", "ytd"):
+        ids   = [p["project_id"]   for p in result[period]["projects"]]
+        names = [p["project_name"] for p in result[period]["projects"]]
+        assert ids   == [1, 2, 3],                            f"{period}: expected [1,2,3], got {ids}"
+        assert names == ["New Capital", "Cassette", "La puerta"], f"{period}: wrong names: {names}"
+
+
+# ── Test K5B-04 — Zero-padding when a project is absent from read_group ────────
+
+
+async def test_kpi5b_zero_pads_missing_project() -> None:
+    """If read_group returns only 2 projects, the third must be zero-padded."""
+    two_projs = [
+        {"project_id": [1, "Project#New Capital"], "amount": 10_000.00, "__count": 5},
+        {"project_id": [2, "Project#Cassette"],    "amount":  5_000.00, "__count": 3},
+    ]
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[two_projs, two_projs, two_projs, two_projs])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock)
+
+    for period in ("mtd", "ytd"):
+        assert len(result[period]["projects"]) == 3, \
+            f"{period}: must always return 3 projects (zero-padding required)"
+        lp = result[period]["projects"][2]
+        assert lp["project_id"]   == 3
+        assert lp["project_name"] == "La puerta"
+        assert lp["numerator_egp"]   == 0.0
+        assert lp["denominator_egp"] == 0.0
+        assert lp["rate_percent"]    is None  # zero den → None
+        assert lp["record_count_num"] == 0
+        assert lp["record_count_den"] == 0
+
+
+# ── Test K5B-05 — Totals equal sum of per-project values ──────────────────────
+
+
+async def test_kpi5b_totals_equal_sum_of_per_project_values(mock_client_kpi5b: MagicMock) -> None:
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock_client_kpi5b)
+
+    for period in ("mtd", "ytd"):
+        sub      = result[period]
+        sum_num  = sum(p["numerator_egp"]   for p in sub["projects"])
+        sum_den  = sum(p["denominator_egp"] for p in sub["projects"])
+        assert sub["total_numerator_egp"]   == pytest.approx(sum_num)
+        assert sub["total_denominator_egp"] == pytest.approx(sum_den)
+        if sum_den > 0:
+            assert sub["total_rate_percent"] == pytest.approx(sum_num / sum_den * 100)
+        else:
+            assert sub["total_rate_percent"] is None
+
+
+# ── Test K5B-06 — Cache hit: second call served from cache (4 RPCs total) ─────
+
+
+async def test_kpi5b_second_call_is_served_from_cache(mock_client_kpi5b: MagicMock) -> None:
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result1 = await get_collection_rate_by_project(client=mock_client_kpi5b)
+        result2 = await get_collection_rate_by_project(client=mock_client_kpi5b)
+
+    assert mock_client_kpi5b.execute_kw.call_count == 4, (
+        "execute_kw must be called exactly 4 times total (first call only)"
+    )
+    assert result1["cache_status"] == "fresh"
+    assert result2["cache_status"] == "cached"
+    assert result2["rpc_duration_ms"] == 0
+    assert result2["mtd"]["total_numerator_egp"] == result1["mtd"]["total_numerator_egp"]
+    assert result2["ytd"]["total_denominator_egp"] == result1["ytd"]["total_denominator_egp"]
+
+
+# ── Test K5B-07 — OdooQueryError on any RPC failure ───────────────────────────
+
+
+async def test_kpi5b_rpc_failure_raises_odoo_query_error() -> None:
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=RuntimeError("connection refused"))
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        with pytest.raises(OdooQueryError):
+            await get_collection_rate_by_project(client=mock)
+
+
+async def test_kpi5b_rpc_failure_mid_sequence_raises_odoo_query_error() -> None:
+    """Failure on Q3 (after Q1, Q2 succeed) must also raise OdooQueryError."""
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        _MOCK_KPI5B_Q1,
+        _MOCK_KPI5B_Q2,
+        RuntimeError("timeout on Q3"),
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        with pytest.raises(OdooQueryError):
+            await get_collection_rate_by_project(client=mock)
+
+
+# ── Test K5B-08 — RPC failure writes no cache entry ───────────────────────────
+
+
+async def test_kpi5b_rpc_failure_writes_no_cache_entry() -> None:
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=RuntimeError("timeout"))
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        with pytest.raises(OdooQueryError):
+            await get_collection_rate_by_project(client=mock)
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPI5B)
+    assert _cache.get(cache_key) is None, (
+        "A failed RPC must not write any cache entry"
+    )
+
+
+# ── Test K5B-09 — Read-only assertion ─────────────────────────────────────────
+
+
+async def test_kpi5b_contaminated_allowed_methods_raises_before_any_rpc(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_client_kpi5b: MagicMock,
+) -> None:
+    monkeypatch.setattr(
+        "backend.modules.collections.services.kpi_service.ALLOWED_METHODS",
+        frozenset({"read_group", "write"}),
+    )
+
+    with pytest.raises(ReadOnlyViolationError):
+        await get_collection_rate_by_project(client=mock_client_kpi5b)
+
+    mock_client_kpi5b.execute_kw.assert_not_called()
+
+
+async def test_kpi5b_clean_allowed_methods_does_not_raise(mock_client_kpi5b: MagicMock) -> None:
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock_client_kpi5b)
+    assert result["mtd"]["total_numerator_egp"] >= 0.0
+
+
+# ── Test K5B-10 — UnknownProjectError for unexpected project_id ───────────────
+
+
+async def test_kpi5b_unknown_project_id_raises_unknown_project_error() -> None:
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=[
+        [{"project_id": [99, "Project#Unknown"], "amount": 1_000.00, "__count": 1}],
+        _MOCK_KPI5B_Q2,
+        _MOCK_KPI5B_Q3,
+        _MOCK_KPI5B_Q4,
+    ])
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        with pytest.raises(UnknownProjectError):
+            await get_collection_rate_by_project(client=mock)
+
+
+# ── Test K5B-extra — project_names use clean display names ────────────────────
+
+
+async def test_kpi5b_project_names_are_clean_without_project_prefix(
+    mock_client_kpi5b: MagicMock,
+) -> None:
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock_client_kpi5b)
+
+    for period in ("mtd", "ytd"):
+        for proj in result[period]["projects"]:
+            assert not proj["project_name"].startswith("Project#"), (
+                f"project_name must not include 'Project#' prefix, "
+                f"got {proj['project_name']!r}"
+            )
+            assert proj["project_name"] in {"New Capital", "Cassette", "La puerta"}, (
+                f"unexpected project_name: {proj['project_name']!r}"
+            )
