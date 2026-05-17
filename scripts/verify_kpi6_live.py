@@ -44,12 +44,13 @@ PASSWORD    = os.environ.get("VERIFY_PASSWORD", "password")
 ENDPOINT    = "/api/v1/collections/kpi/collection-trend-6m"
 LOG_FILE    = "logs/kpi6_verification.log"
 
-# December 2025 baseline values reflect Decision 5.1 (state='post') and
-# Decision 5.9 (timezone-aware UTC boundaries). The naive pre-fix baseline
-# was 429 records / 47,382,098 EGP. The timezone fix captures 1 additional
-# record (01/12/2025 00:00:00 Egypt = 2025-11-30 22:00:00 UTC) worth 99,114 EGP.
-_DEC_2025_BASELINE_AMOUNT    = 47_481_212.00  # state='post' + timezone-aware
-_DEC_2025_BASELINE_RECORDS   = 430            # state='post' + timezone-aware
+# December 2025 baseline reflects Decision 5.1 (state='post'), Decision 5.9
+# (UTC-shifted domain boundaries), and Decision 5.10 (Python-side Egypt-local
+# regrouping). Record id=3869 (stored "2025-11-30 22:00:00" UTC = "2025-12-01
+# 00:00:00" Egypt) is captured by the UTC-shifted domain and correctly bucketed
+# to December by the Python grouping — identity-equal with the Odoo UI.
+_DEC_2025_BASELINE_AMOUNT    = 47_481_212.00  # Egypt-local grouping baseline
+_DEC_2025_BASELINE_RECORDS   = 430            # Egypt-local grouping baseline
 _DEC_2025_BASELINE_TOLERANCE = 0.01   # EGP — identity-equal expected
 
 _EXPECTED_MONTHS = 6
