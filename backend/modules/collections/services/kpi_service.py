@@ -50,7 +50,9 @@ _MONTH_NAME_TO_NUM: dict[str, int] = {
     name: i for i, name in enumerate(calendar.month_name) if name
 }
 
-# La Verde operates in Egypt (UTC+2, Africa/Cairo, no DST since 2014). Decision 5.9.
+# La Verde operates in Egypt (Africa/Cairo — UTC+2 Nov-Apr, UTC+3 May-Oct per
+# tzdata 2025.2; Egypt re-introduced DST in 2023). ZoneInfo handles transitions
+# automatically. Decision 5.9.
 _LA_VERDE_TZ = ZoneInfo("Africa/Cairo")
 _UTC_TZ = ZoneInfo("UTC")
 
@@ -480,9 +482,10 @@ async def get_late_uncollected_by_project(client: Optional[OdooClient] = None) -
 def _tz_period_bounds(period_start: date, period_end: date) -> tuple[str, str]:
     """Convert local-time period boundaries to UTC datetime strings for Odoo domain.
 
-    Egypt is UTC+2 (Africa/Cairo). A record displayed as "01/12/2025 00:00:00"
-    Egypt time is stored as "2025-11-30 22:00:00" UTC — a naive >= '2025-12-01'
-    filter would exclude it. Decision 5.9.
+    Egypt observes DST (UTC+2 Nov-Apr, UTC+3 May-Oct per tzdata 2025.2).
+    A record displayed as "01/12/2025 00:00:00" Egypt time (winter, UTC+2) is
+    stored as "2025-11-30 22:00:00" UTC — a naive >= '2025-12-01' filter would
+    exclude it. ZoneInfo handles DST transitions automatically. Decision 5.9.
     """
     start_local = datetime.combine(period_start, dt_time.min, tzinfo=_LA_VERDE_TZ)
     end_local   = datetime.combine(period_end, dt_time(23, 59, 59), tzinfo=_LA_VERDE_TZ)

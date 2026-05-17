@@ -989,10 +989,43 @@ async def test_kpi6_domain_has_state_post_and_date_range(
     assert domain[0] == ("state", "=", "post")
     assert domain[1][0] == "date"
     assert domain[1][1] == ">="
-    assert domain[1][2] == "2025-12-01"   # period_start for 2026-05-17
+    # Decision 5.9: boundaries are UTC. Egypt observes DST (UTC+2 Nov-Apr, UTC+3 May-Oct).
+    # 2025-12-01 00:00:00 Africa/Cairo (winter, UTC+2) = 2025-11-30 22:00:00 UTC
+    # 2026-05-17 23:59:59 Africa/Cairo (summer, UTC+3) = 2026-05-17 20:59:59 UTC
+    assert domain[1][2] == "2025-11-30 22:00:00"
     assert domain[2][0] == "date"
     assert domain[2][1] == "<="
-    assert domain[2][2].startswith("2026-05-17")  # period_end + " 23:59:59"
+    assert domain[2][2] == "2026-05-17 20:59:59"
+
+
+# ── Test K6-1b — UTC boundary computation (Decision 5.9) ─────────────────────
+
+
+async def test_kpi6_domain_boundaries_are_utc_offset(
+    mock_client_kpi6: MagicMock,
+) -> None:
+    """Egypt observes DST (UTC+2 Nov-Apr, UTC+3 May-Oct). ZoneInfo applies
+    the correct offset per date.
+
+    today = 2026-03-10 (March, winter, UTC+2):
+      period_start = 2025-10-01 Africa/Cairo (summer, UTC+3) = 2025-09-30 21:00:00 UTC
+      period_end   = 2026-03-10 23:59:59 Africa/Cairo (winter, UTC+2) = 2026-03-10 21:59:59 UTC
+    """
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value=_KPI6_TODAY_MAR,
+    ):
+        await get_collection_trend_6m(client=mock_client_kpi6)
+
+    call_args = mock_client_kpi6.execute_kw.call_args
+    domain = call_args.kwargs["args"][0]
+
+    assert domain[1][2] == "2025-09-30 21:00:00", (
+        f"start_utc wrong: {domain[1][2]!r} — expected 2025-09-30 21:00:00 (Oct summer UTC+3)"
+    )
+    assert domain[2][2] == "2026-03-10 21:59:59", (
+        f"end_utc wrong: {domain[2][2]!r} — expected 2026-03-10 21:59:59 (Mar winter UTC+2)"
+    )
 
 
 # ── Test K6-2 — Uses HEADER model with date:month groupby ────────────────────
