@@ -52,7 +52,27 @@
 
 {# ── Row 1 — Hero KPI: Late Uncollected (KPI 2) ──────────────────────────── #}
 <div class="mb-4" id="col-kpi2-container">
-  {{ kpi_hero_skeleton() }}
+  <div class="kpi-card border-l-4 border-danger-500 hover:border-l-[6px] focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+       data-drilldown-target="kpi2"
+       tabindex="0"
+       aria-label="{{ _t('Late Uncollected') }}: —">
+    <p class="text-xs font-semibold uppercase tracking-widest text-neutral-500 dark:text-neutral-400 mb-4">
+      {{ _t("Late Uncollected") }}
+    </p>
+    <p id="col-kpi2-value"
+       class="text-5xl md:text-6xl font-bold tabular text-danger-700 dark:text-danger-400 mb-3 opacity-0 transition-opacity duration-200"
+       title="">
+      —
+    </p>
+    <p id="col-kpi2-subtitle"
+       class="text-sm text-neutral-500 dark:text-neutral-400 opacity-0 transition-opacity duration-200">
+      <span id="col-kpi2-records">—</span>
+      {{ _t("records") }}
+      &middot;
+      {{ _t("as of") }}
+      <span id="col-kpi2-as-of">—</span>
+    </p>
+  </div>
 </div>
 
 {# ── Row 2 — Secondary trio: KPI 1 · KPI 3 · KPI 4 ──────────────────────── #}
@@ -101,22 +121,38 @@
 {% block extra_scripts %}
 <script>
 window.COLLECTIONS_STRINGS = {
-  loading:      {{ _t("Loading...")      | tojson }},
-  just_now:     {{ _t("just now")       | tojson }},
-  seconds_ago:  {{ _t("seconds ago")    | tojson }},
-  minutes_ago:  {{ _t("minutes ago")    | tojson }},
-  last_updated: {{ _t("Last updated")   | tojson }},
-  error:        {{ _t("Error loading data") | tojson }},
-  try_again:    {{ _t("Try again")      | tojson }},
-  egp:          {{ _t("EGP")            | tojson }},
-  million:      {{ _t("million")        | tojson }},
-  billion:      {{ _t("billion")        | tojson }},
-  late:         {{ _t("Late")           | tojson }},
-  rate:         {{ _t("Rate")           | tojson }},
-  project:      {{ _t("Project")        | tojson }},
-  average:      {{ _t("Average")        | tojson }},
-  month:        {{ _t("month")          | tojson }},
-  lang:         {{ lang | tojson }}
+  loading:               {{ _t("Loading...")             | tojson }},
+  just_now:              {{ _t("just now")               | tojson }},
+  seconds_ago:           {{ _t("seconds ago")            | tojson }},
+  minutes_ago:           {{ _t("minutes ago")            | tojson }},
+  last_updated:          {{ _t("Last updated")           | tojson }},
+  error:                 {{ _t("Error loading data")     | tojson }},
+  try_again:             {{ _t("Try again")              | tojson }},
+  egp:                   {{ _t("EGP")                    | tojson }},
+  million:               {{ _t("million")                | tojson }},
+  billion:               {{ _t("billion")                | tojson }},
+  late:                  {{ _t("Late")                   | tojson }},
+  rate:                  {{ _t("Rate")                   | tojson }},
+  project:               {{ _t("Project")                | tojson }},
+  average:               {{ _t("Average")                | tojson }},
+  month:                 {{ _t("month")                  | tojson }},
+  records:               {{ _t("records")                | tojson }},
+  installments:          {{ _t("installments")           | tojson }},
+  in_pipeline:           {{ _t("in pipeline")            | tojson }},
+  mtd:                   {{ _t("MTD")                    | tojson }},
+  ytd:                   {{ _t("YTD")                    | tojson }},
+  data_entry_in_progress:{{ _t("Data entry in progress") | tojson }},
+  total_portfolio:       {{ _t("Total Portfolio Value")  | tojson }},
+  pending_check:         {{ _t("Pending Check Exposure") | tojson }},
+  collection_rate:       {{ _t("Collection Rate")        | tojson }},
+  late_uncollected:      {{ _t("Late Uncollected")       | tojson }},
+  trend_title:           {{ _t("6-Month Collection Trend")| tojson }},
+  project_names: {
+    "New Capital": {{ _t("New Capital") | tojson }},
+    "Cassette":    {{ _t("Cassette")    | tojson }},
+    "La puerta":   {{ _t("La puerta")   | tojson }}
+  },
+  lang: {{ lang | tojson }}
 };
 </script>
 <script src="/static/js/formatters.js"></script>

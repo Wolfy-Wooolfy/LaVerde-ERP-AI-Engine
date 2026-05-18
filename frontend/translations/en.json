@@ -147,5 +147,9 @@
   "million": "million",
   "billion": "billion",
   "Average": "Average",
-  "month": "month"
+  "month": "month",
+  "records": "records",
+  "in pipeline": "in pipeline",
+  "MTD": "MTD",
+  "YTD": "YTD"
 }

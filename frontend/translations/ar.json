@@ -147,5 +147,9 @@
   "million": "مليون",
   "billion": "مليار",
   "Average": "المتوسط",
-  "month": "شهر"
+  "month": "شهر",
+  "records": "سجل",
+  "in pipeline": "في الانتظار",
+  "MTD": "MTD",
+  "YTD": "YTD"
 }
