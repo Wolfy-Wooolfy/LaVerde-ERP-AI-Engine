@@ -151,5 +151,6 @@
   "records": "سجل",
   "in pipeline": "في الانتظار",
   "MTD": "MTD",
-  "YTD": "YTD"
+  "YTD": "YTD",
+  "no_installments_due": "لا أقساط مستحقة في هذه الفترة"
 }

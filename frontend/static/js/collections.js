@@ -23,6 +23,25 @@
     el.classList.add('opacity-100');
   }
 
+  // Returns true when a rate field should display "—" instead of a percentage.
+  // Covers: null rate (no denominator) and data-entry phase (numerator=0, denominator>0).
+  function isRateUnavailable(period) {
+    if (!period) return true;
+    if (period.rate_percent === null || period.rate_percent === undefined) return true;
+    if (period.rate_percent === 0 && period.numerator_egp === 0 && period.denominator_egp > 0) return true;
+    return false;
+  }
+
+  function getRateTooltip(period, s) {
+    if (!period || period.rate_percent === null || period.rate_percent === undefined) {
+      return s.no_installments_due || 'No installments due in this period';
+    }
+    if (period.rate_percent === 0 && period.numerator_egp === 0 && period.denominator_egp > 0) {
+      return s.data_entry_in_progress || 'Data entry in progress';
+    }
+    return '';
+  }
+
   // D2.4 — KPI 2 Late Uncollected hero card
   function renderKpi2(kpi) {
     if (!kpi) return;
@@ -104,14 +123,15 @@
     var s4    = document.getElementById('col-kpi4-subtitle');
     var c4    = document.getElementById('col-kpi4-container');
     if (kpi4) {
-      var mtdRate = fmt.formatRate(kpi4.mtd.rate_percent, lang);
-      var ytdRate = fmt.formatRate(kpi4.ytd.rate_percent, lang);
-      var bothNull = kpi4.mtd.rate_percent === null && kpi4.ytd.rate_percent === null;
+      var mtdUnavail = isRateUnavailable(kpi4.mtd);
+      var ytdUnavail = isRateUnavailable(kpi4.ytd);
+      var mtdRate = mtdUnavail ? '—' : fmt.formatRate(kpi4.mtd.rate_percent, lang);
+      var ytdRate = ytdUnavail ? '—' : fmt.formatRate(kpi4.ytd.rate_percent, lang);
 
-      if (mtdEl) { mtdEl.textContent = mtdRate; fadeIn(mtdEl); }
-      if (ytdEl) { ytdEl.textContent = ytdRate; fadeIn(ytdEl); }
+      if (mtdEl) { mtdEl.textContent = mtdRate; mtdEl.title = mtdUnavail ? getRateTooltip(kpi4.mtd, s) : ''; fadeIn(mtdEl); }
+      if (ytdEl) { ytdEl.textContent = ytdRate; ytdEl.title = ytdUnavail ? getRateTooltip(kpi4.ytd, s) : ''; fadeIn(ytdEl); }
       if (s4) {
-        s4.textContent = bothNull
+        s4.textContent = (mtdUnavail && ytdUnavail)
           ? (s.data_entry_in_progress || 'Data entry in progress')
           : (s.mtd || 'MTD') + ' / ' + (s.ytd || 'YTD') + ' · ' + kpi4.ytd.period_start;
         fadeIn(s4);
@@ -121,16 +141,6 @@
   }
 
   // D2.6 — Row 3: Top 3 Projects
-  function getProjectRate(kpi5b, projectId) {
-    if (!kpi5b || !kpi5b.projects) return null;
-    for (var i = 0; i < kpi5b.projects.length; i++) {
-      if (kpi5b.projects[i].project_id === projectId) {
-        return kpi5b.projects[i].rate_percent;
-      }
-    }
-    return null;
-  }
-
   function renderRow3(state) {
     var kpi5a = state[2];
     var kpi5b = state[6];
@@ -149,8 +159,16 @@
 
       var displayName = (s.project_names && s.project_names[p.project_name]) || p.project_name;
       var lateAmt     = fmt.formatEGP(p.late_uncollected, lang);
-      var rate        = getProjectRate(kpi5b, p.project_id);
-      var rateStr     = fmt.formatRate(rate, lang);
+
+      var proj5b = null;
+      if (kpi5b && kpi5b.projects) {
+        for (var j = 0; j < kpi5b.projects.length; j++) {
+          if (kpi5b.projects[j].project_id === p.project_id) { proj5b = kpi5b.projects[j]; break; }
+        }
+      }
+      var rateUnavail = isRateUnavailable(proj5b);
+      var rateStr     = rateUnavail ? '—' : fmt.formatRate(proj5b.rate_percent, lang);
+      var rateTip     = rateUnavail ? getRateTooltip(proj5b, s) : '';
 
       if (nameEl) { nameEl.textContent = displayName; fadeIn(nameEl); }
       if (lateEl) {
@@ -158,7 +176,7 @@
         lateEl.title = fmt.formatEGP(p.late_uncollected, lang, { fullValue: true });
         fadeIn(lateEl);
       }
-      if (rateEl) { rateEl.textContent = rateStr; fadeIn(rateEl); }
+      if (rateEl) { rateEl.textContent = rateStr; rateEl.title = rateTip; fadeIn(rateEl); }
       if (card) {
         card.setAttribute('data-drilldown-target', 'kpi5-proj-' + p.project_id);
         card.setAttribute('aria-label', displayName + ': ' + lateAmt + ' · ' + rateStr);
@@ -265,7 +283,7 @@
   function shouldShowDataEntryBanner(state) {
     if (new URLSearchParams(window.location.search).get('show_banner') === '1') return true;
     var kpi4 = state[5];
-    if (kpi4 && kpi4.mtd.rate_percent === null && kpi4.ytd.rate_percent === null) return true;
+    if (kpi4 && (isRateUnavailable(kpi4.mtd) || isRateUnavailable(kpi4.ytd))) return true;
     var kpi6 = state[4];
     if (kpi6 && kpi6.months) {
       var nonZero = kpi6.months.filter(function (m) { return m.amount > 0; }).length;

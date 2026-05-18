@@ -151,5 +151,6 @@
   "records": "records",
   "in pipeline": "in pipeline",
   "MTD": "MTD",
-  "YTD": "YTD"
+  "YTD": "YTD",
+  "no_installments_due": "No installments due in this period"
 }
