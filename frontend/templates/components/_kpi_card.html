@@ -9,27 +9,30 @@
         href="/dashboard"
    ) }} #}
 
-{% macro kpi_card(label, value, variant="default", icon="activity", sparkline_metric=none, href=none, tooltip=none) %}
+{% macro kpi_card(label, value, variant="default", icon=none, sparkline_metric=none, href=none, tooltip=none) %}
 {% set border_colors = {
   "default":  "border-neutral-200  dark:border-neutral-700",
   "danger":   "border-danger-200   dark:border-danger-800",
   "warning":  "border-warning-200  dark:border-warning-800",
   "success":  "border-success-200  dark:border-success-800",
-  "info":     "border-primary-200  dark:border-primary-800"
+  "info":     "border-primary-200  dark:border-primary-800",
+  "emerald":  "border-emerald-200  dark:border-emerald-800"
 } %}
 {% set icon_bg = {
   "default":  "bg-neutral-100  dark:bg-neutral-700  text-neutral-500  dark:text-neutral-400",
   "danger":   "bg-danger-100   dark:bg-danger-900/40 text-danger-600   dark:text-danger-400",
   "warning":  "bg-warning-100  dark:bg-warning-900/40 text-warning-600  dark:text-warning-400",
   "success":  "bg-success-100  dark:bg-success-900/40 text-success-600  dark:text-success-400",
-  "info":     "bg-primary-100  dark:bg-primary-900/40 text-primary-600  dark:text-primary-400"
+  "info":     "bg-primary-100  dark:bg-primary-900/40 text-primary-600  dark:text-primary-400",
+  "emerald":  "bg-emerald-100  dark:bg-emerald-900/40 text-emerald-600  dark:text-emerald-400"
 } %}
 {% set value_color = {
   "default":  "text-neutral-900  dark:text-neutral-100",
   "danger":   "text-danger-700   dark:text-danger-400",
   "warning":  "text-warning-700  dark:text-warning-400",
   "success":  "text-success-700  dark:text-success-400",
-  "info":     "text-primary-700  dark:text-primary-400"
+  "info":     "text-primary-700  dark:text-primary-400",
+  "emerald":  "text-emerald-700  dark:text-emerald-400"
 } %}
 
 {% set tag = "a" if href else "div" %}
@@ -37,7 +40,7 @@
   class="kpi-card border {{ border_colors.get(variant, border_colors.default) }} group flex flex-col overflow-hidden"
   {% if sparkline_metric %}data-sparkline-metric="{{ sparkline_metric }}"{% endif %}
 >
-  <div class="flex items-start justify-between mb-3">
+  <div class="flex items-start {% if icon %}justify-between{% endif %} mb-3">
     <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight flex items-center gap-1"
        {% if tooltip %}title="{{ tooltip }}"{% endif %}>
       {{ label }}
@@ -47,6 +50,7 @@
       </svg>
       {% endif %}
     </p>
+    {% if icon %}
     <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center {{ icon_bg.get(variant, icon_bg.default) }}">
       {% if icon == "users" %}
       <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
@@ -64,6 +68,7 @@
       <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
       {% endif %}
     </div>
+    {% endif %}
   </div>
 
   <div class="flex items-end justify-between">
