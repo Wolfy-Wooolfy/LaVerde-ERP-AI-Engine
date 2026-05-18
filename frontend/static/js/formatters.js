@@ -4,10 +4,21 @@
   var B = 1e9;
   var M = 1e6;
 
-  function formatEGP(value, lang) {
+  // opts.fullValue = true → full grouped number with 2 decimal places
+  function formatEGP(value, lang, opts) {
     if (value === null || value === undefined) return '—';
     var s = window.COLLECTIONS_STRINGS || {};
     var egp = s.egp || 'EGP';
+    var options = opts || {};
+
+    if (options.fullValue) {
+      var locale = lang === 'ar' ? 'ar-EG' : 'en-EG';
+      return value.toLocaleString(locale, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }) + ' ' + egp;
+    }
+
     var absVal = Math.abs(value);
 
     if (absVal >= B) {
@@ -22,19 +33,24 @@
         ? millions + ' ' + (s.million || 'مليون') + ' ' + egp
         : millions + 'M ' + egp;
     }
-    var rounded = Math.round(value).toLocaleString('en-EG');
-    return rounded + ' ' + egp;
+    var locale2 = lang === 'ar' ? 'ar-EG' : 'en-EG';
+    return Math.round(value).toLocaleString(locale2) + ' ' + egp;
   }
 
-  function formatRate(value) {
+  function formatRate(value, lang) {
     if (value === null || value === undefined) return '—';
     return parseFloat(value).toFixed(1) + '%';
   }
 
-  function formatCount(value) {
+  function formatCount(value, lang) {
     if (value === null || value === undefined) return '—';
-    return Math.round(value).toLocaleString('en-EG');
+    var locale = lang === 'ar' ? 'ar-EG' : 'en-EG';
+    return Math.round(value).toLocaleString(locale);
   }
 
-  window.CollectionsFormatters = { formatEGP: formatEGP, formatRate: formatRate, formatCount: formatCount };
+  window.CollectionsFormatters = {
+    formatEGP: formatEGP,
+    formatRate: formatRate,
+    formatCount: formatCount,
+  };
 }());
