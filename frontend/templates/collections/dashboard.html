@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "components/_kpi_card.html" import kpi_card %}
 {% from "components/_skeleton.html" import kpi_hero_skeleton, kpi_skeleton, kpi_project_skeleton, chart_skeleton %}
-{% from "components/_project_card.html" import project_card %}
+{% from "components/_project_card.html" import project_card with context %}
 {% from "components/_chart_container.html" import chart_container %}
 
 {% block title %}{{ _t("Collections Dashboard") }} — LaVerde ERP AI Engine{% endblock %}
