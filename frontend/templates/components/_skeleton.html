@@ -32,6 +32,28 @@
 </div>
 {% endmacro %}
 
+{% macro kpi_hero_skeleton() %}
+<div class="kpi-card border border-danger-200 dark:border-danger-800">
+  <div class="flex items-start justify-between mb-4">
+    <div class="skeleton h-4 w-36 rounded"></div>
+    <div class="skeleton h-9 w-9 rounded-lg"></div>
+  </div>
+  <div class="skeleton h-14 w-48 rounded mb-3"></div>
+  <div class="skeleton h-3 w-28 rounded"></div>
+</div>
+{% endmacro %}
+
+{% macro kpi_project_skeleton() %}
+<div class="kpi-card">
+  <div class="flex items-start justify-between mb-3">
+    <div class="skeleton h-4 w-20 rounded"></div>
+    <div class="skeleton h-8 w-8 rounded-lg"></div>
+  </div>
+  <div class="skeleton h-9 w-24 rounded mb-2"></div>
+  <div class="skeleton h-3 w-16 rounded"></div>
+</div>
+{% endmacro %}
+
 {% macro text_skeleton(lines=3, widths=none) %}
 {% set w = widths or ["w-full", "w-3/4", "w-1/2"] %}
 <div class="space-y-2">
