@@ -1,0 +1,384 @@
+══════════════════════════════════════════════════════════════════════════════
+  Phase 0.5 — UI-Driven Discovery: rs.installment UI Artifacts
+  Run at (UTC) : 2026-05-18 14:24:07 UTC
+  Today (Cairo): 2026-05-18
+  Bucket ends  : month=2026-05-31  year=2026-12-31
+  ALLOWED_METHODS : ['fields_get', 'name_get', 'name_search', 'read', 'read_group', 'search', 'search_count', 'search_read']
+  READ-ONLY. No writes. No OpenAI. AI cost = $0.00
+══════════════════════════════════════════════════════════════════════════════
+
+  Context: Phase 0 bucket totals verified identity-equal (2026-05-18).
+  This script resolves 4 UI artifacts not captured by RPC-only discovery:
+    A. Pre-existing KPI-named Favorites (ir.filters)
+    B. 'Has Checks' and 'All Checks Collected' filter options
+    C. 'Checks' tab on installment form → check_ids relation details
+    D. Undocumented field labels (total_due_amount, reservation_id, etc.)
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 1 — 'Checks' tab: check_ids relation + statistical proof
+══════════════════════════════════════════════════════════════════════════════
+
+  1a. fields_get(rs.installment, all fields)
+      → 85 total fields on rs.installment  (1140 ms)
+
+  Check-related relational fields on rs.installment:
+    check_ids                                  type=many2many  relation=rs.account.check                         label='Checks'
+
+  Primary checks field identified: 'check_ids'
+
+  1b. fields_get(rs.account.check) — check model field inventory
+      → 88 fields on rs.account.check  (78 ms)
+
+  Field                                         Type           UI Label                                 Relation
+  --------------------------------------------- -------------- ---------------------------------------- ------------------------------
+  activity_calendar_event_id                    many2one       Next Activity Calendar Event             → calendar.event
+  activity_date_deadline                        date           Next Activity Deadline                   
+  activity_exception_decoration                 selection      Activity Exception Decoration            
+  activity_exception_icon                       char           Icon                                     
+  activity_state                                selection      Activity State                           
+  activity_summary                              char           Next Activity Summary                    
+  activity_type_icon                            char           Activity Type Icon                       
+  activity_type_id                              many2one       Next Activity Type                       → mail.activity.type
+  activity_user_id                              many2one       Responsible User                         → res.users
+  amount                                        monetary       Amount                                   
+  bank_id                                       many2one       Check Bank                               → res.bank
+  building_id                                   many2one       Building                                 → rs.structure.building
+  category_ids                                  many2many      Category                                 → rs.structure.type
+  check_action_line                             one2many       Check Action Lines                       → rs.account.check.action.line
+  check_payment_id                              many2one       Check Payment                            → rs.account.payment.check
+  check_reconcile_id                            many2one       Check Reconcile                          → rs.account.payment.check.reconcile
+  collected_amount                              monetary       Collected Amount                         
+  company_currency_id                           many2one       Company Currency                         → res.currency
+  company_id                                    many2one       Company                                  → res.company
+  contract_id                                   many2one       Contract                                 → rs.contract
+  currency_id                                   many2one       Currency                                 → res.currency
+  currency_rate                                 float          Currency Rate                            
+  date                                          date           Date                                     
+  deposit_bank_id                               many2one       Deposit Bank                             → res.bank
+  deposit_journal_id                            many2one       Deposit Journal                          → account.journal
+  followup_ids                                  one2many       Follow Ups                               → rs.followup
+  handed_journal_id                             many2one       Handed Journal                           → account.journal
+  has_message                                   boolean        Has Message                              
+  hold_journal_id                               many2one       Hold Journal                             → account.journal
+  id                                            integer        ID                                       
+  installment_amount                            monetary       Amount                                   
+  installment_currency_id                       many2one       Currency                                 → res.currency
+  installment_due_amount                        monetary       Due Amount                               
+  installment_ids                               many2many      Installments                             → rs.installment
+  installment_name                              char           Installment Name                         
+  installment_paid_amount                       monetary       Paid Amount                              
+  installment_payment_type_id                   many2one       Payment Period                           → rs.payment.type
+  installment_type_id                           many2one       Installment Type                         → rs.installment.type
+  is_manual                                     boolean        Manual Check                             
+  is_suspended                                  boolean        Is Suspended                             
+  journal_id                                    many2one       Journal                                  → account.journal
+  location_id                                   many2one       Location                                 → rs.account.check.location
+  lot_id                                        many2one       Lot                                      → rs.account.check.lot
+  maturity_date                                 date           Maturity Date                            
+  message_has_error_counter                     integer        Number of errors                         
+  message_has_sms_error                         boolean        SMS Delivery error                       
+  message_partner_ids                           many2many      Followers (Partners)                     → res.partner
+  move_count                                    integer        Entries Count                            
+  move_ids                                      one2many       Journal Entries                          → account.move
+  move_line_ids                                 one2many       Journal Items                            → account.move.line
+  my_activity_date_deadline                     date           My Activity Deadline                     
+  name                                          char           Check Number                             
+  note                                          text           Notes                                    
+  partner_destination_account_id                many2one       Partner Destination Account              → account.account
+  partner_id                                    many2one       Customer                                 → res.partner
+  penality_line                                 one2many       Penalty Lines                            → rs.penalty
+  penalty_count                                 integer        Penalty Count                            
+  pending_penality_amount                       monetary       Pending Penality                         
+  phase_id                                      many2one       Phase                                    → rs.structure.phase
+  position_id                                   many2one       Position                                 → rs.account.check.position
+  project_id                                    many2one       Project                                  → rs.structure.project
+  project_type_ids                              many2many      Project Type                             → rs.structure.project.type
+  rating_ids                                    one2many       Ratings                                  → rating.rating
+  reservation_id                                many2one       Reservation                              → rs.reservation
+  residual_amount                               monetary       Residual Amount                          
+  state                                         selection      Status                                   
+  subaction_id                                  many2one       Subaction                                → rs.account.check.action.subaction
+  tag_ids                                       many2many      Tags                                     → check.tag
+  termination_id                                many2one       Termination                              → rs.termination
+  unit_finishing_type_id                        many2one       Finishing                                → rs.structure.unit.finishing.type
+  unit_id                                       many2one       Unit                                     → rs.structure.unit
+  unit_type_id                                  many2one       Unit Type                                → rs.structure.unit.type
+  unit_view_id                                  many2one       View                                     → rs.structure.unit.view
+  zone_id                                       many2one       Zone                                     → rs.structure.zone
+
+  1c. search_count(rs.account.check, []) — total check records
+      → 5,224 total check records  (77 ms)
+
+  e_pre. total_future_unpaid — KPI 7 this_year bucket universe
+      domain: [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '>=', '2026-05-18'), ('date', '<=', '2026-12-31')]
+      result: 1,934 records  (93 ms)
+
+  e_post. future_unpaid_with_checks — year bucket + check_ids != False
+      domain: [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '>=', '2026-05-18'), ('date', '<=', '2026-12-31'), ('check_ids', '!=', False)]
+      result: 39 records  (78 ms)
+
+  e_calc. Statistical interpretation — year bucket
+      total_future_unpaid       : 1,934
+      future_unpaid_with_checks : 39
+      percentage                : 2.02%
+      Threshold: 2.0% < 10% — checks NOT on future installments → PATH C likely
+
+  e_subset. this_month bucket check stats (strongest near-term signal)
+      date range: 2026-05-18 → 2026-05-31
+      total this_month (future unpaid): 133  (77 ms)
+      this_month with checks attached: 3  (93 ms)
+      this_month percentage: 2.3% < 10% — checks NOT on future installments → PATH C likely
+
+  e_samples. 10 future installments — verify statistical finding
+      (IDs and amounts only — no customer names)
+      → 10 records  (78 ms)
+
+      id=  39370 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  42611 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  19889 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  18387 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  19334 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  38756 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  19185 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  19209 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  12731 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+      id=  45338 | 2026-05-18 | paid=      0.00 | actual=      0.00 | chk_pending=      0.00 |   no checks (0)
+
+      [INFO] None of the 10 sampled records have check_ids set.
+           Consistent with year_pct=2.0% < 10% finding.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 2 — 'Has Checks' / 'All Checks Collected' fields (3-type probe)
+══════════════════════════════════════════════════════════════════════════════
+
+  2a. Filtering all_inst_fields (from Section 1) for 'check' keywords
+      Attributes checked: type, string, compute, store, depends, related
+
+  Fields matching 'check' keywords — 5 found:
+
+    all_checks_collected
+      type        : boolean
+      string      : All Checks Collected
+      store       : True
+      depends     : ['check_ids', 'check_ids.state', 'check_ids.is_suspended']
+      readonly    : True
+
+    check_approved_amount
+      type        : monetary
+      string      : Check Approved Amount
+      store       : True
+      depends     : ['check_ids', 'check_ids.state', 'check_ids.amount', 'check_ids.is_suspended']
+      readonly    : True
+
+    check_ids
+      type        : many2many
+      string      : Checks
+      store       : True
+      depends     : ['check_ids.state', 'check_ids.is_suspended']
+      relation    : rs.account.check
+
+    check_pending_amount
+      type        : monetary
+      string      : Check Pending Amount
+      store       : True
+      depends     : ['check_ids', 'check_ids.state', 'check_ids.amount', 'check_ids.is_suspended']
+      readonly    : True
+
+    has_checks
+      type        : boolean
+      string      : Has Checks
+      store       : True
+      depends     : ['check_ids']
+      readonly    : True
+
+  2b. Field 'all_checks_collected'  type=boolean  store=True
+      → Type 1 (stored boolean) — running search_count with 'all_checks_collected'=True
+         ALL installments where all_checks_collected=True : 788  (93 ms)
+         KPI 7 universe + all_checks_collected=True       : 0  (77 ms)
+         pct of future unpaid              : 0.00%
+         Threshold: 0.0% < 10% — checks NOT on future installments → PATH C likely
+
+  2b. Field 'check_approved_amount'  type=monetary  store=True
+      → Type 3 (non-boolean: monetary) — documenting semantics only.
+         string: Check Approved Amount
+         depends: ['check_ids', 'check_ids.state', 'check_ids.amount', 'check_ids.is_suspended']
+
+  2b. Field 'check_ids'  type=many2many  store=True
+      → Type 3 (non-boolean: many2many) — documenting semantics only.
+         string: Checks
+         relation: rs.account.check
+         depends: ['check_ids.state', 'check_ids.is_suspended']
+
+  2b. Field 'check_pending_amount'  type=monetary  store=True
+      → Type 3 (non-boolean: monetary) — documenting semantics only.
+         string: Check Pending Amount
+         depends: ['check_ids', 'check_ids.state', 'check_ids.amount', 'check_ids.is_suspended']
+
+  2b. Field 'has_checks'  type=boolean  store=True
+      → Type 1 (stored boolean) — running search_count with 'has_checks'=True
+         ALL installments where has_checks=True : 5,343  (93 ms)
+         KPI 7 universe + has_checks=True       : 39  (93 ms)
+         pct of future unpaid              : 2.02%
+         Threshold: 2.0% < 10% — checks NOT on future installments → PATH C likely
+
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 3 — Undocumented fields on rs.installment (Objective 3)
+══════════════════════════════════════════════════════════════════════════════
+
+  3a. fields_get for 7 probe fields
+      (77 ms)
+
+  Field                        Type          UI Label                         Relation                           Compute/Store
+  ---------------------------- ------------- -------------------------------- ---------------------------------- --------------------
+  total_due_amount             monetary      Total Due Amount                 —                                  comp='—' store=True
+  reservation_id               many2one      Reservation                      rs.reservation                     comp='—' store=True
+  contract_id                  many2one      Contract                         rs.contract                        comp='—' store=True
+  phase_id                     many2one      Phase                            rs.structure.phase                 comp='—' store=True
+  building_id                  many2one      Building                         rs.structure.building              comp='—' store=True
+  zone_id                      many2one      Zone                             rs.structure.zone                  comp='—' store=True
+  unit_id                      many2one      Unit                             rs.structure.unit                  comp='—' store=True
+
+  3b. Related model record counts and samples (non-PII)
+
+  total_due_amount — monetary (no related model to probe)
+  reservation_id → rs.reservation
+    search_count([]) = 1,479  (78 ms)
+    3 sample records (fields: ['id', 'activity_state', 'activity_type_icon', 'activity_date_deadline', 'my_activity_date_deadline', 'activity_summary', 'activity_exception_decoration', 'activity_exception_icon', 'has_message'])  (156 ms):
+      {'id': 4736, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 4734, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 4735, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+
+  contract_id → rs.contract
+    search_count([]) = 1,409  (93 ms)
+    3 sample records (fields: ['id', 'activity_state', 'activity_type_icon', 'activity_date_deadline', 'my_activity_date_deadline', 'activity_summary', 'activity_exception_decoration', 'activity_exception_icon', 'has_message'])  (156 ms):
+      {'id': 1460, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 1453, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 1452, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+
+  phase_id → rs.structure.phase
+    search_count([]) = 5  (78 ms)
+    3 sample records (fields: ['id', 'activity_state', 'activity_type_icon', 'activity_date_deadline', 'my_activity_date_deadline', 'activity_summary', 'activity_exception_decoration', 'activity_exception_icon', 'has_message'])  (186 ms):
+      {'id': 5, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 4, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 3, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+
+  building_id → rs.structure.building
+    search_count([]) = 277  (78 ms)
+    3 sample records (fields: ['id', 'activity_state', 'activity_type_icon', 'activity_date_deadline', 'my_activity_date_deadline', 'activity_summary', 'activity_exception_decoration', 'activity_exception_icon', 'has_message'])  (171 ms):
+      {'id': 840, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 839, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': False}
+      {'id': 838, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': False}
+
+  zone_id → rs.structure.zone
+    search_count([]) = 11  (78 ms)
+    3 sample records (fields: ['id', 'activity_state', 'activity_type_icon', 'activity_date_deadline', 'my_activity_date_deadline', 'activity_summary', 'activity_exception_decoration', 'activity_exception_icon', 'has_message'])  (171 ms):
+      {'id': 29, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 28, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 27, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+
+  unit_id → rs.structure.unit
+    search_count([]) = 1,873  (78 ms)
+    3 sample records (fields: ['id', 'activity_state', 'activity_type_icon', 'activity_date_deadline', 'my_activity_date_deadline', 'activity_summary', 'activity_exception_decoration', 'activity_exception_icon', 'has_message'])  (171 ms):
+      {'id': 5542, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 5541, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+      {'id': 5499, 'activity_state': False, 'activity_type_icon': False, 'activity_date_deadline': False, 'my_activity_date_deadline': False, 'activity_summary': False, 'activity_exception_decoration': False, 'activity_exception_icon': False, 'has_message': True}
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 4 — Pre-existing KPI Favorites on All Installments (Objective 4)
+══════════════════════════════════════════════════════════════════════════════
+
+  search_read(ir.filters, [('model_id','=','rs.installment')])
+  → 6 saved filters found  (94 ms)
+
+  ── 'All Installments'  (user_id=1876)
+     domain  : []
+     context : {'group_by': []}
+     sort    : []
+
+  ── 'EXEC - KPI Base (Installments)'  (user_id=1947)
+     domain  : [("contract_id.state", "=", "confirm")]
+     context : {'group_by': [], 'pivot_measures': ['__count', 'amount', 'paid_amount', 'due_amount'], 'pivot_column_groupby': [], 'pivot_row_groupby': []}
+     sort    : []
+
+  ── 'KPI – Overdue Installments (Confirmed)'  (user_id=1947)
+     domain  : ["&", "&", ("date", ">=", (context_today() + relativedelta(days = -1)).strftime("%Y-%m-%d")), ("date", "<=", context_today().strftime("%Y-%m-%d")), "&", ("due_amount", ">", 0), ("contract_id.state", "=", "confirm")]
+     context : {'group_by': [], 'pivot_measures': ['__count', 'due_amount'], 'pivot_column_groupby': [], 'pivot_row_groupby': []}
+     sort    : []
+     [INFO] no date filter — portfolio-wide (KPI 1 / KPI 3 pattern)
+
+  ── 'KPI – Total Collected Amount (Confirmed)'  (user_id=1947)
+     domain  : [("contract_id.state", "=", "confirm")]
+     context : {'group_by': [], 'pivot_measures': ['__count', 'paid_amount'], 'pivot_column_groupby': [], 'pivot_row_groupby': []}
+     sort    : []
+     [INFO] Likely KPI 4 / collections-rate related — compare against kpi_service.py
+
+  ── 'KPI – Total Contracted Value (Confirmed)'  (user_id=1947)
+     domain  : []
+     context : {'group_by': [], 'pivot_measures': ['__count', 'amount'], 'pivot_column_groupby': [], 'pivot_row_groupby': []}
+     sort    : []
+
+  ── 'KPI – Total Outstanding Amount (Confirmed)'  (user_id=1947)
+     domain  : [("contract_id.state", "=", "confirm")]
+     context : {'group_by': [], 'pivot_measures': ['__count', 'due_amount'], 'pivot_column_groupby': [], 'pivot_row_groupby': []}
+     sort    : []
+     [INFO] no date filter — portfolio-wide (KPI 1 / KPI 3 pattern)
+
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 5 — UI field label verification (Objective 5)
+══════════════════════════════════════════════════════════════════════════════
+
+  fields_get for 8 observed UI label fields
+  (125 ms)
+
+  | UI Label (observed)              | Technical Field                       | fields_get string                     | Match?
+  |----------------------------------|---------------------------------------|---------------------------------------|-------
+  | Amount                           | amount                                | Amount                                | [PASS]
+  | Paid Amount                      | paid_amount                           | Paid Amount                           | [PASS]
+  | Due Amount                       | due_amount                            | Due Amount                            | [PASS]
+  | Actual Paid Amount               | x_studio_actual_paid_amount           | Actual Paid Amount                    | [PASS]
+  | Total Due Amount                 | total_due_amount                      | Total Due Amount                      | [PASS]
+  | Payment Period                   | payment_type_id                       | Payment Period                        | [PASS]
+  | Reservation                      | reservation_id                        | Reservation                           | [PASS]
+  | Contract                         | contract_id                           | Contract                              | [PASS]
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 6 — Phase 1 KPI 7 PATH Recommendation
+══════════════════════════════════════════════════════════════════════════════
+
+  Evidence summary:
+    checks_field on rs.installment  : 'check_ids'
+    has_checks_field                 : 'has_checks'
+    all_checks_field                 : 'all_checks_collected'
+    year_pct (future installs w/ chk): 2.02%
+    month_pct (this_month w/ chk)    : 2.26%
+
+  ██ RECOMMENDED PATH: C ██
+
+  Rationale:
+    Only 2.0% of future unpaid installments have check records (< 10%).
+    La Verde's cheque workflow does not update paid_amount on installments
+    before their due date. The Alternative B formula (paid_amount - actual_paid)
+    will structurally show 0 EGP on 3 of 4 KPI 7 cards — visual clutter.
+
+  Phase 1 implementation under PATH C:
+    Remove cheques_in_pipeline annotation from KPI 7 forecast card UI.
+    The backend response shape CAN still include cheques_in_pipeline: 0.0
+    for completeness (and future use if the workflow changes).
+    The UI simply does not render the amber annotation when the value is 0.
+    This is consistent with Stage 4 spec §4.4: 'when cheques_in_pipeline == 0,
+    hide the annotation entirely'.
+
+    KPI 2 (Late Installments) cheques annotation is UNAFFECTED — late installs
+    DO have paid_amount > 0 when cheques have been credited.
+
+  Awaiting Khaled's PATH decision (A / B / C) before Phase 1 begins.
+
+══════════════════════════════════════════════════════════════════════════════
+
+  ████████████████████████████████████████████████████████████████████████
+  PHASE 0.5 COMPLETE. AWAITING KHALED REVIEW AND PHASE 1 APPROVAL.
+  ████████████████████████████████████████████████████████████████████████
+
+══════════════════════════════════════════════════════════════════════════════
