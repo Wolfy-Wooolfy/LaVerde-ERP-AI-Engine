@@ -1,0 +1,297 @@
+══════════════════════════════════════════════════════════════════════════════
+  KPI 7 — Expected Collections Forecast — Phase 0 Discovery
+  Run at (UTC) : 2026-05-18 13:31:15 UTC
+  Today (Cairo): 2026-05-18
+  ALLOWED_METHODS : ['fields_get', 'name_get', 'name_search', 'read', 'read_group', 'search', 'search_count', 'search_read']
+  READ-ONLY. No writes. No OpenAI. AI cost = $0.00
+══════════════════════════════════════════════════════════════════════════════
+
+  KPI 7 domain uses rs.installment.date which Phase 2 §2 confirmed is type 'date'.
+  Bucket boundaries therefore use plain ISO strings — no UTC conversion required.
+  Africa/Cairo timezone is used only to compute 'today' (cache-key midnight safety).
+
+  Computed bucket end dates (Cairo calendar arithmetic):
+    this_month    : 2026-05-18  →  2026-05-31
+    this_quarter  : 2026-05-18  →  2026-06-30
+    this_half     : 2026-05-18  →  2026-06-30
+    this_year     : 2026-05-18  →  2026-12-31
+
+  [INFO] this_quarter and this_half both end on 2026-06-30.
+       This is expected nesting collapse: Q2 ends Jun 30, H1 also ends Jun 30.
+       The two buckets will return identical Odoo UI counts — this is correct.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 1 — rs.installment.date field type confirmation (D0.3)
+══════════════════════════════════════════════════════════════════════════════
+
+  Model    : rs.installment
+  Field    : date
+  Label    : Date
+  Type     : date
+  Required : True
+  RPC time : 797 ms
+
+  [PASS] Field type confirmed as 'date' (not 'datetime').
+       → Bucket boundary domains use plain ISO date strings.
+       → _tz_period_bounds() is NOT needed for KPI 7 (unlike KPI 6).
+       → Phase 2 §2 Dependency #1 status: CONFIRMED.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 2 — Field-to-field domain comparison test (D0.2)
+══════════════════════════════════════════════════════════════════════════════
+
+  Spec §4.6 cheques_drill_down_domain includes:
+    ('paid_amount', '>', 'x_studio_actual_paid_amount')
+  Standard Odoo domain syntax expects a literal right-hand operand.
+  This test determines whether Odoo accepts a field-name string as the RHS.
+
+  Test 1b (control baseline)
+    domain : [('state', '=', 'post'), ('paid_amount', '>', 0)]
+    result : 29,931 records  (125 ms)
+             posted installments with any paid_amount — sanity baseline
+
+  Test 1a (field-to-field comparison)
+    domain : [('state', '=', 'post'), ('paid_amount', '>', 'x_studio_actual_paid_amount')]
+    [FLAG] Exception raised (93 ms): Odoo query error: {'code': 200, 'message': 'Odoo Server Error', 'data': {'name': 'builtins.ValueError', 'debug': 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/odoo/http.py", line 2167, in _transactioning\n    return service_model.retrying(func, env=self.env)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 157, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 2134, in _serve_ir_http\n    response = self.dispatcher.dispatch(rule.endpoint, args)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 2382, in dispatch\n    result = self.request.registry[\'ir.http\']._dispatch(endpoint)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/addons/base/models/ir_http.py", line 333, in _dispatch\n    result = endpoint(**request.params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 754, in route_wrapper\n    result = endpoint(self, *args, **params_ok)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/addons/base/controllers/rpc.py", line 178, in jsonrpc\n    return dispatch_rpc(service, method, args)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 412, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 59, in dispatch\n    res = execute_kw(db, uid, *params[3:])\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 82, in execute_kw\n    return execute(db, uid, obj, method, *args, **kw or {})\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 88, in execute\n    res = execute_cr(cr, uid, obj, method, *args, **kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 73, in execute_cr\n    result = retrying(partial(odoo.api.call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 157, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/odoo/api.py", line 535, in call_kw\n    result = getattr(recs, name)(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 1731, in search_count\n    query = self._search(domain, limit=limit)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 5818, in _search\n    query = self._where_calc(domain)\n            ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 5569, in _where_calc\n    return expression.expression(domain, self).query\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/osv/expression.py", line 799, in __init__\n    self.parse()\n  File "/home/odoo/src/odoo/odoo/osv/expression.py", line 1459, in parse\n    push_result(model._condition_to_sql(alias, left, operator, right, self.query))\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 3279, in _condition_to_sql\n    cmp_value = field.convert_to_record(field.convert_to_cache(value, self), self)\n                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/fields.py", line 1775, in convert_to_cache\n    value = float(value or 0.0)\n            ^^^^^^^^^^^^^^^^^^^\nValueError: could not convert string to float: \'x_studio_actual_paid_amount\'\n', 'message': "could not convert string to float: 'x_studio_actual_paid_amount'", 'arguments': ["could not convert string to float: 'x_studio_actual_paid_amount'"], 'context': {}}}
+         → Odoo rejected the domain. Field-to-field comparison is BROKEN.
+
+  CONCLUSION: Field-to-field comparison DOES NOT WORK.
+
+  Three alternative approaches for Phase 1:
+
+  Alternative A — Python-side filter (search_read + Python sum):
+    Fetch bucket installments: search_read(['paid_amount','x_studio_actual_paid_amount']).
+    Python filter: records where paid_amount > x_studio_actual_paid_amount.
+    cheques_in_pipeline = sum(p - a for p, a in records if p > a).
+    PRO: exact formula, exact cheques_record_count.
+    CON: data transfer scales with bucket size. Cap at 10,000 records; FLAG if exceeded.
+
+  Alternative B — read_group net formula (no per-record filter):
+    read_group on bucket domain, fields=['paid_amount','x_studio_actual_paid_amount'].
+    cheques_in_pipeline = max(SUM(paid) - SUM(actual), 0).
+    PRO: 1 RPC per bucket, same formula as KPI 3 (portfolio-wide).
+    CON: cheques_record_count unavailable; may differ from Alt A if anomalous records exist.
+
+  Alternative C — Two-query intersection:
+    Q1: IDs in bucket. Q2: IDs where paid_amount > 0 AND actual < paid (separate filter).
+    Intersect in Python, sum differences.
+    PRO: exact, avoids field-to-field syntax.
+    CON: 2 RPCs per bucket (8 extra RPCs total).
+
+  RECOMMENDATION: Alternative B for the service aggregate RPC (matches KPI 3 pattern,
+    1 RPC per bucket, cost consistent with spec §4.7 '8 read_group calls').
+    cheques_record_count reported as None/omitted when Alt B is used.
+    Section 4b uses Alternative B for the discovery baseline.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 3 — Bucket boundary arithmetic and counts (D0.4)
+══════════════════════════════════════════════════════════════════════════════
+
+  today (Cairo): 2026-05-18
+
+  ── this_month  (2026-05-18 → 2026-05-31)  [108 ms]
+     domain       : [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '>=', '2026-05-18'), ('date', '<=', '2026-05-31')]
+     record_count : 133
+     SUM(amount)  :            22,719,871.00 EGP
+     SUM(due_amt) :            22,693,463.00 EGP
+
+  ── this_quarter  (2026-05-18 → 2026-06-30)  [94 ms]
+     domain       : [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '>=', '2026-05-18'), ('date', '<=', '2026-06-30')]
+     record_count : 355
+     SUM(amount)  :            55,527,209.00 EGP
+     SUM(due_amt) :            55,459,801.00 EGP
+
+  ── this_half  (2026-05-18 → 2026-06-30)  [93 ms]
+     domain       : [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '>=', '2026-05-18'), ('date', '<=', '2026-06-30')]
+     record_count : 355
+     SUM(amount)  :            55,527,209.00 EGP
+     SUM(due_amt) :            55,459,801.00 EGP
+
+  ── this_year  (2026-05-18 → 2026-12-31)  [108 ms]
+     domain       : [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '>=', '2026-05-18'), ('date', '<=', '2026-12-31')]
+     record_count : 1,934
+     SUM(amount)  :           337,946,411.00 EGP
+     SUM(due_amt) :           337,223,075.00 EGP
+
+  Nesting invariant — month ≤ quarter ≤ half ≤ year:
+  [PASS] this_month ≤ this_quarter
+       amount :        22,719,871.00  ≤         55,527,209.00  ✓
+       count  :            133  ≤             355  ✓
+  [PASS] this_quarter ≤ this_half
+       amount :        55,527,209.00  ≤         55,527,209.00  ✓
+       count  :            355  ≤             355  ✓
+  [PASS] this_half ≤ this_year
+       amount :        55,527,209.00  ≤        337,946,411.00  ✓
+       count  :            355  ≤           1,934  ✓
+
+  [PASS] All nesting invariants satisfied.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 3b — KPI 2 / KPI 7 mutual exclusivity sanity check
+══════════════════════════════════════════════════════════════════════════════
+
+  Spec §4.4: KPI 2 uses date < today (past-due), KPI 7 uses date >= today (future).
+  These two date clauses are mutually exclusive by construction.
+  The impossible intersection domain must return exactly 0 records.
+
+  Domain : [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '<', '2026-05-18'), ('date', '>=', '2026-05-18')]
+  Result : 0 records  (93 ms)
+
+  [PASS] Mutual exclusivity confirmed — 0 records match the impossible domain.
+       Spec §4.4 claim verified: KPI 2 ∩ KPI 7 = ∅.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 4 — Khaled cross-check baseline (D0.5)
+            Paste these filter strings into the Odoo UI to verify.
+══════════════════════════════════════════════════════════════════════════════
+
+  Odoo UI path: Collections Mgmt → All Installments
+  Apply filters: Status = Posted AND Payment Status IN [Unpaid, Partially Paid]
+  Then add date filter per bucket below and check Pivot → SUM(Amount).
+
+  [this_month]
+    Filter : date >= 2026-05-18 AND date <= 2026-05-31
+    Expected record_count : 133
+    Expected SUM(amount)  : 22,719,871.00 EGP
+
+  [this_quarter]
+    Filter : date >= 2026-05-18 AND date <= 2026-06-30
+    Expected record_count : 355
+    Expected SUM(amount)  : 55,527,209.00 EGP
+
+  [this_half]
+    Filter : date >= 2026-05-18 AND date <= 2026-06-30
+    Expected record_count : 355
+    Expected SUM(amount)  : 55,527,209.00 EGP
+
+  [this_year]
+    Filter : date >= 2026-05-18 AND date <= 2026-12-31
+    Expected record_count : 1,934
+    Expected SUM(amount)  : 337,946,411.00 EGP
+
+  [INFO] this_quarter and this_half end on the same date (2026-06-30).
+       The Odoo UI will return identical results for both.
+       This is expected — nesting collapse is correct behaviour in May 2026.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 4b — Cheques baseline per bucket
+══════════════════════════════════════════════════════════════════════════════
+
+  Test 1a FAILED → using Alternative B for cheques baseline.
+  Formula: cheques_in_pipeline = SUM(paid_amount) − SUM(x_studio_actual_paid_amount)
+  Note   : This matches KPI 3's portfolio-wide formula (Decision 4.5),
+           scoped to the bucket domain. Per Decision 4.5, the formula equals
+           the per-record clamped sum when no anomalous records exist in the bucket.
+           cheques_record_count is not available via this approach.
+
+  ── this_month  (2026-05-18 → 2026-05-31)  [108 ms]
+     approach             : Alternative B — read_group net formula
+     SUM(paid_amount)     :                26,408.00 EGP
+     SUM(actual_paid)     :                26,408.00 EGP
+     cheques_in_pipeline  :                     0.00 EGP  (net — negative = data anomaly)
+     % of bucket amount   : 0.00%
+
+  ── this_quarter  (2026-05-18 → 2026-06-30)  [94 ms]
+     approach             : Alternative B — read_group net formula
+     SUM(paid_amount)     :                67,408.00 EGP
+     SUM(actual_paid)     :                67,408.00 EGP
+     cheques_in_pipeline  :                     0.00 EGP  (net — negative = data anomaly)
+     % of bucket amount   : 0.00%
+
+  ── this_half  (2026-05-18 → 2026-06-30)  [218 ms]
+     approach             : Alternative B — read_group net formula
+     SUM(paid_amount)     :                67,408.00 EGP
+     SUM(actual_paid)     :                67,408.00 EGP
+     cheques_in_pipeline  :                     0.00 EGP  (net — negative = data anomaly)
+     % of bucket amount   : 0.00%
+
+  ── this_year  (2026-05-18 → 2026-12-31)  [218 ms]
+     approach             : Alternative B — read_group net formula
+     SUM(paid_amount)     :               723,336.00 EGP
+     SUM(actual_paid)     :                80,336.00 EGP
+     cheques_in_pipeline  :               643,000.00 EGP  (net — negative = data anomaly)
+     % of bucket amount   : 0.19%
+
+────────────────────────────────────────────────────────────────────────────
+  KHALED CROSS-CHECK SHEET  (paste verbatim into docs/KPI7_DISCOVERY_FINDINGS.md)
+────────────────────────────────────────────────────────────────────────────
+
+  Cheques approach: Alternative B
+
+  | Bucket         | Start      | End        |  Records |         Amount EGP |        Due Amt EGP |        Cheques EGP | Chq Recs |   Chq % |
+  |-----------------|-------------|-------------|-----------|---------------------|---------------------|---------------------|-----------|----------|
+  | this_month     | 2026-05-18 | 2026-05-31 |      133 |      22,719,871.00 |      22,693,463.00 |               0.00 |      N/A |   0.00% |
+  | this_quarter   | 2026-05-18 | 2026-06-30 |      355 |      55,527,209.00 |      55,459,801.00 |               0.00 |      N/A |   0.00% |
+  | this_half      | 2026-05-18 | 2026-06-30 |      355 |      55,527,209.00 |      55,459,801.00 |               0.00 |      N/A |   0.00% |
+  | this_year      | 2026-05-18 | 2026-12-31 |    1,934 |     337,946,411.00 |     337,223,075.00 |         643,000.00 |      N/A |   0.19% |
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 5 — Summary of Phase 0 Findings
+══════════════════════════════════════════════════════════════════════════════
+
+  D0.3 — rs.installment.date field type:
+    type = 'date'  →  [PASS]
+    ISO string domains work directly. No UTC conversion needed for KPI 7.
+
+  D0.2 — Field-to-field domain comparison:
+    Test 1a FAILED.  [FLAG]
+    Exception: Odoo query error: {'code': 200, 'message': 'Odoo Server Error', 'data': {'name': 'builtins.ValueError', 'debug': 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/odoo/http.py", line 2167, in _transactioning\n    return service_model.retrying(func, env=self.env)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 157, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 2134, in _serve_ir_http\n    response = self.dispatcher.dispatch(rule.endpoint, args)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 2382, in dispatch\n    result = self.request.registry[\'ir.http\']._dispatch(endpoint)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/addons/base/models/ir_http.py", line 333, in _dispatch\n    result = endpoint(**request.params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 754, in route_wrapper\n    result = endpoint(self, *args, **params_ok)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/addons/base/controllers/rpc.py", line 178, in jsonrpc\n    return dispatch_rpc(service, method, args)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/http.py", line 412, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 59, in dispatch\n    res = execute_kw(db, uid, *params[3:])\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 82, in execute_kw\n    return execute(db, uid, obj, method, *args, **kw or {})\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 88, in execute\n    res = execute_cr(cr, uid, obj, method, *args, **kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 73, in execute_cr\n    result = retrying(partial(odoo.api.call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/service/model.py", line 157, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/odoo/api.py", line 535, in call_kw\n    result = getattr(recs, name)(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 1731, in search_count\n    query = self._search(domain, limit=limit)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 5818, in _search\n    query = self._where_calc(domain)\n            ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 5569, in _where_calc\n    return expression.expression(domain, self).query\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/osv/expression.py", line 799, in __init__\n    self.parse()\n  File "/home/odoo/src/odoo/odoo/osv/expression.py", line 1459, in parse\n    push_result(model._condition_to_sql(alias, left, operator, right, self.query))\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/models.py", line 3279, in _condition_to_sql\n    cmp_value = field.convert_to_record(field.convert_to_cache(value, self), self)\n                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/odoo/fields.py", line 1775, in convert_to_cache\n    value = float(value or 0.0)\n            ^^^^^^^^^^^^^^^^^^^\nValueError: could not convert string to float: \'x_studio_actual_paid_amount\'\n', 'message': "could not convert string to float: 'x_studio_actual_paid_amount'", 'arguments': ["could not convert string to float: 'x_studio_actual_paid_amount'"], 'context': {}}}
+    Phase 1: use Alternative B (read_group net formula).
+    UNKNOWN U1: field-to-field comparison broken — document in findings.
+
+  D0.4 — Bucket boundary arithmetic and counts:
+    this_month    : → 2026-05-31 | 133 records | 22,719,871.00 EGP
+    this_quarter  : → 2026-06-30 | 355 records | 55,527,209.00 EGP
+    this_half     : → 2026-06-30 | 355 records | 55,527,209.00 EGP
+    this_year     : → 2026-12-31 | 1,934 records | 337,946,411.00 EGP
+    Nesting invariant : [PASS]
+
+  Section 3b — KPI 2 / KPI 7 mutual exclusivity:
+    Impossible domain count = 0.  [PASS]
+
+  D0.5 / Section 4b — Cheques baseline per bucket:
+    this_month    : cheques_in_pipeline =               0.00 EGP (0.00% of 22,719,871.00)
+    this_quarter  : cheques_in_pipeline =               0.00 EGP (0.00% of 55,527,209.00)
+    this_half     : cheques_in_pipeline =               0.00 EGP (0.00% of 55,527,209.00)
+    this_year     : cheques_in_pipeline =         643,000.00 EGP (0.19% of 337,946,411.00)
+
+  UNKNOWNS surfaced:
+    [FLAG] U1: Field-to-field Odoo domain ('paid_amount','>','x_studio_actual_paid_amount') does not work. Phase 1 must use Alternative B (or A for exact cheques_record_count).
+
+══════════════════════════════════════════════════════════════════════════════
+
+  ████████████████████████████████████████████████████████████████████████
+  PHASE 0 COMPLETE. AWAITING KHALED CROSS-CHECK AND APPROVAL TO PROCEED.
+  ████████████████████████████████████████████████████████████████████████
+
+  Khaled — please verify the baseline numbers in Odoo UI:
+
+  1. Open: Collections Mgmt → All Installments
+  2. Filters: State = Posted  AND  Payment Status = Unpaid or Partially Paid
+  3. Switch to Pivot view, measure = Amount
+  4. For each bucket apply the date filter and confirm record count + SUM(amount):
+
+  [this_month]
+    date >= 2026-05-18 AND date <= 2026-05-31
+    Discovery  : 133 records  |  22,719,871.00 EGP
+    Odoo UI    : _______ records  |  _____________ EGP  (fill in)
+
+  [this_quarter]
+    date >= 2026-05-18 AND date <= 2026-06-30
+    Discovery  : 355 records  |  55,527,209.00 EGP
+    Odoo UI    : _______ records  |  _____________ EGP  (fill in)
+
+  [this_half]
+    date >= 2026-05-18 AND date <= 2026-06-30
+    Discovery  : 355 records  |  55,527,209.00 EGP
+    Odoo UI    : _______ records  |  _____________ EGP  (fill in)
+
+  [this_year]
+    date >= 2026-05-18 AND date <= 2026-12-31
+    Discovery  : 1,934 records  |  337,946,411.00 EGP
+    Odoo UI    : _______ records  |  _____________ EGP  (fill in)
+
+  5. Reply with the Odoo UI figures.
+  6. If all match (±1 EGP) → reply 'approved, proceed to Phase 1'.
+
+══════════════════════════════════════════════════════════════════════════════
