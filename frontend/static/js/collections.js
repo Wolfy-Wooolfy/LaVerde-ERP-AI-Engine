@@ -11,8 +11,9 @@
     '/api/v1/collections/kpi/collection-rate-by-project',
   ];
 
-  var _lastFetchData = null;
-  var _kpi6Chart     = null;
+  var _lastFetchData       = null;
+  var _kpi6Chart           = null;
+  var _autoRefreshInterval = null;
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -340,20 +341,41 @@
     if (banner) banner.classList.add('hidden');
   }
 
+  // D2.9 — 60s auto-refresh with Visibility API pause
+  function startAutoRefresh() {
+    _autoRefreshInterval = setInterval(fetchAllKPIs, 60000);
+  }
+
+  function stopAutoRefresh() {
+    if (_autoRefreshInterval) {
+      clearInterval(_autoRefreshInterval);
+      _autoRefreshInterval = null;
+    }
+  }
+
   function init() {
     // Redirect the topbar Refresh button to our handler on this page.
     var topbarBtn = document.getElementById('refresh-btn');
     if (topbarBtn) topbarBtn.onclick = collectionsRefresh;
 
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        stopAutoRefresh();
+      } else {
+        fetchAllKPIs().then(startAutoRefresh);
+      }
+    });
+
     window.collectionsDashboard = {
       get state() { return _lastFetchData; },
       fetchAll: fetchAllKPIs
     };
-    window.collectionsDashboard.fetchAll();
+    window.collectionsDashboard.fetchAll().then(startAutoRefresh);
   }
 
   window.collectionsRefresh = function () {
-    fetchAllKPIs();
+    stopAutoRefresh();
+    fetchAllKPIs().then(startAutoRefresh);
   };
 
   document.addEventListener('DOMContentLoaded', init);
