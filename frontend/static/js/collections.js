@@ -77,7 +77,11 @@
     var topbarBtn = document.getElementById('refresh-btn');
     if (topbarBtn) topbarBtn.onclick = collectionsRefresh;
 
-    fetchAllKPIs();
+    window.collectionsDashboard = {
+      get state() { return _lastFetchData; },
+      fetchAll: fetchAllKPIs
+    };
+    window.collectionsDashboard.fetchAll();
   }
 
   window.collectionsRefresh = function () {

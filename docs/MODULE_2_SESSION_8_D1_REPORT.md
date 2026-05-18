@@ -111,6 +111,7 @@
 |---|---|---|
 | `caniuse-lite` advisory | Cannot be eliminated. Advisory persists even on the latest version because browserslist compares the release DATE of caniuse-lite against today (> 6 months threshold). Documented in commit `f2e31be`. | No workaround exists without a new caniuse release from the caniuse team. |
 | Screenshot delivery | Screenshots not captured (require live browser + Odoo). Steps documented in the smoke test doc. | I cannot autonomously launch a browser; Khaled will take them during Checkpoint A. |
+| **D1.4 CORRECTION** `window.collectionsDashboard` not exposed — D1 static review verified "one console.log" but did not verify window exposure. `collections.js` used procedural functions (no class); `init()` called `fetchAllKPIs()` directly, never assigning to `window`. Fixed in commit `TBD` (post-Checkpoint A): `window.collectionsDashboard = { get state() { return _lastFetchData; }, fetchAll: fetchAllKPIs }` assigned in `init()`, with `window.collectionsDashboard.fetchAll()` as the call site. D1.4 PASS status revised to PASS-WITH-CORRECTION. |
 
 ---
 
