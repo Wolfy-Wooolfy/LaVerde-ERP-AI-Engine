@@ -2,6 +2,7 @@
 {% from "components/_kpi_card.html" import kpi_card %}
 {% from "components/_skeleton.html" import kpi_hero_skeleton, kpi_skeleton, kpi_project_skeleton, chart_skeleton %}
 {% from "components/_project_card.html" import project_card %}
+{% from "components/_chart_container.html" import chart_container %}
 
 {% block title %}{{ _t("Collections Dashboard") }} — LaVerde ERP AI Engine{% endblock %}
 
@@ -162,8 +163,8 @@
 </div>
 
 {# ── Row 4 — 6-Month Collection Trend (KPI 6) ────────────────────────────── #}
-<div id="col-kpi6-container">
-  {{ chart_skeleton() }}
+<div id="col-kpi6-container" class="mb-4">
+  {% call chart_container(_t("6-Month Collection Trend"), "col-kpi6-chart", height="h-64") %}{% endcall %}
 </div>
 
 {# ── Error banner (hidden until an API call fails) ────────────────────────── #}

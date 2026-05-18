@@ -12,6 +12,7 @@
   ];
 
   var _lastFetchData = null;
+  var _kpi6Chart     = null;
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -164,6 +165,101 @@
     }
   }
 
+  // D2.7 — Row 4: 6-Month Collection Trend
+  function renderRow4(state) {
+    var kpi6 = state[4];
+    if (!kpi6 || !kpi6.months) return;
+    var s    = window.COLLECTIONS_STRINGS || {};
+    var lang = s.lang || 'en';
+    var fmt  = window.CollectionsFormatters;
+
+    var canvas  = document.getElementById('col-kpi6-chart');
+    var emptyEl = document.getElementById('col-kpi6-chart-empty');
+    if (!canvas) return;
+
+    var amounts = kpi6.months.map(function (m) { return m.amount; });
+    var allZero = amounts.every(function (a) { return a === 0; });
+
+    if (allZero) {
+      canvas.style.display = 'none';
+      if (emptyEl) emptyEl.classList.remove('hidden');
+      return;
+    }
+    canvas.style.display = '';
+    if (emptyEl) emptyEl.classList.add('hidden');
+
+    var labels = kpi6.months.map(function (m) {
+      return lang === 'ar' ? m.label_ar : m.label_en;
+    });
+
+    if (_kpi6Chart) { _kpi6Chart.destroy(); _kpi6Chart = null; }
+
+    var p   = palette();
+    var avg = kpi6.average_monthly;
+
+    applyChartDefaults();
+    _kpi6Chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: s.trend_title || '6-Month Collection Trend',
+            data: amounts,
+            borderColor: '#059669',
+            backgroundColor: 'rgba(5, 150, 105, 0.3)',
+            fill: true,
+            borderWidth: 2,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            tension: 0.3,
+          },
+          {
+            label: s.average || 'Average',
+            data: kpi6.months.map(function () { return avg; }),
+            borderColor: p.text,
+            borderDash: [6, 4],
+            borderWidth: 1.5,
+            pointRadius: 0,
+            fill: false,
+            tension: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            labels: { usePointStyle: true, pointStyleWidth: 8 },
+          },
+          tooltip: {
+            filter: function (tooltipItem) { return tooltipItem.datasetIndex !== 1; },
+            callbacks: {
+              label: function (ctx) { return ' ' + fmt.formatEGP(ctx.parsed.y, lang); },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: p.text },
+          },
+          y: {
+            grid: { color: p.gridLines },
+            ticks: {
+              color: p.text,
+              callback: function (val) { return fmt.formatEGP(val, lang); },
+            },
+            beginAtZero: true,
+          },
+        },
+      },
+    });
+    registerChart('col-kpi6-chart', _kpi6Chart);
+  }
+
   function fetchAllKPIs() {
     var t0 = performance.now();
     return Promise.all(KPI_ENDPOINTS.map(function (url) {
@@ -178,7 +274,7 @@
       renderKpi2(results[0]);
       renderRow2(results);
       renderRow3(results);
-      // TODO(D2): render KPI 6 — 6-Month Trend → results[4]
+      renderRow4(results);
       return results;
     }).catch(function (err) {
       showErrorBanner();
