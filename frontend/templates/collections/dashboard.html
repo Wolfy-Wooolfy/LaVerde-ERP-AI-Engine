@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "components/_kpi_card.html" import kpi_card %}
 {% from "components/_skeleton.html" import kpi_hero_skeleton, kpi_skeleton, kpi_project_skeleton, chart_skeleton %}
+{% from "components/_project_card.html" import project_card %}
 
 {% block title %}{{ _t("Collections Dashboard") }} — LaVerde ERP AI Engine{% endblock %}
 
@@ -154,9 +155,9 @@
     {{ _t("Top 3 Projects Performance") }}
   </h2>
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-    <div id="col-proj1-container">{{ kpi_project_skeleton() }}</div>
-    <div id="col-proj2-container">{{ kpi_project_skeleton() }}</div>
-    <div id="col-proj3-container">{{ kpi_project_skeleton() }}</div>
+    <div id="col-proj1-container">{{ project_card(1) }}</div>
+    <div id="col-proj2-container">{{ project_card(2) }}</div>
+    <div id="col-proj3-container">{{ project_card(3) }}</div>
   </div>
 </div>
 

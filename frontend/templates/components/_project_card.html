@@ -1,0 +1,21 @@
+{% macro project_card(idx) %}
+<div id="col-proj{{ idx }}-card"
+     class="kpi-card border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+     data-drilldown-target="kpi5-placeholder-{{ idx }}"
+     tabindex="0"
+     aria-label="—">
+  <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-3 truncate">
+    <span id="col-proj{{ idx }}-name"
+          class="opacity-0 transition-opacity duration-200">—</span>
+  </p>
+  <p class="text-xs text-neutral-400 dark:text-neutral-500 mb-0.5">{{ _t("Late") }}</p>
+  <p id="col-proj{{ idx }}-late"
+     class="text-3xl font-bold tabular text-danger-700 dark:text-danger-400 mb-1 opacity-0 transition-opacity duration-200"
+     title="">—</p>
+  <div class="flex items-center gap-2 mt-auto pt-2 border-t border-neutral-100 dark:border-neutral-800">
+    <span class="text-xs text-neutral-400 dark:text-neutral-500">{{ _t("Rate") }}</span>
+    <span id="col-proj{{ idx }}-rate"
+          class="text-sm font-semibold tabular text-neutral-900 dark:text-neutral-100 opacity-0 transition-opacity duration-200">—</span>
+  </div>
+</div>
+{% endmacro %}

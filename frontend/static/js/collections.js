@@ -118,6 +118,52 @@
     }
   }
 
+  // D2.6 — Row 3: Top 3 Projects
+  function getProjectRate(kpi5b, projectId) {
+    if (!kpi5b || !kpi5b.projects) return null;
+    for (var i = 0; i < kpi5b.projects.length; i++) {
+      if (kpi5b.projects[i].project_id === projectId) {
+        return kpi5b.projects[i].rate_percent;
+      }
+    }
+    return null;
+  }
+
+  function renderRow3(state) {
+    var kpi5a = state[2];
+    var kpi5b = state[6];
+    if (!kpi5a || !kpi5a.projects) return;
+    var s    = window.COLLECTIONS_STRINGS || {};
+    var lang = s.lang || 'en';
+    var fmt  = window.CollectionsFormatters;
+
+    for (var i = 0; i < kpi5a.projects.length; i++) {
+      var p    = kpi5a.projects[i];
+      var idx  = i + 1;
+      var card   = document.getElementById('col-proj' + idx + '-card');
+      var nameEl = document.getElementById('col-proj' + idx + '-name');
+      var lateEl = document.getElementById('col-proj' + idx + '-late');
+      var rateEl = document.getElementById('col-proj' + idx + '-rate');
+
+      var displayName = (s.project_names && s.project_names[p.project_name]) || p.project_name;
+      var lateAmt     = fmt.formatEGP(p.late_uncollected, lang);
+      var rate        = getProjectRate(kpi5b, p.project_id);
+      var rateStr     = fmt.formatRate(rate, lang);
+
+      if (nameEl) { nameEl.textContent = displayName; fadeIn(nameEl); }
+      if (lateEl) {
+        lateEl.textContent = lateAmt;
+        lateEl.title = fmt.formatEGP(p.late_uncollected, lang, { fullValue: true });
+        fadeIn(lateEl);
+      }
+      if (rateEl) { rateEl.textContent = rateStr; fadeIn(rateEl); }
+      if (card) {
+        card.setAttribute('data-drilldown-target', 'kpi5-proj-' + p.project_id);
+        card.setAttribute('aria-label', displayName + ': ' + lateAmt + ' · ' + rateStr);
+      }
+    }
+  }
+
   function fetchAllKPIs() {
     var t0 = performance.now();
     return Promise.all(KPI_ENDPOINTS.map(function (url) {
@@ -131,9 +177,8 @@
       updateTimestamps();
       renderKpi2(results[0]);
       renderRow2(results);
-      // TODO(D2): render KPI 5 — Late Uncollected per project → results[2]
-      // TODO(D2): render KPI 6 — 6-Month Trend          → results[4]
-      // TODO(D2): render KPI 5b — Collection Rate per project → results[6]
+      renderRow3(results);
+      // TODO(D2): render KPI 6 — 6-Month Trend → results[4]
       return results;
     }).catch(function (err) {
       showErrorBanner();
