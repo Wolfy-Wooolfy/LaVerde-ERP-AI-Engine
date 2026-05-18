@@ -76,10 +76,76 @@
 </div>
 
 {# ── Row 2 — Secondary trio: KPI 1 · KPI 3 · KPI 4 ──────────────────────── #}
-<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-  <div id="col-kpi1-container">{{ kpi_skeleton() }}</div>
-  <div id="col-kpi3-container">{{ kpi_skeleton() }}</div>
-  <div id="col-kpi4-container">{{ kpi_skeleton() }}</div>
+<div id="row-trio" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+
+  {# KPI 1 — Total Portfolio Value (emerald) #}
+  <div id="col-kpi1-container"
+       class="kpi-card border border-emerald-200 dark:border-emerald-800 group flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+       data-drilldown-target="kpi1"
+       tabindex="0"
+       aria-label="{{ _t('Total Portfolio Value') }}: —">
+    <div class="mb-3">
+      <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
+        {{ _t("Total Portfolio Value") }}
+      </p>
+    </div>
+    <div class="flex items-end justify-between">
+      <p id="col-kpi1-value"
+         class="text-3xl font-bold tabular text-emerald-700 dark:text-emerald-400 opacity-0 transition-opacity duration-200"
+         title="">—</p>
+    </div>
+    <p id="col-kpi1-subtitle"
+       class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
+  </div>
+
+  {# KPI 3 — Pending Check Exposure (warning) #}
+  <div id="col-kpi3-container"
+       class="kpi-card border border-warning-200 dark:border-warning-800 group flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+       data-drilldown-target="kpi3"
+       tabindex="0"
+       aria-label="{{ _t('Pending Check Exposure') }}: —">
+    <div class="mb-3">
+      <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
+        {{ _t("Pending Check Exposure") }}
+      </p>
+    </div>
+    <div class="flex items-end justify-between">
+      <p id="col-kpi3-value"
+         class="text-3xl font-bold tabular text-warning-700 dark:text-warning-400 opacity-0 transition-opacity duration-200"
+         title="">—</p>
+    </div>
+    <p id="col-kpi3-subtitle"
+       class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
+  </div>
+
+  {# KPI 4 — Collection Rate MTD/YTD (default, two-stat custom layout) #}
+  <div id="col-kpi4-container"
+       class="kpi-card border border-neutral-200 dark:border-neutral-700 group flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+       data-drilldown-target="kpi4"
+       tabindex="0"
+       aria-label="{{ _t('Collection Rate') }}: — / —">
+    <div class="mb-3">
+      <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
+        {{ _t("Collection Rate") }}
+      </p>
+    </div>
+    <div class="flex items-end gap-5">
+      <div>
+        <p class="text-xs text-neutral-400 dark:text-neutral-500 mb-0.5">{{ _t("MTD") }}</p>
+        <p id="col-kpi4-mtd"
+           class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100 opacity-0 transition-opacity duration-200">—</p>
+      </div>
+      <span class="text-neutral-300 dark:text-neutral-600 text-2xl pb-0.5">/</span>
+      <div>
+        <p class="text-xs text-neutral-400 dark:text-neutral-500 mb-0.5">{{ _t("YTD") }}</p>
+        <p id="col-kpi4-ytd"
+           class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100 opacity-0 transition-opacity duration-200">—</p>
+      </div>
+    </div>
+    <p id="col-kpi4-subtitle"
+       class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
+  </div>
+
 </div>
 
 {# ── Row 3 — Top 3 Projects (KPI 5 late + KPI 5b rate) ──────────────────── #}

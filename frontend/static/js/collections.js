@@ -55,6 +55,69 @@
     if (card) card.setAttribute('aria-label', (s.late_uncollected || 'Late Uncollected') + ': ' + formatted);
   }
 
+  // D2.5 — Row 2: KPI 1 (Portfolio), KPI 3 (Pending Checks), KPI 4 (Rate)
+  function renderRow2(state) {
+    var s   = window.COLLECTIONS_STRINGS || {};
+    var lang = s.lang || 'en';
+    var fmt = window.CollectionsFormatters;
+
+    // KPI 1 — Total Portfolio Value
+    var kpi1 = state[1];
+    var v1   = document.getElementById('col-kpi1-value');
+    var s1   = document.getElementById('col-kpi1-subtitle');
+    var c1   = document.getElementById('col-kpi1-container');
+    if (v1 && kpi1) {
+      var f1 = fmt.formatEGP(kpi1.value, lang);
+      v1.textContent = f1;
+      v1.title = fmt.formatEGP(kpi1.value, lang, { fullValue: true });
+      fadeIn(v1);
+      if (c1) c1.setAttribute('aria-label', (s.total_portfolio || 'Total Portfolio Value') + ': ' + f1);
+    }
+    if (s1 && kpi1) {
+      s1.textContent = fmt.formatCount(kpi1.record_count, lang) + ' ' + (s.installments || 'installments');
+      fadeIn(s1);
+    }
+
+    // KPI 3 — Pending Check Exposure
+    var kpi3 = state[3];
+    var v3   = document.getElementById('col-kpi3-value');
+    var s3   = document.getElementById('col-kpi3-subtitle');
+    var c3   = document.getElementById('col-kpi3-container');
+    if (v3 && kpi3) {
+      var f3 = fmt.formatEGP(kpi3.value, lang);
+      v3.textContent = f3;
+      v3.title = fmt.formatEGP(kpi3.value, lang, { fullValue: true });
+      fadeIn(v3);
+      if (c3) c3.setAttribute('aria-label', (s.pending_check || 'Pending Check Exposure') + ': ' + f3);
+    }
+    if (s3) {
+      s3.textContent = s.in_pipeline || 'in pipeline';
+      fadeIn(s3);
+    }
+
+    // KPI 4 — Collection Rate MTD / YTD
+    var kpi4 = state[5];
+    var mtdEl = document.getElementById('col-kpi4-mtd');
+    var ytdEl = document.getElementById('col-kpi4-ytd');
+    var s4    = document.getElementById('col-kpi4-subtitle');
+    var c4    = document.getElementById('col-kpi4-container');
+    if (kpi4) {
+      var mtdRate = fmt.formatRate(kpi4.mtd.rate_percent, lang);
+      var ytdRate = fmt.formatRate(kpi4.ytd.rate_percent, lang);
+      var bothNull = kpi4.mtd.rate_percent === null && kpi4.ytd.rate_percent === null;
+
+      if (mtdEl) { mtdEl.textContent = mtdRate; fadeIn(mtdEl); }
+      if (ytdEl) { ytdEl.textContent = ytdRate; fadeIn(ytdEl); }
+      if (s4) {
+        s4.textContent = bothNull
+          ? (s.data_entry_in_progress || 'Data entry in progress')
+          : (s.mtd || 'MTD') + ' / ' + (s.ytd || 'YTD') + ' · ' + kpi4.ytd.period_start;
+        fadeIn(s4);
+      }
+      if (c4) c4.setAttribute('aria-label', (s.collection_rate || 'Collection Rate') + ': MTD ' + mtdRate + ' / YTD ' + ytdRate);
+    }
+  }
+
   function fetchAllKPIs() {
     var t0 = performance.now();
     return Promise.all(KPI_ENDPOINTS.map(function (url) {
@@ -67,11 +130,9 @@
       hideErrorBanner();
       updateTimestamps();
       renderKpi2(results[0]);
-      // TODO(D2): render KPI 1 — Total Portfolio Value  → results[1]
+      renderRow2(results);
       // TODO(D2): render KPI 5 — Late Uncollected per project → results[2]
-      // TODO(D2): render KPI 3 — Pending Check Exposure → results[3]
       // TODO(D2): render KPI 6 — 6-Month Trend          → results[4]
-      // TODO(D2): render KPI 4 — Collection Rate MTD/YTD → results[5]
       // TODO(D2): render KPI 5b — Collection Rate per project → results[6]
       return results;
     }).catch(function (err) {
