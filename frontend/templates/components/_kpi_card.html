@@ -69,7 +69,7 @@
   <div class="flex items-end justify-between">
     <p class="text-3xl font-bold tabular {{ value_color.get(variant, value_color.default) }}"
        data-kpi-value="{{ sparkline_metric or '' }}">
-      {{ value | int if value is defined else '—' }}
+      {% if value is not defined or value is none %}—{% elif value is number %}{{ value | int }}{% else %}{{ value }}{% endif %}
     </p>
     <span class="text-xs text-neutral-400 dark:text-neutral-500 font-mono"
           data-kpi-trend="{{ sparkline_metric or '' }}">
