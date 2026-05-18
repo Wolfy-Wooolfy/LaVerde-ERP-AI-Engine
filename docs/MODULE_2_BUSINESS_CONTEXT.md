@@ -543,3 +543,82 @@ This module will NOT do:
 - Collections Officer daily workflow — operational follow-up logging, per-installment manual actions, and the daily filter-by-status views of Collections Mgmt remain in the existing Odoo app
 - Per-salesperson operational dashboards — sales team management views are not a Board-level concern in this MVP
 - Predictive analytics, alerts, and notifications — deferred until the Board confirms what is "alert-worthy" through actual use
+
+---
+
+## 18. Odoo UI Artifacts Reference
+
+> **Source:** Phase 0.5 UI-Driven Discovery — `scripts/discover_phase_0_5_ui_artifacts.py` (2026-05-18).  
+> See `docs/PHASE_0_5_UI_DISCOVERY_FINDINGS.md` for full evidence and analysis.
+
+### 18.1 Check-Related Fields on rs.installment
+
+Four additional fields on `rs.installment` (all stored, all computed from `check_ids`):
+
+| Field | Type | Label | Description |
+|-------|------|-------|-------------|
+| `check_ids` | many2many → `rs.account.check` | Checks | All check records linked to this installment |
+| `has_checks` | boolean (computed, stored) | Has Checks | True if any check_ids are attached |
+| `all_checks_collected` | boolean (computed, stored) | All Checks Collected | True if ALL linked checks are in cashed/collected state |
+| `check_pending_amount` | monetary (computed, stored) | Check Pending Amount | Sum of pending check amounts (from check_ids) |
+| `check_approved_amount` | monetary (computed, stored) | Check Approved Amount | Sum of approved check amounts (from check_ids) |
+
+**Statistical baseline (2026-05-18):**
+- `has_checks = True` on 5,343 installments (portfolio-wide)
+- `has_checks = True` on 39 of 1,934 future unpaid installments (**2.02%**)
+- `all_checks_collected = True` on 0 future unpaid installments
+
+**Implication:** La Verde's cheque workflow does not attach check records to installments before their due date. `paid_amount` on future-dated installments is structurally 0. The `cheques_in_pipeline` annotation on KPI 7 forecast buckets shows 0 EGP for 3 of 4 buckets — this is correct behaviour, not a formula error.
+
+### 18.2 rs.account.check — Key Fields
+
+The `rs.account.check` model (5,224 records as of 2026-05-18) tracks the full check lifecycle:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `amount` | monetary | Check face value |
+| `collected_amount` | monetary | Amount actually cashed |
+| `residual_amount` | monetary | Remaining uncashed amount |
+| `state` | selection | Check status (values: see RS Accounting app) |
+| `maturity_date` | date | Cheque maturity/due date |
+| `date` | date | Check issue date |
+| `is_suspended` | boolean | Whether check is suspended |
+| `installment_ids` | many2many → `rs.installment` | Back-link to installments |
+| `installment_paid_amount` | monetary | Paid amount on linked installment |
+| `installment_due_amount` | monetary | Due amount on linked installment |
+| `contract_id` | many2one → `rs.contract` | Parent contract |
+| `lot_id` | many2one → `rs.account.check.lot` | Check lot (77 lots) |
+
+### 18.3 Pre-existing KPI Favorites (ir.filters)
+
+Six saved searches exist on the All Installments view. Discovered via `search_read(ir.filters)`:
+
+| Name | Domain | Notes |
+|------|--------|-------|
+| All Installments | `[]` | No filter — baseline view |
+| EXEC - KPI Base (Installments) | `[("contract_id.state","=","confirm")]` | Confirmed contracts only |
+| KPI – Overdue Installments (Confirmed) | `date in [yesterday, today] AND due_amount > 0 AND contract_id.state = confirm` | **1-day window — see critical note below** |
+| KPI – Total Collected Amount (Confirmed) | `[("contract_id.state","=","confirm")]` + measure=paid_amount | Collections total |
+| KPI – Total Contracted Value (Confirmed) | `[]` + measure=amount | Portfolio total |
+| KPI – Total Outstanding Amount (Confirmed) | `[("contract_id.state","=","confirm")]` + measure=due_amount | Outstanding receivables |
+
+**Critical note — "Overdue" definition discrepancy:**  
+The EXEC "KPI – Overdue Installments" filter uses a **1-day sliding window** (yesterday to today), capturing only installments that fell due in the past 24 hours. This is an operational/daily-flow view, not the accumulated overdue stock.
+
+Our **KPI 2** implementation uses `date < today` — capturing ALL historically accumulated past-due installments (322.2M EGP as of May 2026). These are two fundamentally different metrics. Khaled must confirm which definition the Board expects before Stage 3 frontend launch.
+
+**Critical note — `contract_id.state = confirm` vs `state = post`:**  
+All four named EXEC KPI filters scope to confirmed contracts. Our KPI implementations scope to `state = post` on `rs.installment`. These two scoping rules are not equivalent. The count overlap was not verified in Phase 0.5 and is flagged as Unknown U2 in `docs/PHASE_0_5_UI_DISCOVERY_FINDINGS.md`.
+
+### 18.4 Property Hierarchy Fields on rs.installment
+
+Each installment carries direct many2one links to all 4 levels of the property hierarchy (denormalized for query efficiency):
+
+| Field | Relation | Record count |
+|-------|----------|-------------|
+| `phase_id` | `rs.structure.phase` | 5 |
+| `building_id` | `rs.structure.building` | 277 |
+| `zone_id` | `rs.structure.zone` | 11 |
+| `unit_id` | `rs.structure.unit` | 1,873 |
+
+These fields enable future drill-down filters (Stage 5) and per-building / per-zone reporting without joining through contract or reservation.
