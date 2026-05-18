@@ -260,6 +260,29 @@
     registerChart('col-kpi6-chart', _kpi6Chart);
   }
 
+  // D2.8 — Data-entry banner auto-hide
+  function shouldShowDataEntryBanner(state) {
+    if (new URLSearchParams(window.location.search).get('show_banner') === '1') return true;
+    var kpi4 = state[5];
+    if (kpi4 && kpi4.mtd.rate_percent === null && kpi4.ytd.rate_percent === null) return true;
+    var kpi6 = state[4];
+    if (kpi6 && kpi6.months) {
+      var nonZero = kpi6.months.filter(function (m) { return m.amount > 0; }).length;
+      if (nonZero < 5) return true;
+    }
+    return false;
+  }
+
+  function updateDataEntryBanner(state) {
+    var banner = document.getElementById('col-data-entry-notice');
+    if (!banner) return;
+    if (shouldShowDataEntryBanner(state)) {
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+  }
+
   function fetchAllKPIs() {
     var t0 = performance.now();
     return Promise.all(KPI_ENDPOINTS.map(function (url) {
@@ -275,6 +298,7 @@
       renderRow2(results);
       renderRow3(results);
       renderRow4(results);
+      updateDataEntryBanner(results);
       return results;
     }).catch(function (err) {
       showErrorBanner();
