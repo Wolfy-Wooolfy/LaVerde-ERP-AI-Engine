@@ -88,6 +88,9 @@ async def test_return_shape_has_all_required_keys(mock_client: MagicMock) -> Non
     expected_keys = {
         "value", "currency", "record_count", "as_of",
         "cache_status", "rpc_duration_ms", "domain",
+        "cheques_in_pipeline", "cheques_record_count",
+        "drill_down_domain", "cheques_drill_down_domain",
+        "data_quality_warning",
     }
     assert set(result.keys()) == expected_keys
 
@@ -189,6 +192,68 @@ async def test_clean_allowed_methods_does_not_raise(mock_client: MagicMock) -> N
     # Baseline: the production ALLOWED_METHODS must never trigger the assertion
     result = await get_late_uncollected(client=mock_client)
     assert result["value"] >= 0.0
+
+
+# ── Test K2-A — cheques_in_pipeline field ────────────────────────────────────
+
+
+async def test_kpi2_response_includes_cheques_in_pipeline(mock_client: MagicMock) -> None:
+    result = await get_late_uncollected(client=mock_client)
+
+    assert isinstance(result["cheques_in_pipeline"], float)
+    assert result["cheques_in_pipeline"] >= 0
+    assert result["cheques_in_pipeline"] <= result["value"]
+
+
+# ── Test K2-B — drill_down_domain matches Candidate C ────────────────────────
+
+
+async def test_kpi2_response_includes_drill_down_domain_matching_candidate_c(
+    mock_client: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.cache.today_str",
+        return_value="2026-05-19",
+    ):
+        result = await get_late_uncollected(client=mock_client)
+
+    today_str = "2026-05-19"
+    expected_domain = [
+        ("state", "=", "post"),
+        ("payment_state", "in", ["unpaid", "partial"]),
+        ("date", "<", today_str),
+    ]
+    assert result["drill_down_domain"] == expected_domain
+    assert result["drill_down_domain"] == result["domain"]
+
+
+# ── Test K2-C — null Alt B fields ────────────────────────────────────────────
+
+
+async def test_kpi2_cheques_record_count_is_null(mock_client: MagicMock) -> None:
+    result = await get_late_uncollected(client=mock_client)
+
+    assert result["cheques_record_count"] is None
+    assert result["cheques_drill_down_domain"] is None
+
+
+# ── Test K2-D — negative cheques anomaly triggers data_quality_warning ───────
+
+
+async def test_kpi2_negative_cheques_triggers_data_quality_warning() -> None:
+    mock_client = MagicMock()
+    mock_client.execute_kw = AsyncMock(return_value=[{
+        "due_amount": 100_000.0,
+        "__count": 5,
+        "amount": 120_000.0,
+        "paid_amount": 10_000.0,
+        "x_studio_actual_paid_amount": 15_000.0,  # actual > paid = anomaly
+    }])
+
+    result = await get_late_uncollected(client=mock_client)
+
+    assert result["cheques_in_pipeline"] == 0.0
+    assert result["data_quality_warning"] == "negative_cheques"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

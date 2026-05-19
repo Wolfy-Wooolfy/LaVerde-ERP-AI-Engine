@@ -187,12 +187,12 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
         "record_count":              count,
         "cheques_in_pipeline":       cheques_in_pipeline,
         "cheques_record_count":      None,
-        "drill_down_domain":         domain,
+        "drill_down_domain":         list(domain),
         "cheques_drill_down_domain": None,
         "as_of":                     datetime.now(timezone.utc).isoformat(),
         "cache_status":              "fresh",
         "rpc_duration_ms":           rpc_ms,
-        "domain":                    domain,
+        "domain":                    list(domain),
         "data_quality_warning":      data_quality_warning,
     }
 

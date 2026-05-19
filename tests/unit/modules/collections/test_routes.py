@@ -17,7 +17,10 @@ from fastapi.testclient import TestClient
 
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
-from backend.modules.collections.schemas import ExpectedCollectionsForecastResponse
+from backend.modules.collections.schemas import (
+    ExpectedCollectionsForecastResponse,
+    LateUncollectedResponse,
+)
 
 _AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/collections/kpi/late-uncollected"
@@ -26,6 +29,14 @@ _MOCK_DATA = {
     "value": 312_604_879.40,
     "currency": "EGP",
     "record_count": 1971,
+    "cheques_in_pipeline": 1_929_000.0,
+    "cheques_record_count": None,
+    "drill_down_domain": [
+        ["state", "=", "post"],
+        ["payment_state", "in", ["unpaid", "partial"]],
+        ["date", "<", "2026-05-16"],
+    ],
+    "cheques_drill_down_domain": None,
     "as_of": "2026-05-16T10:00:00+00:00",
     "cache_status": "fresh",
     "rpc_duration_ms": 42,
@@ -34,6 +45,7 @@ _MOCK_DATA = {
         ["payment_state", "in", ["unpaid", "partial"]],
         ["date", "<", "2026-05-16"],
     ],
+    "data_quality_warning": None,
 }
 
 
@@ -111,6 +123,57 @@ def test_odoo_unavailable_returns_503_with_error_shape(client: TestClient) -> No
 def test_post_returns_405(client: TestClient) -> None:
     r = client.post(_URL, auth=_AUTH)
     assert r.status_code == 405
+
+
+# ── Test 8e — response_model= is enforced on the success path ────────────────
+
+
+def test_kpi2_endpoint_response_model_validates_success_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_uncollected",
+        new=AsyncMock(return_value=_MOCK_DATA),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 200
+    # Must not raise — confirms response_model= is active on the success path
+    LateUncollectedResponse(**r.json())
+
+
+# ── Test 8f — strict shape includes all 12 keys + cheques constraints ─────────
+
+
+def test_kpi2_endpoint_strict_shape_includes_new_fields(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_uncollected",
+        new=AsyncMock(return_value=_MOCK_DATA),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    expected_keys = {
+        "value", "currency", "record_count", "as_of",
+        "cache_status", "rpc_duration_ms", "domain",
+        "cheques_in_pipeline", "cheques_record_count",
+        "drill_down_domain", "cheques_drill_down_domain",
+        "data_quality_warning",
+    }
+    assert set(body.keys()) == expected_keys
+
+    assert isinstance(body["cheques_in_pipeline"], float)
+    assert body["cheques_in_pipeline"] >= 0
+    assert body["cheques_record_count"] is None
+
+    ddomain = body["drill_down_domain"]
+    assert len(ddomain) == 3
+    assert ddomain[0] == ["state", "=", "post"]
+    assert ddomain[1] == ["payment_state", "in", ["unpaid", "partial"]]
+    assert ddomain[2][0] == "date"
+    assert ddomain[2][1] == "<"
+
+    assert body["cheques_drill_down_domain"] is None
 
 
 # ══════════════════════════════════════════════════════════════════════════════

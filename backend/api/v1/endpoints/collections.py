@@ -17,7 +17,10 @@ from loguru import logger
 
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
-from backend.modules.collections.schemas import ExpectedCollectionsForecastResponse
+from backend.modules.collections.schemas import (
+    ExpectedCollectionsForecastResponse,
+    LateUncollectedResponse,
+)
 from backend.modules.collections.services.kpi_service import (
     get_collection_rate_by_project,
     get_collection_rate_mtd_ytd,
@@ -32,9 +35,16 @@ from backend.modules.collections.services.kpi_service import (
 router = APIRouter(prefix="/collections", tags=["collections"])
 
 
-@router.get("/kpi/late-uncollected", summary="KPI 2 — Late Uncollected receivables")
+@router.get(
+    "/kpi/late-uncollected",
+    summary="KPI 2 — Late Uncollected receivables",
+    response_model=LateUncollectedResponse,
+)
 @limiter.limit("60/minute")
-async def late_uncollected(request: Request) -> JSONResponse:
+async def late_uncollected(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
     try:
         data = await get_late_uncollected()
     except OdooQueryError:
@@ -60,13 +70,9 @@ async def late_uncollected(request: Request) -> JSONResponse:
             },
         )
 
-    return JSONResponse(
-        content=data,
-        headers={
-            "Cache-Control": "private, max-age=60",
-            "X-Cache-Status": str(data.get("cache_status", "fresh")),
-        },
-    )
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
 
 
 @router.get("/kpi/total-portfolio-value", summary="KPI 1 — Total Portfolio Value")
