@@ -1,7 +1,7 @@
 # Module 2 — Collections Dashboard Refactor Specification
 
 > **Status:** Draft — Pending Khaled approval before Stage 1 begins
-> **Version:** 1.0
+> **Version:** 1.1
 > **Date:** 2026-05-18
 > **Author:** Khaled (Product) + Claude Chat (CTO/Architect)
 > **Prerequisite Tags:** `checkpoint-A-D1-complete`, `checkpoint-B-D2-complete`
@@ -10,6 +10,12 @@
 >   - `docs/MODULE_2_BUSINESS_CONTEXT.md`
 >   - `docs/MODULE_2_MVP_DESIGN.md`
 >   - `docs/MODULE_2_IMPLEMENTATION_DECISIONS.md`
+
+---
+
+## Changelog
+- **v1.1 (2026-05-18)** — Applied PATH C from Phase 0.5 findings. KPI 7 cheques annotation removed from frontend cards (backend response unchanged). Section 7.1 layout updated. Sections 4.5, 4.6, 7.1, 7.4, 7.6, 8.2, 8.5 amended. §11 open questions resolved. §16 cross-references added.
+- **v1.0 (2026-05-18)** — Initial draft, approved by Khaled.
 
 ---
 
@@ -51,6 +57,9 @@ The new mental model for the Board:
 1. **KPI 3 (Pending Cheque Exposure) is removed from the UI.** The endpoint stays alive for drill-down use, but it no longer occupies a card on the dashboard.
 2. **KPI 2 (Late Installments) is extended** with a `cheques_in_pipeline` field showing how much of the late amount is dependent on uncashed cheques.
 3. **KPI 7 (Expected Collections Forecast) is added** with 4 time buckets (Month / Quarter / Half / Year), each annotated with its `cheques_in_pipeline` portion.
+
+   > *Amended v1.1: Cheques annotation removed from KPI 7 forecast cards per Phase 0.5 PATH C decision. The `cheques_in_pipeline` field remains in the backend response for future use, but the frontend does not render the amber annotation. Rationale: 2.02% of future unpaid installments carry check records — annotation would show 0 EGP on 3 of 4 cards.*
+
 4. **Frontend is restructured into 4 sections** organized by reading priority:
    - إجمالي المحفظة (Portfolio scale)
    - المخاطرة الحالية (Current risk)
@@ -178,6 +187,8 @@ This means KPI 2 and KPI 7 are **mutually exclusive** by construction — an ins
 
 For each bucket, in addition to the total amount, compute `cheques_in_pipeline` using the canonical formula from §2, scoped to installments in that bucket.
 
+> **Amendment v1.1 (Phase 0.5 PATH C):** The `cheques_in_pipeline` field is preserved in the response shape for forward compatibility but is not rendered on the frontend cards. Frontend code MUST hide the amber annotation when `cheques_in_pipeline == 0`, which will be the case for ~98% of future installments based on the current La Verde cheque attachment workflow (checks attach to installments at posting time, not at receipt).
+
 ### 4.6 Response Shape
 
 ```json
@@ -190,7 +201,7 @@ For each bucket, in addition to the total amount, compute `cheques_in_pipeline` 
     "amount": 48800000.00,
     "record_count": 263,
     "cheques_in_pipeline": 42000000.00,
-    "cheques_record_count": 220,
+    "cheques_record_count": null,
     "period_start": "2026-05-18",
     "period_end": "2026-05-31",
     "drill_down_domain": [
@@ -212,6 +223,8 @@ For each bucket, in addition to the total amount, compute `cheques_in_pipeline` 
   "this_year":    { ... same shape, broader date range ... }
 }
 ```
+
+> **Note (v1.1):** `cheques_in_pipeline` and `cheques_record_count` will typically be 0 / null for forecast buckets. This is correct behavior, not a bug. `cheques_record_count` is returned as `null` (not 0) when Alternative B aggregate formula is used, since the per-installment count is not available via `read_group`. Reference: PHASE_0_5_UI_DISCOVERY_FINDINGS §Objective 1.
 
 ### 4.7 Implementation Pattern
 
@@ -366,19 +379,21 @@ The dashboard is reorganized into 4 visually distinct sections, each with a sect
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│ Section 3 — المتوقع تحصيله / Expected Collections       │
+│ Section 3 — التحصيل المتوقع / Expected Collections      │
 │                                                          │
 │   ┌──────────────┬──────────────┐                       │
 │   │ هذا الشهر   │ هذا الربع   │                       │
 │   │ 48.8M       │ 142.5M      │                       │
-│   │ شيكات: 42M  │ شيكات: 118M │                       │
+│   │ 263 قسط     │ 720 قسط     │                       │
 │   └──────────────┴──────────────┘                       │
 │   ┌──────────────┬──────────────┐                       │
 │   │ النصف       │ هذا العام  │                       │
 │   │ 287.3M      │ 521.7M      │                       │
-│   │ شيكات: 220M │ شيكات: 380M │                       │
+│   │ 1450 قسط    │ 2980 قسط    │                       │
 │   └──────────────┴──────────────┘                       │
 └─────────────────────────────────────────────────────────┘
+
+> **Amendment v1.1:** The amber cheques annotation previously shown on each KPI 7 forecast card is removed per Phase 0.5 PATH C. Each card now displays: bucket label, amount, and record count subtitle. The section header is amended from "المتوقع تحصيله" to "التحصيل المتوقع" per Q5 resolution (2026-05-18). The cheques annotation on KPI 2 (Late) card remains unchanged.
 
 ┌─────────────────────────────────────────────────────────┐
 │ Section 4 — الأداء والاتجاه / Performance & Trend       │
@@ -418,6 +433,8 @@ Each section header is:
 | 4 — Performance | Neutral / no accent | No left border (informational only) |
 
 **Cheques annotation** within sections 2 and 3 uses amber text (`text-amber-700 dark:text-amber-400`) to provide a consistent visual cue across all cheques references, without competing with the primary section color.
+
+> **Amendment v1.1:** Cheques annotation in section 3 (Expected Collections) is REMOVED. The amber color treatment applies only to section 2 (Current Risk / KPI 2) cheques annotation.
 
 ### 7.5 Card Templates
 
@@ -459,11 +476,11 @@ The existing `_kpi_card.html` macro is preserved for any future use but no longe
 │                                     │
 │   263 قسط · حتى ٣١ مايو            │  ← record count + end date
 │                                     │
-│   منها شيكات: 42 مليون              │  ← cheques annotation (amber)
-│                                     │
 │   [hover state]                     │
 └────────────────────────────────────┘
 ```
+
+> **Amendment v1.1:** The "منها شيكات" line is removed from forecast cards. Card content: bucket label, amount (text-3xl, info color), record count + end date subtitle. The cheques annotation remains on the Risk Card (KPI 2) only.
 
 ### 7.7 Responsive Behavior
 
@@ -495,10 +512,12 @@ This matches the spec established during D2 (Khaled's decision in Checkpoint A r
 | KPI 2 main amount | List of late installments (all 1,995) sorted by `due_amount` desc |
 | KPI 2 cheques annotation | List of late installments with `paid_amount > actual_paid` (cheques pending subset) |
 | KPI 7 month/quarter/half/year amount | List of installments due in that bucket sorted by `date` asc |
-| KPI 7 cheques annotation | List of installments due in that bucket with cheques pending |
+| ~~KPI 7 cheques annotation~~ | ~~List of installments due in that bucket with cheques pending~~ |
 | KPI 1 value | Top 50 customers by portfolio value (existing MVP Design §3.4) |
 | Project card (per project) | Per-project breakdown (existing MVP Design §3.4) |
 | Trend chart point | Month-by-month breakdown (existing MVP Design §3.4) |
+
+> *Removed v1.1 — no cheques annotation on KPI 7 cards per PATH C. The KPI 7 cheques annotation drill-down row above is struck through. KPI 7 bucket amounts open the drill-down with no preset filter.*
 
 ### 8.3 Drill-Down List Columns
 
@@ -530,6 +549,8 @@ Each drill-down panel has a filter sidebar/header:
 | Sort field (Due Date / Amount / Due Amount) | All drill-downs |
 
 When a user clicks the "منها شيكات في الـ pipeline" annotation on a card, the drill-down opens with the "Has Pending Cheque" filter pre-applied.
+
+> **Amendment v1.1:** This behavior now applies ONLY to KPI 2's cheques annotation (the only remaining cheques annotation on the dashboard). KPI 7 cards have no cheques annotation; clicking the bucket amount opens the drill-down with no preset filter.
 
 ### 8.6 Backend Drill-Down Endpoints
 
@@ -748,23 +769,24 @@ This refactor is driven by the following decisions made during Session 8 convers
 | R.8 | Tags as rollback points before each stage | Standard practice | `checkpoint-B-D2-complete` is the pre-refactor baseline. Each stage adds a new checkpoint tag. |
 | R.9 | `state` array becomes named object in Stage 3 | CTO recommendation | Index-based access is brittle (changes when KPIs are added/removed). Named access is self-documenting. |
 | R.10 | Drill-downs not cached | CTO design decision | Cardinality explosion from filter combinations; infrequent access; cache staleness more misleading than aggregate staleness. |
+| R.11 | Apply PATH C: remove cheques annotation from KPI 7 forecast cards | Phase 0.5 findings + CTO recommendation, Khaled approval 2026-05-18 | 2.02% of future unpaid installments carry check records. Annotation would show 0 EGP on 3 of 4 cards — visual clutter without information value. Backend response unchanged for forward compatibility. |
 
 ---
 
 ## 11. Open Questions / Pending Khaled Approval
 
-These items need explicit confirmation from Khaled before Stage 1 begins:
+All 8 questions below are now RESOLVED. Resolved per Khaled confirmation 2026-05-18.
 
-| # | Question | Default Answer (if no input) |
-|---|---|---|
-| Q1 | Should bucket boundaries be "calendar" (Jan-Mar = Q1) or "fiscal" (e.g., Jul-Sep = Q1)? | **Calendar** (matches Decision 6.2 YTD assumption) |
-| Q2 | Should `this_year` include only future installments (today → Dec 31) or full year (Jan 1 → Dec 31 including already-collected)? | **Future only** (today → Dec 31) — consistent with the "forward-looking" framing |
-| Q3 | When the user is on May 18, 2026: does `this_quarter` mean Apr 1 → Jun 30 (calendar quarter) or May 18 → Aug 17 (rolling 3 months)? | **Calendar quarter** (Apr 1 → Jun 30) but **filtered to future only** (today → Jun 30) |
-| Q4 | Should the dashboard show "خلال 30 يوم" / "خلال 90 يوم" rolling windows as an alternative or replacement to calendar buckets? | **Calendar buckets only** for now; rolling windows can be considered in a future iteration |
-| Q5 | Are the section headers ("إجمالي المحفظة" / "المخاطرة الحالية" / etc.) the final user-facing strings? | **Yes** unless Khaled requests changes |
-| Q6 | Should KPI 2's cheques annotation include a tooltip showing the percentage (e.g., "14% of late amount")? | **Yes** — adds context without cluttering the card |
-| Q7 | Drill-down sort default — by date asc, due_amount desc, or partner name? | **Due date asc** for KPI 7 buckets; **due_amount desc** for KPI 2 |
-| Q8 | Should the Trend Chart (KPI 6) be re-imagined to align with the new buckets (e.g., show forecast + historical on same chart)? | **No change** in this refactor; reconsider in a future iteration |
+| # | Question | Resolution | Resolved On |
+|---|---|---|---|
+| Q1 | Should bucket boundaries be "calendar" (Jan-Mar = Q1) or "fiscal" (e.g., Jul-Sep = Q1)? | **Calendar** (matches Decision 6.2 YTD assumption). Default adopted. | 2026-05-18 |
+| Q2 | Should `this_year` include only future installments (today → Dec 31) or full year (Jan 1 → Dec 31 including already-collected)? | **Future only** (today → Dec 31) — consistent with the "forward-looking" framing. Default adopted. | 2026-05-18 |
+| Q3 | When the user is on May 18, 2026: does `this_quarter` mean Apr 1 → Jun 30 (calendar quarter) or May 18 → Aug 17 (rolling 3 months)? | **Calendar quarter** (Apr 1 → Jun 30) filtered to future only (today → Jun 30). Default adopted. | 2026-05-18 |
+| Q4 | Should the dashboard show "خلال 30 يوم" / "خلال 90 يوم" rolling windows as an alternative or replacement to calendar buckets? | **Calendar buckets only** for this iteration. Rolling windows deferred to future iteration. Default adopted. | 2026-05-18 |
+| Q5 | Are the section headers ("إجمالي المحفظة" / "المخاطرة الحالية" / etc.) the final user-facing strings? | **Yes**, with one amendment: Section 3 header is "التحصيل المتوقع" (not "المتوقع تحصيله"). All other headers as proposed. Diagram in §7.1 updated accordingly. | 2026-05-18 |
+| Q6 | Should KPI 2's cheques annotation include a tooltip showing the percentage (e.g., "14% of late amount")? | **Yes** — tooltip implemented in Stage 4. Default adopted. | 2026-05-18 |
+| Q7 | Drill-down sort default — by date asc, due_amount desc, or partner name? | **Due date asc** for KPI 7 buckets; **due_amount desc** for KPI 2. Default adopted. | 2026-05-18 |
+| Q8 | Should the Trend Chart (KPI 6) be re-imagined to align with the new buckets (e.g., show forecast + historical on same chart)? | **No change** in this refactor. Trend chart redesign deferred to a future iteration. Default adopted. | 2026-05-18 |
 
 ---
 
@@ -850,6 +872,15 @@ This document is the canonical source for the refactor plan. If any decision cha
 4. Tag the document update in git: `git tag -a refactor-spec-v1.X -m "..."`
 
 After Stage 6 completion, this document is archived (renamed to `MODULE_2_REFACTOR_SPEC_COMPLETED.md`) and a final `MODULE_2_AS_BUILT.md` is created documenting the as-implemented state.
+
+---
+
+## 16. Cross-References to Related Documents
+
+- `docs/PHASE_0_5_UI_DISCOVERY_FINDINGS.md` — source of PATH C decision; documents 2.02% statistic, `has_checks` field semantics, EXEC favorites discrepancy
+- `docs/KPI7_DISCOVERY_FINDINGS.md` — Phase 0 bucket baseline + Phase 0.5 outcomes summary
+- `docs/MODULE_2_BUSINESS_CONTEXT.md` §19 — KPI definition canonical decisions
+- `docs/ODOO_UI_VERIFICATION_GUIDE.md` — practical guide for any manual cross-check against Odoo UI
 
 ---
 
