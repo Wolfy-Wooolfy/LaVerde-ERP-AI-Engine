@@ -8,18 +8,21 @@ GET /api/v1/collections/kpi/pending-check-exposure        — KPI 3: Pending Che
 GET /api/v1/collections/kpi/collection-trend-6m           — KPI 6: 6-Month Collection Trend
 GET /api/v1/collections/kpi/collection-rate               — KPI 4: Collection Rate MTD & YTD
 GET /api/v1/collections/kpi/collection-rate-by-project    — KPI 5b: Collection Rate per Project
+GET /api/v1/collections/kpi/expected-forecast             — KPI 7: Expected Collections Forecast
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 from loguru import logger
 
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
+from backend.modules.collections.schemas import ExpectedCollectionsForecastResponse
 from backend.modules.collections.services.kpi_service import (
     get_collection_rate_by_project,
     get_collection_rate_mtd_ytd,
     get_collection_trend_6m,
+    get_expected_collections_forecast,
     get_late_uncollected,
     get_late_uncollected_by_project,
     get_pending_check_exposure,
@@ -302,3 +305,43 @@ async def collection_rate_by_project(request: Request) -> JSONResponse:
             "X-Cache-Status": str(data.get("cache_status", "fresh")),
         },
     )
+
+
+@router.get(
+    "/kpi/expected-forecast",
+    summary="KPI 7 — Expected Collections Forecast (4 forward-looking calendar buckets)",
+    response_model=ExpectedCollectionsForecastResponse,
+)
+@limiter.limit("60/minute")
+async def expected_collections_forecast(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
+    try:
+        data = await get_expected_collections_forecast()
+    except OdooQueryError:
+        logger.warning("KPI 7 — Odoo query failed", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "odoo_unavailable",
+                    "message": "Odoo is unavailable or the query failed. Try again shortly.",
+                }
+            },
+        )
+    except Exception:
+        logger.error("KPI 7 — unexpected error", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_error",
+                    "message": "An unexpected error occurred.",
+                }
+            },
+        )
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data

@@ -5,6 +5,7 @@ GET /api/v1/collections/kpi/late-uncollected       — KPI 2
 GET /api/v1/collections/kpi/total-portfolio-value  — KPI 1
 GET /api/v1/collections/kpi/pending-check-exposure — KPI 3
 GET /api/v1/collections/kpi/collection-trend-6m    — KPI 6
+GET /api/v1/collections/kpi/expected-forecast      — KPI 7
 
 Uses FastAPI TestClient with service functions patched — no Odoo connection.
 """
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
+from backend.modules.collections.schemas import ExpectedCollectionsForecastResponse
 
 _AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/collections/kpi/late-uncollected"
@@ -478,3 +480,176 @@ def test_kpi6_odoo_unavailable_returns_503(client: TestClient) -> None:
 def test_kpi6_post_returns_405(client: TestClient) -> None:
     r = client.post(_URL_KPI6, auth=_AUTH)
     assert r.status_code == 405
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 7 — Expected Collections Forecast endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_KPI7 = "/api/v1/collections/kpi/expected-forecast"
+
+# Mock data uses 2026-05-19 as today (Cairo) — bucket ends computed from D0.4 baseline.
+# this_quarter == this_half (nesting collapse: Q2/H1 both end Jun 30 in 2026).
+_TODAY_KPI7 = "2026-05-19"
+_BUCKET_PERIOD_ENDS = {
+    "this_month":   "2026-05-31",
+    "this_quarter": "2026-06-30",
+    "this_half":    "2026-06-30",
+    "this_year":    "2026-12-31",
+}
+
+
+def _make_bucket(name: str) -> dict:
+    period_end = _BUCKET_PERIOD_ENDS[name]
+    return {
+        "bucket":                    name,
+        "period_start":              _TODAY_KPI7,
+        "period_end":                period_end,
+        "amount":                    22_719_871.00,
+        "record_count":              133,
+        "due_amount":                22_693_463.00,
+        "cheques_in_pipeline":       0.0,
+        "cheques_record_count":      None,
+        "drill_down_domain": [
+            ["state", "=", "post"],
+            ["payment_state", "in", ["unpaid", "partial"]],
+            ["date", ">=", _TODAY_KPI7],
+            ["date", "<=", period_end],
+        ],
+        "cheques_drill_down_domain": None,
+    }
+
+
+_MOCK_DATA_KPI7 = {
+    "buckets": {name: _make_bucket(name) for name in
+                ("this_month", "this_quarter", "this_half", "this_year")},
+    "currency":             "EGP",
+    "today_cairo":          _TODAY_KPI7,
+    "cache_status":         "fresh",
+    "rpc_duration_ms":      84,
+    "data_quality_warning": None,
+}
+
+_BUCKET_FIELDS = (
+    "bucket", "period_start", "period_end", "amount", "record_count",
+    "due_amount", "cheques_in_pipeline", "cheques_record_count",
+    "drill_down_domain", "cheques_drill_down_domain",
+)
+
+
+# ── Test K7-8a — 200 + strict full-shape verification ────────────────────────
+
+
+def test_kpi7_get_returns_200_and_strict_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI7),
+    ):
+        r = client.get(_URL_KPI7, auth=_AUTH)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    # Top-level keys
+    for key in ("buckets", "currency", "today_cairo", "cache_status",
+                "rpc_duration_ms", "data_quality_warning"):
+        assert key in body, f"Response missing top-level key: {key!r}"
+
+    # Scalar top-level values
+    assert body["currency"] == "EGP"
+    assert body["today_cairo"] == _TODAY_KPI7
+    assert body["cache_status"] in {"fresh", "cached"}
+
+    # All 4 bucket keys present
+    buckets = body["buckets"]
+    for bname in ("this_month", "this_quarter", "this_half", "this_year"):
+        assert bname in buckets, f"Missing bucket key: {bname!r}"
+
+    # Per-bucket: all 10 fields, null fields, and period_end matches Cairo boundary
+    for bname, expected_end in _BUCKET_PERIOD_ENDS.items():
+        b = buckets[bname]
+        for field in _BUCKET_FIELDS:
+            assert field in b, f"Bucket {bname!r} missing field: {field!r}"
+        assert b["cheques_record_count"] is None, \
+            f"cheques_record_count must be null (Alternative B limitation) in bucket {bname!r}"
+        assert b["cheques_drill_down_domain"] is None, \
+            f"cheques_drill_down_domain must be null (Alternative B) in bucket {bname!r}"
+        assert b["period_end"] == expected_end, \
+            f"period_end mismatch for {bname!r}: expected {expected_end!r}, got {b['period_end']!r}"
+        assert b["period_start"] == _TODAY_KPI7, \
+            f"period_start must equal today_cairo for bucket {bname!r}"
+
+
+# ── Test K7-8b — Response headers ────────────────────────────────────────────
+
+
+def test_kpi7_response_has_cache_control_and_x_cache_status(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI7),
+    ):
+        r = client.get(_URL_KPI7, auth=_AUTH)
+
+    assert r.status_code == 200
+    assert "private"    in r.headers.get("cache-control", "")
+    assert "max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_kpi7_x_cache_status_reflects_cached_when_served_from_cache(
+    client: TestClient,
+) -> None:
+    cached_data = {**_MOCK_DATA_KPI7, "cache_status": "cached", "rpc_duration_ms": 0}
+    with patch(
+        "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
+        new=AsyncMock(return_value=cached_data),
+    ):
+        r = client.get(_URL_KPI7, auth=_AUTH)
+
+    assert r.headers.get("x-cache-status") == "cached"
+
+
+# ── Test K7-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_kpi7_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_KPI7, auth=_AUTH)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+
+
+# ── Test K7-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_kpi7_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_KPI7, auth=_AUTH)
+    assert r.status_code == 405
+
+
+# ── Test K7-8e — response_model= is enforced on the success path ─────────────
+
+
+def test_kpi7_response_model_validates_success_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI7),
+    ):
+        r = client.get(_URL_KPI7, auth=_AUTH)
+
+    assert r.status_code == 200
+    # If response_model= is active on the success path, the dict return is
+    # validated by FastAPI and must parse as ExpectedCollectionsForecastResponse
+    # without raising. A JSONResponse return would bypass this.
+    validated = ExpectedCollectionsForecastResponse(**r.json())
+    assert validated.currency == "EGP"
+    assert set(validated.buckets.keys()) == {
+        "this_month", "this_quarter", "this_half", "this_year"
+    }
