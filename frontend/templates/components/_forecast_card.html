@@ -1,0 +1,31 @@
+{# _forecast_card.html
+   Usage: {% from "components/_forecast_card.html" import forecast_card with context %}
+          {{ forecast_card('this_month') }}
+          {{ forecast_card('this_quarter') }}
+          {{ forecast_card('this_half') }}
+          {{ forecast_card('this_year') }}
+   Section 3 — Expected Collections
+   KPI 7: Expected Collections Forecast, primary/info accent cards
+   bucket_key: this_month | this_quarter | this_half | this_year
+   Element IDs: col-forecast-{bucket_key}-container, -amount, -subtitle
+   PATH C: no cheques annotation rendered (Decision 9.1)
+#}
+
+{% macro forecast_card(bucket_key) %}
+<div id="col-forecast-{{ bucket_key }}-container"
+     class="kpi-card border-l-4 border-primary-500 hover:border-l-[6px]
+            focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+     data-drilldown-target="forecast-{{ bucket_key }}"
+     tabindex="0"
+     aria-label="{{ _t(bucket_key) }}: —">
+  <p class="text-xs font-semibold uppercase tracking-widest text-neutral-500 dark:text-neutral-400 mb-4">
+    {{ _t(bucket_key) }}
+  </p>
+  <p id="col-forecast-{{ bucket_key }}-amount"
+     class="text-3xl font-bold tabular text-primary-700 dark:text-primary-400 mb-3
+            opacity-0 transition-opacity duration-200"
+     title="">—</p>
+  <p id="col-forecast-{{ bucket_key }}-subtitle"
+     class="text-sm text-neutral-500 dark:text-neutral-400 opacity-0 transition-opacity duration-200">—</p>
+</div>
+{% endmacro %}

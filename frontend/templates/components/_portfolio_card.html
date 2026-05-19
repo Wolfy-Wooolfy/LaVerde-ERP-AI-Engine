@@ -1,0 +1,26 @@
+{# _portfolio_card.html
+   Usage: {% from "components/_portfolio_card.html" import portfolio_card with context %}
+          {{ portfolio_card() }}
+   Section 1 — Portfolio Scale
+   KPI 1: Total Portfolio Value, emerald accent hero card
+   Element IDs: col-kpi1-container, col-kpi1-value, col-kpi1-subtitle
+#}
+
+{% macro portfolio_card() %}
+<div id="col-kpi1-container"
+     class="kpi-card border-l-4 border-emerald-500 hover:border-l-[6px]
+            focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+     data-drilldown-target="kpi1"
+     tabindex="0"
+     aria-label="{{ _t('Total Portfolio Value') }}: —">
+  <p class="text-xs font-semibold uppercase tracking-widest text-neutral-500 dark:text-neutral-400 mb-4">
+    {{ _t("Total Portfolio Value") }}
+  </p>
+  <p id="col-kpi1-value"
+     class="text-5xl md:text-6xl font-bold tabular text-emerald-700 dark:text-emerald-400 mb-3
+            opacity-0 transition-opacity duration-200"
+     title="">—</p>
+  <p id="col-kpi1-subtitle"
+     class="text-sm text-neutral-500 dark:text-neutral-400 opacity-0 transition-opacity duration-200">—</p>
+</div>
+{% endmacro %}
