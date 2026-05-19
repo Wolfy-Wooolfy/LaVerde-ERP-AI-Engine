@@ -1107,3 +1107,249 @@ _Pending. Run `python scripts/verify_kpi5b_live.py` against the running backend
 - Board launch deferred per Decision 1.3 until historical data entry is complete.
 
 ---
+
+## Session 9 — 2026-05-19 — KPI 7 Backend (Expected Collections Forecast)
+
+**Scope:** D0 (Phase 0 + Phase 0.5 discovery, completed in prior sessions),
+D1 (service function + schemas), D2 (endpoint), D3 (verification script),
+D4 (unit tests), D5 (this decisions entry).
+
+---
+
+### Decision 9.1 — Cheques formula: Alternative B (read_group net, null count)
+
+**Status:** Approved (Phase 0 discovery finding U1)
+
+**Approach:**
+```python
+cheques_in_pipeline = max(SUM(paid_amount) - SUM(x_studio_actual_paid_amount), 0.0)
+```
+
+via a single `read_group` RPC per bucket (fields `["paid_amount", "x_studio_actual_paid_amount"]`).
+
+**Why Alternative B, not Alternative A (Python-side filter + search_read):**
+Alternative A would allow exact `cheques_record_count` (per-installment count of
+records where `paid_amount > x_studio_actual_paid_amount`), but requires fetching
+full record sets and Python-side filtering. This does not scale for the
+`this_year` bucket (1,934+ records). Alternative B uses one extra `read_group`
+RPC per bucket, matching KPI 3's portfolio-wide formula (Decision 4.5).
+
+**Consequence:** `cheques_record_count` is returned as `null` in all KPI 7
+bucket responses. `cheques_drill_down_domain` is also `null` (field-to-field
+Odoo domain comparison is broken for Float fields — raises `ValueError`
+as confirmed in Phase 0 discovery D0.2/U1).
+
+**PATH C (Phase 0.5):** The backend keeps `cheques_in_pipeline` in the response
+(Alternative B formula, value ≈ 0 for near-term buckets). The Stage 4 frontend
+suppresses the amber annotation when `cheques_in_pipeline == 0` (per spec §4.4).
+Only `this_year` bucket may show non-zero cheques (643,000 EGP observed in Phase 0).
+
+---
+
+### Decision 9.2 — Domain date format: plain ISO strings, no UTC conversion
+
+**Status:** Approved (Phase 0 discovery finding D0.3)
+
+`rs.installment.date` is a plain `date` field (type confirmed via `fields_get`).
+All domain clauses use plain `YYYY-MM-DD` strings:
+```python
+("date", ">=", "2026-05-19")   # today_cairo ISO
+("date", "<=", "2026-05-31")   # bucket_end ISO
+```
+
+**Why:** UTC conversion (Decision 5.9 pattern) applies only to `datetime` fields.
+Applying UTC offsets to a `date` field would shift the boundary by 0 or 1 day
+depending on DST, producing silently wrong results. `ZoneInfo("Africa/Cairo")`
+is used exclusively to compute "today" — not to convert domain values.
+
+**Contrast with KPI 6:** KPI 6 (Decision 5.9) uses UTC-shifted datetime strings
+because `rs.account.payment.installment.date` is a `datetime` field (UTC-stored).
+
+---
+
+### Decision 9.3 — Cache key uses Cairo-local date, not UTC date
+
+**Status:** Approved
+
+Cache key format: `kpi:expected_forecast:YYYY-MM-DD` where the date is
+`datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()`.
+
+**Why Cairo, not UTC:** The cache invalidates at Cairo midnight (the natural
+day boundary for La Verde operations). Using UTC midnight would produce a stale
+cache during the window 22:00–24:00 UTC (Egypt winter, UTC+2) or 21:00–24:00
+UTC (Egypt summer, UTC+3). This is the same rationale as for other daily-keyed
+KPIs — consistency with the Cairo business day.
+
+**Contrast with KPI 2 / KPI 1:** Those KPIs use `_cache.make_key()` which
+internally calls `today_str()` (UTC date). KPI 7 constructs its cache key
+manually to use the Cairo date. A future refactor may standardize this
+(Decision 3.5 — deferred).
+
+---
+
+### Decision 9.4 — RPC budget: 8 per uncached call; TTL 60 seconds
+
+**Status:** Approved
+
+8 RPCs = 2 `read_group` calls per bucket × 4 buckets:
+- RPC 1: fields `["amount", "due_amount"]` → bucket total + record count
+- RPC 2: fields `["paid_amount", "x_studio_actual_paid_amount"]` → cheques net
+
+TTL is 60 seconds (consistent with KPI 2, KPI 1, KPI 3, KPI 4, KPI 5b).
+KPI 6 uses 3600s (hourly trend data); KPI 7 uses 60s because forward-looking
+installment data can change intra-session (new postings, partial payments).
+
+---
+
+### Decision 9.5 — KPI 7 endpoint uses response_model= (PATH Y)
+
+**Status:** Approved (Commit 2 implementation decision)
+
+`GET /api/v1/collections/kpi/expected-forecast` is decorated with:
+```python
+response_model=ExpectedCollectionsForecastResponse
+```
+
+This makes KPI 7 the first Collections endpoint to use `response_model=`,
+joining the wider project convention (5 other modules, 8 endpoints already use it —
+confirmed via grep in Commit 2 pre-approval review).
+
+**Implementation pattern (PATH P1):** The endpoint returns `dict` on the success
+path (so FastAPI's `response_model=` validates and serializes the response via
+Pydantic) and `JSONResponse` on error paths (preserving the
+`{"error": {"code": ..., "message": ...}}` shape expected by `api.js`).
+Response headers (`Cache-Control`, `X-Cache-Status`) are injected via the
+`response: Response` parameter rather than via `JSONResponse(..., headers=...)`.
+
+**Why dict return for success:** Returning `JSONResponse` directly bypasses
+`response_model=` validation at runtime, making the decorator documentation-only.
+Returning `dict` causes FastAPI to run the full Pydantic validation + serialization
+pipeline, which is the intent of Decision 9.5.
+
+---
+
+### Decision 9.6 — Tech debt: 6 existing collections endpoints lack response_model=
+
+**Status:** Noted as tech debt; deferred to a future cleanup session
+
+The 6 existing collections endpoints (`/kpi/late-uncollected`, `/kpi/total-portfolio-value`,
+`/kpi/pending-check-exposure`, `/kpi/collection-trend-6m`, `/kpi/collection-rate`,
+`/kpi/collection-rate-by-project`) all return `JSONResponse(content=data)` with no
+`response_model=` decorator. As a result, their response shapes are only implicitly
+documented (via unit tests and the service function's return dict).
+
+KPI 7 sets the correct pattern. A future cleanup session should:
+1. Define Pydantic models for each of the 6 existing KPI responses in `schemas.py`
+2. Refactor each endpoint to use PATH P1 (dict return on success, JSONResponse on errors)
+3. Add `test_kpiN_response_model_validates_success_shape` tests for each
+
+This is explicitly deferred — no scope expansion in the current session (Constraint C9).
+
+---
+
+### Decision 9.8 — Dual-return endpoint pattern for KPI 7
+
+**Status:** Implemented in Commit 2 (`7a5be0e`)
+
+**Choice:** The KPI 7 endpoint returns `dict` on the success path (validated by
+`response_model=ExpectedCollectionsForecastResponse`) and `JSONResponse` on error
+paths (preserving the `{"error": {"code": ..., "message": ...}}` shape that the
+existing 6 endpoints use and that the frontend `api.js` reads via
+`data?.error?.message`).
+
+**Rationale:** `response_model=` validation only runs when the endpoint returns
+`dict` or a Pydantic model — it is skipped when the endpoint returns a `Response`
+object directly (FastAPI behavior). To get both runtime schema enforcement AND
+frontend-compatible error responses, the dual-return pattern is required.
+
+The pattern:
+```python
+async def expected_collections_forecast(
+    request: Request,
+    response: Response,         # injected for header injection on success path
+) -> dict | JSONResponse:
+    try:
+        data = await get_expected_collections_forecast()
+    except OdooQueryError:
+        return JSONResponse(status_code=503, content={"error": {...}})
+    except Exception:
+        return JSONResponse(status_code=500, content={"error": {...}})
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data   # ← response_model= validates + serializes this path
+```
+
+**Alternative considered:** `HTTPException`-based error handling with FastAPI's
+default `{"detail": ...}` shape. Rejected because `api.js` reads
+`data?.error?.message` — switching to `.detail` would require a frontend change
+out of scope for Stage 1.
+
+**Verification:** `test_kpi7_response_model_validates_success_shape` in
+`test_routes.py` confirms `response_model=` is active on the success path
+(`ExpectedCollectionsForecastResponse(**r.json())` must not raise).
+`test_kpi7_odoo_unavailable_returns_503` confirms the error path preserves the
+existing `{"error": {"code": ...}}` shape.
+
+**Source:** PATH P1 decision reached during Commit 2 pre-approval review
+(2026-05-19). Grep of `api.js` confirmed `data?.error?.message` pattern; grep
+of existing test_routes.py confirmed `body["error"]["code"] == "odoo_unavailable"`
+in all 5 existing 503 tests.
+
+---
+
+### Decision 9.7 — Parameter naming: `odoo_client` vs `client` inconsistency
+
+**Status:** Noted; deferred to future standardization
+
+`get_expected_collections_forecast(odoo_client: Optional[OdooClient] = None)` uses
+`odoo_client` while all 6 existing KPI service functions use `client`. The naming
+is cosmetic and does not affect behavior. A future refactor session should standardize
+the parameter name across all 7 KPI service functions (recommended: `client` for
+brevity, matching the majority pattern).
+
+---
+
+### KPI 7 Implementation Summary
+
+| Aspect | Detail |
+|---|---|
+| Endpoint | `GET /api/v1/collections/kpi/expected-forecast` |
+| Service function | `get_expected_collections_forecast()` in `kpi_service.py` |
+| Pydantic schemas | `ForecastBucket`, `ExpectedCollectionsForecastResponse` in `schemas.py` |
+| Buckets | 4 nested forward-looking calendar buckets: this_month ⊆ this_quarter ⊆ this_half ⊆ this_year |
+| Scoping | `state='post'`, `payment_state IN ['unpaid','partial']` (KD-1 canonical) |
+| Domain date format | Plain ISO strings — no UTC conversion (D0.3: date field, not datetime) |
+| Cheques formula | Alternative B: `max(SUM(paid_amount) - SUM(x_studio_actual_paid_amount), 0)` |
+| `cheques_record_count` | `null` (Alternative B limitation) |
+| `cheques_drill_down_domain` | `null` (field-to-field comparison broken for Float fields — D0.2/U1) |
+| RPCs per call | 8 `read_group` calls (2 per bucket × 4 buckets) |
+| Cache key | `kpi:expected_forecast:{YYYY-MM-DD}` using Cairo-local date |
+| Cache TTL | 60 seconds |
+| `response_model=` | `ExpectedCollectionsForecastResponse` (PATH Y / PATH P1 — Decision 9.5) |
+| Unit tests | 13 tests (K7-1 through K7-13), all passing |
+| Endpoint tests | 6 tests (K7-8a through K7-8e), all passing |
+| Verification | `scripts/verify_kpi7_live.py` — pending live run |
+| Discovery | Phase 0: `scripts/discover_kpi7.py`; Phase 0.5: `scripts/discover_phase_0_5_ui_artifacts.py` |
+
+---
+
+### Verification Result — Session 9 KPI 7 Close
+
+**Date:** 2026-05-19
+
+**Checkpoint 1 (D0 / Phase 0 discovery cross-check — manual Odoo UI, 2026-05-18):**
+
+| Bucket | Records | Amount EGP | Cheques EGP |
+|---|---|---|---|
+| `this_month` | 133 | 22,719,871.00 | 0.00 |
+| `this_quarter` | 355 | 55,527,209.00 | 0.00 |
+| `this_half` | 355 | 55,527,209.00 | 0.00 |
+| `this_year` | 1,934 | 337,946,411.00 | 643,000.00 |
+
+Q2/H1 nesting collapse confirmed (May 2026: quarter end = half end = 2026-06-30).
+
+**Checkpoint 2 (D3 verify script — live endpoint):**
+_Pending. Run `python scripts/verify_kpi7_live.py` against the running backend
+(after Decision 6.4 clean restart) and paste output for final Stage 1 sign-off._
+
+---
