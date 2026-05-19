@@ -1821,3 +1821,55 @@ Checkpoint tag target:
   rendering work begins.
 - **Applies to:** All Stage 4, 5, 6 prompts, and any
   subsequent module's frontend work.
+
+### Decision 11.18 — Duplicate KPI fetches when DevTools open (pre-existing D2.9 defect, deferred to Stage 4)
+
+- **Status:** Discovered during Stage 3 V16 visual check 2026-05-19;
+  classified PRE-EXISTING; fix deferred to Stage 4 (Premium Visual Polish)
+- **Symptom:** When the Collections dashboard is open with DevTools
+  active, the Network panel shows the 7 KPI endpoints being fetched
+  2x to N× per session rather than once at load + every 60s. Console
+  shows multiple `[Collections] Fetched 7 KPIs` log lines at intervals
+  shorter than the designed 60s auto-refresh.
+- **Root cause (two compounding patterns):**
+  1. `startAutoRefresh()` in `frontend/static/js/collections.js`
+     line 397 has no guard against creating a second interval. Every
+     call stacks a new `setInterval` on top of any existing one.
+  2. The `visibilitychange` restore branch (line 412-418) calls
+     `fetchAllKPIs().then(startAutoRefresh)` without first calling
+     `stopAutoRefresh()`. Opening or closing DevTools triggers a
+     visibilitychange (hidden→visible transition), which causes a
+     new interval to stack on top of the initial-load interval.
+  The `collectionsRefresh()` function (lines 427-430) already implements
+  the correct pattern (`stopAutoRefresh()` before
+  `fetchAllKPIs().then(startAutoRefresh)`); the visibilitychange handler
+  simply missed the same discipline.
+- **Classification — PRE-EXISTING:** `git blame` confirms both root-cause
+  regions originate in commit `729f6822` (Session 8, D2.9 auto-refresh
+  implementation, 2026-05-18). No Stage 3 commit (Commits 1-4 + 4.5)
+  touched these lines. The defect was always present; it was simply
+  not observed until Stage 3 V16 because earlier verification sessions
+  did not specifically audit the Network panel fetch count.
+- **Stage 3 tag legitimacy:** Stage 3 introduced zero regressions in
+  this region. The 4-section layout, state refactor, KPI 3 removal,
+  and KPI 7 fetch wiring (the actual Stage 3 scope) are unaffected.
+  V1-V16 pass with the stated acceptance criteria. The checkpoint
+  tag is applied today; this decision documents the latent defect
+  for the Stage 4 fix session.
+- **Remediation plan (Stage 4 scope):** Option 3 from V16 diagnostic —
+  apply both fixes together:
+  - `startAutoRefresh()`: add `if (_autoRefreshInterval) return;` as
+    the first line to prevent interval stacking under any caller
+  - `visibilitychange` restore branch: add `stopAutoRefresh();`
+    before `fetchAllKPIs().then(startAutoRefresh)` to mirror the
+    correct pattern from `collectionsRefresh()`
+- **Operational note:** Under normal end-user conditions (DevTools
+  closed, browser not minimized/restored frequently), the defect is
+  not visible — the single initial-load interval runs as designed.
+  The defect surfaces only when DevTools is opened or the tab loses
+  and regains focus. Production exposure is low until the Board
+  begins routine dashboard use.
+- **Reference:** V16 diagnostic report 2026-05-19, conducted as a
+  read-only investigation per the diagnostic-first protocol. Full
+  report transcript preserved in the Claude Chat session for this
+  closure cycle.

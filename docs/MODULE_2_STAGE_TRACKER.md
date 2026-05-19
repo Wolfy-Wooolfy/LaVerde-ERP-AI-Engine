@@ -11,7 +11,7 @@ Module 2. Update at the close of every stage.
 |---|---|---|---|---|---|
 | 1 — KPI 7 backend | ✅ Closed | `checkpoint-C-stage1-kpi7-backend-complete` | Session 9 | 4 | Expected Collections forecast endpoint |
 | 2 — KPI 2 cheques extension | ✅ Closed | `checkpoint-C-stage2-kpi2-extended` | Session 10 (10.1-10.9) | 5 | KPI 2 backend extended (PATH C) |
-| 3 — Frontend Restructure | 🔄 In closure | (pending V7-V16 sign-off) | Session 11 (11.1-11.17) | 5 + 1 fix | 4-section layout, state refactor |
+| 3 — Frontend Restructure | ✅ Closed | `checkpoint-D-stage3-frontend-restructure-complete` | Session 11 (11.1-11.18) | 5 + 1 fix + 1 doc | 4-section layout, state refactor |
 | 2.5 — KPI 2 redefinition | ⏳ Planned | — | (Session 12) | TBD ~5 | KPI 2 formula → actual_paid_amount |
 | 4 — Premium Visual Polish | ⏳ Planned | — | (Session 13) | TBD | "From the future" tier UX |
 | 5 — Drill-down Backend | ⏳ Planned | — | (Session 14) | TBD | Drill-down endpoints + KPI 7 cheques count |
@@ -46,7 +46,7 @@ Module 2. Update at the close of every stage.
 | `checkpoint-B-D2-complete` | Module 2 Phase 5 D2 close | (historical) |
 | `checkpoint-C-stage1-kpi7-backend-complete` | Stage 1 close | 2026-05-17 |
 | `checkpoint-C-stage2-kpi2-extended` | Stage 2 close | 2026-05-19 |
-| `checkpoint-D-stage3-frontend-restructure-complete` | Stage 3 close | 2026-05-19 (pending V7-V16 sign-off) |
+| `checkpoint-D-stage3-frontend-restructure-complete` | Stage 3 close | 2026-05-19 |
 
 ## Maintenance instructions
 
