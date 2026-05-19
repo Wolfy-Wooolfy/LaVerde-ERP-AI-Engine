@@ -1,6 +1,7 @@
 {% extends "base.html" %}
-{% from "components/_kpi_card.html" import kpi_card %}
-{% from "components/_skeleton.html" import kpi_hero_skeleton, kpi_skeleton, kpi_project_skeleton, chart_skeleton %}
+{% from "components/_portfolio_card.html" import portfolio_card with context %}
+{% from "components/_risk_card.html" import risk_card with context %}
+{% from "components/_forecast_card.html" import forecast_card with context %}
 {% from "components/_project_card.html" import project_card with context %}
 {% from "components/_chart_container.html" import chart_container %}
 
@@ -52,77 +53,54 @@
   <span>{{ _t("Data entry in progress") }}</span>
 </div>
 
-{# ── Row 1 — Hero KPI: Late Uncollected (KPI 2) ──────────────────────────── #}
-<div class="mb-4" id="col-kpi2-container">
-  <div class="kpi-card border-l-4 border-danger-500 hover:border-l-[6px] focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-       data-drilldown-target="kpi2"
-       tabindex="0"
-       aria-label="{{ _t('Late Uncollected') }}: —">
-    <p class="text-xs font-semibold uppercase tracking-widest text-neutral-500 dark:text-neutral-400 mb-4">
-      {{ _t("Late Uncollected") }}
-    </p>
-    <p id="col-kpi2-value"
-       class="text-5xl md:text-6xl font-bold tabular text-danger-700 dark:text-danger-400 mb-3 opacity-0 transition-opacity duration-200"
-       title="">
-      —
-    </p>
-    <p id="col-kpi2-subtitle"
-       class="text-sm text-neutral-500 dark:text-neutral-400 opacity-0 transition-opacity duration-200">
-      <span id="col-kpi2-records">—</span>
-      {{ _t("records") }}
-      &middot;
-      {{ _t("as of") }}
-      <span id="col-kpi2-as-of">—</span>
-    </p>
+{# ── Section 1 — Portfolio Scale ─────────────────────────────────────────── #}
+<section>
+  <h2 class="text-xs font-semibold uppercase tracking-wider
+             text-neutral-500 dark:text-neutral-400
+             mt-8 mb-3 text-start">
+    {{ _t("Portfolio Scale") }}
+  </h2>
+  {{ portfolio_card() }}
+</section>
+
+{# ── Section 2 — Current Risk ────────────────────────────────────────────── #}
+<section>
+  <h2 class="text-xs font-semibold uppercase tracking-wider
+             text-neutral-500 dark:text-neutral-400
+             mt-8 mb-3 text-start">
+    {{ _t("Current Risk") }}
+  </h2>
+  {{ risk_card() }}
+</section>
+
+{# ── Section 3 — Expected Collections (KPI 7) ────────────────────────────── #}
+<section>
+  <h2 class="text-xs font-semibold uppercase tracking-wider
+             text-neutral-500 dark:text-neutral-400
+             mt-8 mb-3 text-start">
+    {{ _t("Expected Collections") }}
+  </h2>
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    {{ forecast_card('this_month') }}
+    {{ forecast_card('this_quarter') }}
+    {{ forecast_card('this_half') }}
+    {{ forecast_card('this_year') }}
   </div>
-</div>
+</section>
 
-{# ── Row 2 — Secondary trio: KPI 1 · KPI 3 · KPI 4 ──────────────────────── #}
-<div id="row-trio" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+{# ── Section 4 — Performance & Trend ────────────────────────────────────── #}
+<section>
+  <h2 class="text-xs font-semibold uppercase tracking-wider
+             text-neutral-500 dark:text-neutral-400
+             mt-8 mb-3 text-start">
+    {{ _t("Performance & Trend") }}
+  </h2>
 
-  {# KPI 1 — Total Portfolio Value (emerald) #}
-  <div id="col-kpi1-container"
-       class="kpi-card border border-emerald-200 dark:border-emerald-800 group flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-       data-drilldown-target="kpi1"
-       tabindex="0"
-       aria-label="{{ _t('Total Portfolio Value') }}: —">
-    <div class="mb-3">
-      <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
-        {{ _t("Total Portfolio Value") }}
-      </p>
-    </div>
-    <div class="flex items-end justify-between">
-      <p id="col-kpi1-value"
-         class="text-3xl font-bold tabular text-emerald-700 dark:text-emerald-400 opacity-0 transition-opacity duration-200"
-         title="">—</p>
-    </div>
-    <p id="col-kpi1-subtitle"
-       class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
-  </div>
-
-  {# KPI 3 — Pending Check Exposure (warning) #}
-  <div id="col-kpi3-container"
-       class="kpi-card border border-warning-200 dark:border-warning-800 group flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-       data-drilldown-target="kpi3"
-       tabindex="0"
-       aria-label="{{ _t('Pending Check Exposure') }}: —">
-    <div class="mb-3">
-      <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
-        {{ _t("Pending Check Exposure") }}
-      </p>
-    </div>
-    <div class="flex items-end justify-between">
-      <p id="col-kpi3-value"
-         class="text-3xl font-bold tabular text-warning-700 dark:text-warning-400 opacity-0 transition-opacity duration-200"
-         title="">—</p>
-    </div>
-    <p id="col-kpi3-subtitle"
-       class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
-  </div>
-
-  {# KPI 4 — Collection Rate MTD/YTD (default, two-stat custom layout) #}
+  {# KPI 4 — Collection Rate MTD/YTD (full-width row 1) #}
   <div id="col-kpi4-container"
-       class="kpi-card border border-neutral-200 dark:border-neutral-700 group flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+       class="kpi-card border border-neutral-200 dark:border-neutral-700
+              group flex flex-col overflow-hidden
+              focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
        data-drilldown-target="kpi4"
        tabindex="0"
        aria-label="{{ _t('Collection Rate') }}: — / —">
@@ -148,24 +126,19 @@
        class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
   </div>
 
-</div>
-
-{# ── Row 3 — Top 3 Projects (KPI 5 late + KPI 5b rate) ──────────────────── #}
-<div class="mb-4">
-  <h2 class="text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-3">
-    {{ _t("Top 3 Projects Performance") }}
-  </h2>
-  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-    <div id="col-proj1-container">{{ project_card(1) }}</div>
-    <div id="col-proj2-container">{{ project_card(2) }}</div>
-    <div id="col-proj3-container">{{ project_card(3) }}</div>
+  {# KPI 5a/5b — Per-project performance (row 2, 3-col at sm+) #}
+  <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+    {{ project_card(1) }}
+    {{ project_card(2) }}
+    {{ project_card(3) }}
   </div>
-</div>
 
-{# ── Row 4 — 6-Month Collection Trend (KPI 6) ────────────────────────────── #}
-<div id="col-kpi6-container" class="mb-4">
-  {% call chart_container(_t("6-Month Collection Trend"), "col-kpi6-chart", height="h-64") %}{% endcall %}
-</div>
+  {# KPI 6 — 6-Month Collection Trend (full-width below the grid) #}
+  <div class="mt-4">
+    {% call chart_container(_t("6-Month Collection Trend"), "col-kpi6-chart", height="h-64") %}{% endcall %}
+  </div>
+
+</section>
 
 {# ── Error banner (hidden until an API call fails) ────────────────────────── #}
 <div id="col-error-banner"
@@ -206,16 +179,24 @@ window.COLLECTIONS_STRINGS = {
   month:                 {{ _t("month")                  | tojson }},
   records:               {{ _t("records")                | tojson }},
   installments:          {{ _t("installments")           | tojson }},
-  in_pipeline:           {{ _t("in pipeline")            | tojson }},
   mtd:                   {{ _t("MTD")                    | tojson }},
   ytd:                   {{ _t("YTD")                    | tojson }},
+  as_of:                 {{ _t("as of")                 | tojson }},
   data_entry_in_progress:{{ _t("Data entry in progress") | tojson }},
   no_installments_due:   {{ _t("no_installments_due")   | tojson }},
   total_portfolio:       {{ _t("Total Portfolio Value")  | tojson }},
-  pending_check:         {{ _t("Pending Check Exposure") | tojson }},
   collection_rate:       {{ _t("Collection Rate")        | tojson }},
   late_uncollected:      {{ _t("Late Uncollected")       | tojson }},
   trend_title:           {{ _t("6-Month Collection Trend")| tojson }},
+  portfolio_scale:       {{ _t("Portfolio Scale")        | tojson }},
+  current_risk:          {{ _t("Current Risk")           | tojson }},
+  expected_collections:  {{ _t("Expected Collections")   | tojson }},
+  performance_trend:     {{ _t("Performance & Trend")    | tojson }},
+  this_month:            {{ _t("this_month")             | tojson }},
+  this_quarter:          {{ _t("this_quarter")           | tojson }},
+  this_half:             {{ _t("this_half")              | tojson }},
+  this_year:             {{ _t("this_year")              | tojson }},
+  until:                 {{ _t("until")                  | tojson }},
   project_names: {
     "New Capital": {{ _t("New Capital") | tojson }},
     "Cassette":    {{ _t("Cassette")    | tojson }},
