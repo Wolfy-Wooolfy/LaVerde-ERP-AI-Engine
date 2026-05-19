@@ -6,6 +6,7 @@ Live verification is the job of scripts/verify_kpi2_live.py.
 """
 
 import re
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
@@ -17,9 +18,11 @@ from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX_KPI1,
     _CACHE_KEY_PREFIX_KPI4,
     _CACHE_KEY_PREFIX_KPI6,
+    _CACHE_KEY_PREFIX_KPI7,
     _PAYMENT_HEADER_MODEL,
     get_collection_rate_mtd_ytd,
     get_collection_trend_6m,
+    get_expected_collections_forecast,
     get_late_uncollected,
     get_pending_check_exposure,
     get_total_portfolio_value,
@@ -2130,3 +2133,346 @@ async def test_kpi5b_project_names_are_clean_without_project_prefix(
             assert proj["project_name"] in {"New Capital", "Cassette", "La puerta"}, (
                 f"unexpected project_name: {proj['project_name']!r}"
             )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 7 — Expected Collections Forecast (get_expected_collections_forecast)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Default per-bucket 5-tuple: (amount, count, due_amount, cheques_clamped, cheques_raw)
+_RPC_TUPLE_KPI7 = (22_719_871.0, 133, 22_693_463.0, 0.0, 0.0)
+
+# RPC 1 returns amount+due_amount aggregate; RPC 2 returns cheque fields.
+# 8 responses total: 2 per bucket × 4 buckets.
+_KPI7_RPC1 = [{"amount": 22_719_871.0, "due_amount": 22_693_463.0, "__count": 133}]
+_KPI7_RPC2 = [{"paid_amount": 26_408.0, "x_studio_actual_paid_amount": 26_408.0}]
+
+
+@pytest.fixture
+def mock_client_kpi7() -> MagicMock:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(side_effect=[
+        _KPI7_RPC1, _KPI7_RPC2,   # this_month
+        _KPI7_RPC1, _KPI7_RPC2,   # this_quarter
+        _KPI7_RPC1, _KPI7_RPC2,   # this_half
+        _KPI7_RPC1, _KPI7_RPC2,   # this_year
+    ])
+    return client
+
+
+# ── Test K7-1 — Returns all four buckets ─────────────────────────────────────
+
+
+async def test_kpi7_returns_all_four_buckets(mock_client_kpi7: MagicMock) -> None:
+    with patch(
+        "backend.modules.collections.services.kpi_service._fetch_bucket",
+        AsyncMock(return_value=_RPC_TUPLE_KPI7),
+    ):
+        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert "buckets" in result
+    assert len(result["buckets"]) == 4
+
+
+# ── Test K7-2 — Bucket keys are the canonical 4 names ────────────────────────
+
+
+async def test_kpi7_bucket_keys_are_correct(mock_client_kpi7: MagicMock) -> None:
+    with patch(
+        "backend.modules.collections.services.kpi_service._fetch_bucket",
+        AsyncMock(return_value=_RPC_TUPLE_KPI7),
+    ):
+        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert set(result["buckets"]) == {
+        "this_month", "this_quarter", "this_half", "this_year"
+    }
+
+
+# ── Test K7-3 — Nesting invariant: month ≤ quarter ≤ half ≤ year ─────────────
+
+
+async def test_kpi7_nesting_invariant_holds(mock_client_kpi7: MagicMock) -> None:
+    # Strictly increasing amounts so any bucket-swapping plumbing bug will fail.
+    # this_year has non-zero cheques (50.0 EGP) matching Phase 0 baseline shape
+    # (D0.6: near-term buckets show 0 EGP, only the year bucket has cheques).
+    # Tuple: (amount, count, due_amount, cheques_clamped, cheques_raw)
+    tuples = [
+        (100.0,    10,  95.0,   0.0,  0.0),  # this_month
+        (350.0,    35, 340.0,   0.0,  0.0),  # this_quarter
+        (350.0,    35, 340.0,   0.0,  0.0),  # this_half (collapses with quarter in Q2)
+        (1_000.0, 100, 980.0,  50.0, 50.0),  # this_year: 50.0 EGP cheques in pipeline
+    ]
+    with patch(
+        "backend.modules.collections.services.kpi_service._fetch_bucket",
+        AsyncMock(side_effect=tuples),
+    ):
+        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    b = result["buckets"]
+
+    # Amount nests
+    assert b["this_month"]["amount"]   <= b["this_quarter"]["amount"]
+    assert b["this_quarter"]["amount"] <= b["this_half"]["amount"]
+    assert b["this_half"]["amount"]    <= b["this_year"]["amount"]
+
+    # Record count nests
+    assert b["this_month"]["record_count"]   <= b["this_quarter"]["record_count"]
+    assert b["this_quarter"]["record_count"] <= b["this_half"]["record_count"]
+    assert b["this_half"]["record_count"]    <= b["this_year"]["record_count"]
+
+    # due_amount nests
+    assert b["this_month"]["due_amount"]   <= b["this_quarter"]["due_amount"]
+    assert b["this_quarter"]["due_amount"] <= b["this_half"]["due_amount"]
+    assert b["this_half"]["due_amount"]    <= b["this_year"]["due_amount"]
+
+    # cheques_in_pipeline nests (subset of due_amount universe)
+    assert b["this_month"]["cheques_in_pipeline"]   <= b["this_quarter"]["cheques_in_pipeline"]
+    assert b["this_quarter"]["cheques_in_pipeline"] <= b["this_half"]["cheques_in_pipeline"]
+    assert b["this_half"]["cheques_in_pipeline"]    <= b["this_year"]["cheques_in_pipeline"]
+
+    # period_end nests
+    ends = [b[n]["period_end"] for n in
+            ("this_month", "this_quarter", "this_half", "this_year")]
+    assert ends[0] <= ends[1] <= ends[2] <= ends[3]
+
+
+# ── Test K7-4 — cheques_in_pipeline is clamped (≥ 0) and ≤ bucket amount ─────
+
+
+async def test_kpi7_cheques_in_pipeline_le_bucket_amount(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    # Phase 0 baseline (D0.6): this_year has 643,000 EGP cheques; others 0.
+    tuples = [
+        (22_719_871.0,   133,  22_693_463.0,       0.0,       0.0),
+        (55_527_209.0,   355,  55_459_801.0,       0.0,       0.0),
+        (55_527_209.0,   355,  55_459_801.0,       0.0,       0.0),
+        (337_946_411.0, 1934, 337_223_075.0, 643_000.0, 643_000.0),
+    ]
+    with patch(
+        "backend.modules.collections.services.kpi_service._fetch_bucket",
+        AsyncMock(side_effect=tuples),
+    ):
+        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    for bname in ("this_month", "this_quarter", "this_half", "this_year"):
+        b = result["buckets"][bname]
+        assert b["cheques_in_pipeline"] >= 0.0, (
+            f"cheques_in_pipeline must be ≥ 0 (clamped), bucket {bname!r}"
+        )
+        assert b["cheques_in_pipeline"] <= b["amount"], (
+            f"cheques_in_pipeline must be ≤ bucket amount, bucket {bname!r}"
+        )
+
+
+# ── Test K7-5 — Zero-record bucket returns 0.0 / 0, not None ─────────────────
+
+
+async def test_kpi7_zero_bucket_returns_zero_not_none(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.kpi_service._fetch_bucket",
+        AsyncMock(return_value=(0.0, 0, 0.0, 0.0, 0.0)),
+    ):
+        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    for bname in ("this_month", "this_quarter", "this_half", "this_year"):
+        b = result["buckets"][bname]
+        assert isinstance(b["amount"], float)          and b["amount"]            == 0.0
+        assert isinstance(b["record_count"], int)      and b["record_count"]      == 0
+        assert isinstance(b["due_amount"], float)      and b["due_amount"]        == 0.0
+        assert isinstance(b["cheques_in_pipeline"], float) and b["cheques_in_pipeline"] == 0.0
+
+
+# ── Test K7-6 — Cache hit: rpc_duration_ms=0, cache_status="cached" ──────────
+
+
+async def test_kpi7_cache_hit_returns_zero_rpc_duration(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    with patch(
+        "backend.modules.collections.services.kpi_service._fetch_bucket",
+        AsyncMock(return_value=_RPC_TUPLE_KPI7),
+    ):
+        result1 = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+        result2 = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert result1["cache_status"] == "fresh"
+    assert result2["cache_status"] == "cached"
+    assert result2["rpc_duration_ms"] == 0
+    assert (result2["buckets"]["this_year"]["amount"] ==
+            result1["buckets"]["this_year"]["amount"])
+
+
+# ── Test K7-7 — Cache miss triggers exactly 8 Odoo RPCs ──────────────────────
+
+
+async def test_kpi7_cache_miss_invokes_eight_rpcs(mock_client_kpi7: MagicMock) -> None:
+    await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert mock_client_kpi7.execute_kw.call_count == 8, (
+        f"Expected 8 RPCs (2 per bucket × 4 buckets), "
+        f"got {mock_client_kpi7.execute_kw.call_count}"
+    )
+
+
+# ── Test K7-8 — Read-only assertion fires before any RPC ─────────────────────
+
+
+async def test_kpi7_read_only_assertion_fires_when_violated(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_client_kpi7: MagicMock,
+) -> None:
+    monkeypatch.setattr(
+        "backend.modules.collections.services.kpi_service.ALLOWED_METHODS",
+        frozenset({"read_group", "write"}),
+    )
+
+    with pytest.raises(ReadOnlyViolationError):
+        await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    mock_client_kpi7.execute_kw.assert_not_called()
+
+
+# ── Test K7-9 — _fetch_bucket args are plain YYYY-MM-DD, never UTC datetimes ─
+
+
+async def test_kpi7_bucket_boundaries_use_cairo_timezone(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    """rs.installment.date is a plain date field (D0.3). All date args passed to
+    _fetch_bucket must be YYYY-MM-DD strings with no time component or tz suffix.
+    UTC conversion here would be silently wrong."""
+    mock_dt = MagicMock()
+    mock_dt.now.return_value.date.return_value = date(2026, 5, 19)
+
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime", mock_dt
+    ):
+        with patch(
+            "backend.modules.collections.services.kpi_service._fetch_bucket",
+            AsyncMock(return_value=_RPC_TUPLE_KPI7),
+        ) as mock_fetch:
+            await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    for call_obj in mock_fetch.call_args_list:
+        today_arg = call_obj.args[1]
+        end_arg   = call_obj.args[2]
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", today_arg), (
+            f"today_str arg must be plain YYYY-MM-DD, got {today_arg!r}"
+        )
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", end_arg), (
+            f"bucket_end_str arg must be plain YYYY-MM-DD, got {end_arg!r}"
+        )
+
+
+# ── Test K7-10 — Summer DST (UTC+3): correct Cairo date + Q2/H1 collapse ─────
+
+
+async def test_kpi7_summer_dst_boundary(mock_client_kpi7: MagicMock) -> None:
+    """today = 2026-06-15 Cairo (UTC+3, summer). June = Q2 = H1, so
+    this_month, this_quarter, this_half all collapse to 2026-06-30."""
+    mock_dt = MagicMock()
+    mock_dt.now.return_value.date.return_value = date(2026, 6, 15)
+
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime", mock_dt
+    ):
+        with patch(
+            "backend.modules.collections.services.kpi_service._fetch_bucket",
+            AsyncMock(return_value=_RPC_TUPLE_KPI7),
+        ):
+            result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert result["today_cairo"] == "2026-06-15"
+    for bname in ("this_month", "this_quarter", "this_half"):
+        assert result["buckets"][bname]["period_end"] == "2026-06-30", (
+            f"In June, {bname!r} must end 2026-06-30 (Q2/H1 collapse), "
+            f"got {result['buckets'][bname]['period_end']!r}"
+        )
+    assert result["buckets"]["this_year"]["period_end"] == "2026-12-31"
+
+
+# ── Test K7-11 — Winter DST (UTC+2): all 4 bucket ends are distinct ──────────
+
+
+async def test_kpi7_winter_dst_boundary(mock_client_kpi7: MagicMock) -> None:
+    """today = 2026-01-15 Cairo (UTC+2, winter). Jan sits in Q1/H1/year with
+    distinct ends. Feb 2026 has 28 days (not a leap year)."""
+    mock_dt = MagicMock()
+    mock_dt.now.return_value.date.return_value = date(2026, 1, 15)
+
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime", mock_dt
+    ):
+        with patch(
+            "backend.modules.collections.services.kpi_service._fetch_bucket",
+            AsyncMock(return_value=_RPC_TUPLE_KPI7),
+        ):
+            result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert result["today_cairo"] == "2026-01-15"
+    assert result["buckets"]["this_month"]["period_end"]   == "2026-01-31"
+    assert result["buckets"]["this_quarter"]["period_end"] == "2026-03-31"
+    assert result["buckets"]["this_half"]["period_end"]    == "2026-06-30"
+    assert result["buckets"]["this_year"]["period_end"]    == "2026-12-31"
+
+
+# ── Test K7-12 — Cache key uses Cairo local date, not UTC date ───────────────
+
+
+async def test_kpi7_cache_key_uses_cairo_date_not_utc(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    """At 2026-01-14 23:30 UTC (UTC+2 winter), Cairo is already 2026-01-15.
+    Result must be cached under 'kpi:expected_forecast:2026-01-15'.
+    The UTC-date key 'kpi:expected_forecast:2026-01-14' must remain empty."""
+    mock_dt = MagicMock()
+    mock_dt.now.return_value.date.return_value = date(2026, 1, 15)
+
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime", mock_dt
+    ):
+        with patch(
+            "backend.modules.collections.services.kpi_service._fetch_bucket",
+            AsyncMock(return_value=_RPC_TUPLE_KPI7),
+        ):
+            await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    cairo_key = f"{_CACHE_KEY_PREFIX_KPI7}:2026-01-15"
+    utc_key   = f"{_CACHE_KEY_PREFIX_KPI7}:2026-01-14"
+
+    assert _cache.get(cairo_key) is not None, (
+        f"Result must be cached under Cairo-date key {cairo_key!r}"
+    )
+    assert _cache.get(utc_key) is None, (
+        f"UTC-date key {utc_key!r} must remain empty — Cairo date must be used"
+    )
+
+
+# ── Test K7-13 — Dec 31: all 4 buckets collapse to 2026-12-31 ────────────────
+
+
+async def test_kpi7_year_end_full_collapse(mock_client_kpi7: MagicMock) -> None:
+    """On December 31, this_month/this_quarter/this_half/this_year all share
+    the same period_end: Dec 31. Full four-way collapse."""
+    mock_dt = MagicMock()
+    mock_dt.now.return_value.date.return_value = date(2026, 12, 31)
+
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime", mock_dt
+    ):
+        with patch(
+            "backend.modules.collections.services.kpi_service._fetch_bucket",
+            AsyncMock(return_value=_RPC_TUPLE_KPI7),
+        ):
+            result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    for bname in ("this_month", "this_quarter", "this_half", "this_year"):
+        assert result["buckets"][bname]["period_end"] == "2026-12-31", (
+            f"On Dec 31, {bname!r} period_end must be 2026-12-31 (full collapse), "
+            f"got {result['buckets'][bname]['period_end']!r}"
+        )
+        assert result["buckets"][bname]["period_start"] == "2026-12-31"
