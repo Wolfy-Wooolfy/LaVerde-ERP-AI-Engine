@@ -89,18 +89,37 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
     """Return KPI 2 — Late Uncollected.
 
     Queries rs.installment for posted, partially-paid-or-unpaid installments
-    whose due date is before today, and returns SUM(due_amount) via read_group.
+    whose due date is before today, and returns SUM(due_amount) plus cheques
+    derivation fields via Alternative B (Decision 10.2).
+
+    A single read_group call aggregates all monetary fields simultaneously
+    (due_amount, amount, paid_amount, x_studio_actual_paid_amount) — 1 RPC
+    total, unchanged from the original implementation (C3 constraint).
+
+    Cheques formula (Alternative B, Decision 9.1 analog):
+        cheques_in_pipeline = max(SUM(paid_amount) - SUM(x_studio_actual_paid_amount), 0)
+    cheques_record_count is null (Alternative B limitation — per-installment
+    count unavailable via read_group net formula).
+
+    PATH C (Decision 10.1): backend includes cheques fields; Stage 3 frontend
+    will suppress the annotation because 1.929M EGP = 0.49% of the late
+    portfolio is visual noise below the 5M EGP PATH C threshold.
 
     Return shape::
 
         {
-            "value":           float,  # EGP total due_amount
-            "currency":        "EGP",
-            "record_count":    int,    # matched installment count
-            "as_of":           str,    # ISO 8601 UTC datetime of the query
-            "cache_status":    str,    # "fresh" or "cached"
-            "rpc_duration_ms": int,    # 0 if served from cache
-            "domain":          list,   # exact domain used (paste into Odoo for debugging)
+            "value":                     float,  # EGP total due_amount
+            "currency":                  "EGP",
+            "record_count":              int,    # matched installment count
+            "cheques_in_pipeline":       float,  # EGP uncashed cheques (Alt B)
+            "cheques_record_count":      None,   # Alt B limitation
+            "drill_down_domain":         list,   # Candidate C domain (= domain)
+            "cheques_drill_down_domain": None,   # Alt B limitation
+            "as_of":                     str,    # ISO 8601 UTC datetime of the query
+            "cache_status":              str,    # "fresh" or "cached"
+            "rpc_duration_ms":           int,    # 0 if served from cache
+            "domain":                    list,   # legacy field — same value as drill_down_domain
+            "data_quality_warning":      str | None,  # "negative_cheques" or null
         }
 
     Raises:
@@ -133,7 +152,7 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
         rows = await _client.execute_kw(
             _MODEL,
             "read_group",
-            args=[domain, ["due_amount"], []],
+            args=[domain, ["due_amount", "amount", "paid_amount", "x_studio_actual_paid_amount"], []],
             kwargs={"lazy": False},
         )
     except Exception as exc:
@@ -148,17 +167,33 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
     logger.info(f"Odoo read_group on {_MODEL} in {rpc_ms}ms | cache_key={cache_key}")
 
     row = rows[0] if rows else {}
-    value = float(row.get("due_amount") or 0.0)
-    count = int(row.get("__count") or 0)
+    value        = float(row.get("due_amount") or 0.0)
+    count        = int(row.get("__count") or 0)
+    paid_amount  = float(row.get("paid_amount") or 0.0)
+    actual_paid  = float(row.get("x_studio_actual_paid_amount") or 0.0)
+    cheques_raw  = paid_amount - actual_paid
+    cheques_in_pipeline = max(cheques_raw, 0.0)
+
+    if cheques_raw < 0:
+        logger.warning(
+            "KPI 2: negative cheques_raw detected — paid_amount < x_studio_actual_paid_amount. "
+            "This is a data quality anomaly in Odoo Studio fields."
+        )
+    data_quality_warning: Optional[str] = "negative_cheques" if cheques_raw < 0 else None
 
     result: dict = {
-        "value": value,
-        "currency": "EGP",
-        "record_count": count,
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "cache_status": "fresh",
-        "rpc_duration_ms": rpc_ms,
-        "domain": domain,
+        "value":                     value,
+        "currency":                  "EGP",
+        "record_count":              count,
+        "cheques_in_pipeline":       cheques_in_pipeline,
+        "cheques_record_count":      None,
+        "drill_down_domain":         domain,
+        "cheques_drill_down_domain": None,
+        "as_of":                     datetime.now(timezone.utc).isoformat(),
+        "cache_status":              "fresh",
+        "rpc_duration_ms":           rpc_ms,
+        "domain":                    domain,
+        "data_quality_warning":      data_quality_warning,
     }
 
     _cache.set(cache_key, result)

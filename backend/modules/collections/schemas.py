@@ -1,6 +1,7 @@
 """
 Pydantic response schemas for Collections KPIs.
 
+KPI 2 — Late Uncollected (Stage 2, PATH C applied).
 KPI 7 — Expected Collections Forecast (Stage 1, Phase 1).
 """
 
@@ -8,6 +9,21 @@ from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel
+
+
+class LateUncollectedResponse(BaseModel):
+    value: float
+    currency: Literal["EGP"]
+    record_count: int
+    cheques_in_pipeline: float
+    cheques_record_count: int | None
+    drill_down_domain: list
+    cheques_drill_down_domain: list | None
+    as_of: str
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int
+    domain: list  # legacy — same value as drill_down_domain
+    data_quality_warning: str | None
 
 
 class ForecastBucket(BaseModel):
