@@ -33,6 +33,7 @@ _CACHE_KEY_PREFIX_KPI3 = "kpi:pending_check_exposure"
 _CACHE_KEY_PREFIX_KPI6 = "kpi:collection_trend_6m"
 _CACHE_KEY_PREFIX_KPI4  = "kpi:collection_rate"
 _CACHE_KEY_PREFIX_KPI5B = "kpi:collection_rate_by_project"
+_CACHE_KEY_PREFIX_KPI7 = "kpi:expected_forecast"
 
 # KPI 6 uses the payment installment header model (Decision 5.6).
 # The HEADER.date field is user-entered (cash receipt date); HEADER.amount
@@ -1090,6 +1091,255 @@ async def get_collection_rate_by_project(client: Optional[OdooClient] = None) ->
         "as_of":                 datetime.now(timezone.utc).isoformat(),
         "cache_status":          "fresh",
         "rpc_duration_ms":       rpc_ms,
+    }
+
+    _cache.set(cache_key, result)
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 7 — Expected Collections Forecast
+# Stage 1 — Phase 1 (Module 2 Refactor)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Canonical bucket order — must not change without updating _BUCKET_NAMES everywhere.
+_BUCKET_NAMES: tuple[str, ...] = (
+    "this_month", "this_quarter", "this_half", "this_year"
+)
+
+
+def _compute_bucket_ends(today: date) -> dict[str, date]:
+    """Return the Cairo-local end date for each of the 4 KPI 7 calendar buckets.
+
+    All arithmetic is pure calendar math on plain date objects. ZoneInfo is
+    NOT used here — it is used upstream when computing today_cairo. The caller
+    is responsible for passing a Cairo-local date. Decision 9.2.
+
+    Quarter boundaries: Q1 ends Mar 31, Q2 ends Jun 30, Q3 ends Sep 30, Q4 ends Dec 31.
+    Half boundaries:   H1 ends Jun 30 (months 1-6), H2 ends Dec 31 (months 7-12).
+
+    Edge case — nesting collapse in May/Jun 2026:
+      this_quarter (Q2 ends Jun 30) == this_half (H1 ends Jun 30) → correct.
+
+    Edge case — Dec 31:
+      All 4 buckets collapse to Dec 31 → correct (test_kpi7_year_end_full_collapse).
+    """
+    _, last_day = calendar.monthrange(today.year, today.month)
+    end_of_month = date(today.year, today.month, last_day)
+
+    quarter_idx = (today.month - 1) // 3          # 0=Q1, 1=Q2, 2=Q3, 3=Q4
+    end_q_month = (quarter_idx + 1) * 3           # 3, 6, 9, or 12
+    _, end_q_day = calendar.monthrange(today.year, end_q_month)
+    end_of_quarter = date(today.year, end_q_month, end_q_day)
+
+    end_h_month = 6 if today.month <= 6 else 12
+    _, end_h_day = calendar.monthrange(today.year, end_h_month)
+    end_of_half = date(today.year, end_h_month, end_h_day)
+
+    end_of_year = date(today.year, 12, 31)
+
+    return {
+        "this_month":   end_of_month,
+        "this_quarter": end_of_quarter,
+        "this_half":    end_of_half,
+        "this_year":    end_of_year,
+    }
+
+
+async def _fetch_bucket(
+    client: OdooClient,
+    today_str: str,
+    bucket_end_str: str,
+) -> tuple[float, int, float, float, float]:
+    """Fetch one KPI 7 bucket via 2 sequential read_group RPCs.
+
+    RPC 1 — amount + due_amount aggregate (bucket total + record count).
+    RPC 2 — cheques aggregate using Alternative B formula (Decision 9.1):
+              cheques_raw = SUM(paid_amount) - SUM(x_studio_actual_paid_amount)
+
+    Returns (amount, count, due_amount, cheques_clamped, cheques_raw).
+    cheques_clamped = max(cheques_raw, 0.0).
+    cheques_raw < 0 signals a data quality anomaly; the caller sets
+    data_quality_warning = "negative_cheques".
+
+    Domain (KD-1 / KD-2 compliant, Decision 9.2):
+        state='post', payment_state IN [unpaid, partial], date >= today, date <= bucket_end
+    No UTC conversion — rs.installment.date is a plain date field (D0.3).
+    """
+    domain = [
+        ("state", "=", "post"),
+        ("payment_state", "in", ["unpaid", "partial"]),
+        ("date", ">=", today_str),
+        ("date", "<=", bucket_end_str),
+    ]
+
+    # RPC 1 — amount + due_amount
+    amount_rows = await client.execute_kw(
+        _MODEL,
+        "read_group",
+        args=[domain, ["amount", "due_amount"], []],
+        kwargs={"lazy": False},
+    )
+    amount_row = amount_rows[0] if amount_rows else {}
+    amount     = float(amount_row.get("amount") or 0.0)
+    count      = int(amount_row.get("__count") or 0)
+    due_amount = float(amount_row.get("due_amount") or 0.0)
+
+    # RPC 2 — cheques in pipeline (Alternative B, per Decision 9.1)
+    cheque_rows = await client.execute_kw(
+        _MODEL,
+        "read_group",
+        args=[domain, ["paid_amount", "x_studio_actual_paid_amount"], []],
+        kwargs={"lazy": False},
+    )
+    cheque_row  = cheque_rows[0] if cheque_rows else {}
+    cheques_raw = (
+        float(cheque_row.get("paid_amount") or 0.0)
+        - float(cheque_row.get("x_studio_actual_paid_amount") or 0.0)
+    )
+
+    return amount, count, due_amount, max(cheques_raw, 0.0), cheques_raw
+
+
+async def get_expected_collections_forecast(
+    odoo_client: Optional[OdooClient] = None,
+) -> dict:
+    """Return KPI 7 — Expected Collections Forecast.
+
+    Four forward-looking calendar buckets (this_month ⊆ this_quarter ⊆
+    this_half ⊆ this_year), each reporting installment amounts due from
+    today (Cairo-local) through the bucket end date inclusive.
+
+    Bucket boundaries are computed in Africa/Cairo timezone for today's
+    date; all domain values use plain ISO date strings since
+    rs.installment.date is type 'date', not 'datetime' (D0.3, Decision 9.2).
+
+    Cheques formula (Alternative B, Decision 9.1):
+        cheques_in_pipeline = max(SUM(paid_amount) - SUM(x_studio_actual_paid_amount), 0)
+    cheques_record_count is null (Alternative B limitation — per-installment
+    count unavailable via read_group net formula).
+
+    Cache key uses the Cairo-local date so the cache invalidates at
+    Cairo midnight, not UTC midnight (Decision 9.3).
+
+    8 RPCs per uncached call (2 per bucket × 4 buckets), 60-second TTL
+    (Decision 9.4).
+
+    Return shape::
+
+        {
+            "buckets": {
+                "this_month":   { bucket fields ... },
+                "this_quarter": { bucket fields ... },
+                "this_half":    { bucket fields ... },
+                "this_year":    { bucket fields ... },
+            },
+            "currency":              "EGP",
+            "today_cairo":           "YYYY-MM-DD",   # Cairo-local date string
+            "cache_status":          "fresh" | "cached",
+            "rpc_duration_ms":       int,             # 0 if cached
+            "data_quality_warning":  str | None,      # "negative_cheques" or null
+        }
+
+    Each bucket shape::
+
+        {
+            "bucket":                    str,   # bucket name
+            "period_start":              str,   # today_cairo ISO
+            "period_end":                str,   # bucket end date ISO
+            "amount":                    float, # SUM(amount) EGP
+            "record_count":              int,
+            "due_amount":                float, # SUM(due_amount) EGP
+            "cheques_in_pipeline":       float, # clamped to >= 0
+            "cheques_record_count":      None,  # Alt B limitation
+            "drill_down_domain":         list,  # 4-clause Odoo domain
+            "cheques_drill_down_domain": None,  # Alt B limitation
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any of the 8 Odoo RPCs fails.
+    """
+    _assert_read_only()
+
+    # Compute today in Cairo local time (Decision 9.3).
+    # ZoneInfo handles DST automatically (UTC+2 Nov-Apr, UTC+3 May-Oct).
+    today_cairo = datetime.now(_LA_VERDE_TZ).date()
+    today_str   = today_cairo.isoformat()
+
+    bucket_ends = _compute_bucket_ends(today_cairo)
+
+    # Cairo-local date in the key so cache invalidates at Cairo midnight (Decision 9.3).
+    cache_key = f"{_CACHE_KEY_PREFIX_KPI7}:{today_str}"
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (8 RPCs)")
+
+    _client = odoo_client if odoo_client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        raw: dict[str, tuple[float, int, float, float, float]] = {}
+        for bname in _BUCKET_NAMES:
+            raw[bname] = await _fetch_bucket(
+                _client, today_str, bucket_ends[bname].isoformat()
+            )
+    except Exception as exc:
+        raise OdooQueryError(f"KPI 7 read_group failed: {exc}") from exc
+    finally:
+        if odoo_client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"KPI 7: 8 read_group RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
+    )
+
+    # Check for data quality anomaly — negative raw cheques (Decision 4.4 analog).
+    # raw[b][4] is cheques_raw (before clamping).
+    has_negative_cheques = any(raw[b][4] < 0 for b in _BUCKET_NAMES)
+    if has_negative_cheques:
+        logger.warning(
+            "KPI 7: negative cheques_raw detected — paid_amount < x_studio_actual_paid_amount "
+            "in one or more buckets. This is a data quality anomaly in Odoo Studio fields."
+        )
+    data_quality_warning: Optional[str] = (
+        "negative_cheques" if has_negative_cheques else None
+    )
+
+    buckets: dict = {}
+    for bname in _BUCKET_NAMES:
+        amount, count, due_amount, cheques_clamped, _ = raw[bname]
+        bucket_end_str = bucket_ends[bname].isoformat()
+        buckets[bname] = {
+            "bucket":       bname,
+            "period_start": today_str,
+            "period_end":   bucket_end_str,
+            "amount":       amount,
+            "record_count": count,
+            "due_amount":   due_amount,
+            "cheques_in_pipeline":       cheques_clamped,
+            "cheques_record_count":      None,
+            "drill_down_domain": [
+                ["state", "=", "post"],
+                ["payment_state", "in", ["unpaid", "partial"]],
+                ["date", ">=", today_str],
+                ["date", "<=", bucket_end_str],
+            ],
+            "cheques_drill_down_domain": None,
+        }
+
+    result: dict = {
+        "buckets":              buckets,
+        "currency":             "EGP",
+        "today_cairo":          today_str,
+        "cache_status":         "fresh",
+        "rpc_duration_ms":      rpc_ms,
+        "data_quality_warning": data_quality_warning,
     }
 
     _cache.set(cache_key, result)
