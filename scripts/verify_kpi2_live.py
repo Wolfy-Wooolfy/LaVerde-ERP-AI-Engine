@@ -29,6 +29,13 @@ import io
 import os
 import sys
 from datetime import date, datetime, timezone
+from pathlib import Path
+
+# Ensure project root is on sys.path so `backend.*` imports work when the
+# script is invoked as `python scripts/verify_kpi2_live.py`.
+_PROJECT_ROOT = Path(__file__).parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 import httpx
 from dotenv import load_dotenv
