@@ -1,0 +1,176 @@
+══════════════════════════════════════════════════════════════════════════════
+  KPI 2 Cheques Distribution — Mini-Discovery
+  Run at (UTC)  : 2026-05-19 09:43:53 UTC
+  Run at (Cairo): 2026-05-19 12:43:53 EEST
+  Today (Cairo) : 2026-05-19
+  ALLOWED_METHODS: ['fields_get', 'name_get', 'name_search', 'read', 'read_group', 'search', 'search_count', 'search_read']
+  READ-ONLY. No writes. No OpenAI. AI cost = $0.00
+══════════════════════════════════════════════════════════════════════════════
+
+  Purpose: determine cheques distribution on LATE installments.
+  Outcome determines Stage 2 KPI 2 implementation path (PATH A vs PATH C analog).
+  late_domain = [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '<', '2026-05-19')]
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 1 — KPI 2 Universe Baseline
+══════════════════════════════════════════════════════════════════════════════
+
+  1a. search_count(late_domain)
+      total_late_count : 2,006  (702 ms)
+
+  1b. read_group(late_domain,
+                 fields=[amount, due_amount, paid_amount,
+                         x_studio_actual_paid_amount, check_pending_amount])
+      read_group returned 1 row(s)  (94 ms)
+
+  Universe sums:
+    SUM(amount)                      : 388,979,286.00 EGP
+    SUM(due_amount)                  : 326,551,703.40 EGP
+    SUM(paid_amount)                 : 62,427,582.60 EGP
+    SUM(x_studio_actual_paid_amount) : 60,498,582.60 EGP
+    SUM(check_pending_amount) [RPC 2]: 1,929,000.00 EGP
+
+  Derived cheques_in_pipeline:
+    = max(SUM(paid_amount) - SUM(actual_paid), 0)
+    = max(62,427,582.60 EGP - 60,498,582.60 EGP, 0)
+    = 1,929,000.00 EGP
+    As % of SUM(amount): 0.50%
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 1.5 — Cheques-Posting Workflow Rate (Zero New RPCs)
+══════════════════════════════════════════════════════════════════════════════
+
+  Baseline snapshot date       : 2026-05-14
+  Today                        : 2026-05-19
+  Days elapsed                 : 5
+  Baseline cheques_in_pipeline : 0.00 EGP
+    (MODULE_2_BUSINESS_CONTEXT §9: Paid = Actual on late set at baseline)
+  Today cheques_in_pipeline    : 1,929,000.00 EGP
+  Apparent flow (5 days)       : 1,929,000.00 EGP
+  Apparent daily rate          : 385,800.00 EGP/day
+
+  Note: illustrative only — not predictive.
+  Reflects cheques posted against late installments in the observation window.
+  A reliable rate estimate requires a longer observation window.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 2 — Statistical Proof: Cheques on Late Installments
+            (mirrors Phase 0.5 Section 1 e_pre / e_post / e_calc pattern)
+══════════════════════════════════════════════════════════════════════════════
+
+  e_pre.  total_late_count (reused from Section 1 — no new RPC): 2,006
+
+  e_post. search_count(late_domain + [('has_checks', '=', True)])
+          domain: [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '<', '2026-05-19'), ('has_checks', '=', True)]
+          result: 181 late installments with checks  (78 ms)
+
+  e_calc. Statistical interpretation:
+    total_late_count     : 2,006
+    late_with_checks     : 181
+    late_with_checks_pct : 9.02%
+
+  Threshold table:
+    >= 30%      PATH A        — cheques annotation warranted (Stage 2 as planned)
+    10% – 30%   PATH MIXED    — present evidence to Khaled, decide jointly
+    < 10%       PATH C analog — recommend removing cheques annotation from KPI 2
+
+  → 9.02% < 10%           → PATH C analog
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 3 — Sample Inspection (up to 5 late + has_checks=True records)
+══════════════════════════════════════════════════════════════════════════════
+
+  3a. search_read(late_domain + has_checks=True, limit=5, sanitized — id only)
+      → 5 record(s) returned  (92 ms)
+
+        id  date                  amount            paid     actual_paid      chk_pend  n_checks  all_coll
+  ────────  ────────────  ──────────────  ──────────────  ──────────────  ────────────  ────────  ────────
+     89599  2020-07-09         81,500.00        5,000.00        5,000.00          0.00         0     False
+     89600  2020-10-09         81,500.00            0.00            0.00          0.00         0     False
+     40117  2020-11-10         36,000.00       35,460.00       35,460.00          0.00         0     False
+     89601  2021-01-09         81,500.00            0.00            0.00          0.00         0     False
+     89602  2021-04-09         81,500.00            0.00            0.00          0.00         0     False
+
+  Sanity checks on 5 samples:
+    paid_amount > 0     : 2/5  [PASS]
+    check_ids non-empty : 0/5  [FLAG] some check_ids empty despite has_checks=True
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 4 — Parity Check: Derived vs Stored check_pending_amount
+══════════════════════════════════════════════════════════════════════════════
+
+  From combined read_group (RPC 2):
+    combined_stored_chq : 1,929,000.00 EGP
+    derived formula     : 1,929,000.00 EGP
+
+  4a. Defensive standalone read_group(check_pending_amount only)
+      Purpose: confirm combined RG aggregated check_pending_amount correctly.
+      standalone_stored : 1,929,000.00 EGP  (94 ms)
+
+  [PASS] Combined RG ≈ Standalone RG  (delta = 0.0000 EGP)
+        Combined read_group aggregation is TRUSTWORTHY.
+
+  [PASS] Derived (1,929,000.00 EGP) ≈ Stored (1,929,000.00 EGP)
+        delta = 0.0000 EGP — service formula is CONSISTENT with Odoo computed field.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 5 — PATH Recommendation
+══════════════════════════════════════════════════════════════════════════════
+
+  Evidence:
+    [1] total_late_count        : 2,006
+    [2] late_with_checks_count  : 181
+    [3] late_with_checks_pct    : 9.02%  (threshold: A >= 10%, C < 5%)
+    [4] derived_cheques_in_pipe : 1,929,000.00 EGP  (threshold: A >= 10M EGP, C < 5M EGP)
+    [5] stored_check_pending    : 1,929,000.00 EGP
+    [6] stored_vs_derived_delta : 0.00 EGP
+
+  ┌─ RECOMMENDATION ─────────────────────────────────────────────────────────┐
+  │  PATH MIXED — PRESENT TO KHALED                                            │
+  ├────────────────────────────────────────────────────────────────────────────┤
+  │  Values fall in the ambiguous zone (5–10% count and/or 5M–10M EGP).        │
+  │  Present evidence to Khaled for a joint decision before Stage 2.           │
+  └────────────────────────────────────────────────────────────────────────────┘
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 6 — Manual Cross-Check Sheet (Khaled UI Verification)
+══════════════════════════════════════════════════════════════════════════════
+
+  Open: Collections Mgmt → All Installments
+
+  Filter                     Value
+  ────────────────────────── ────────────────────────────────────────
+  State                      Posted
+  Payment Status             Unpaid + Partially Paid
+  Date                       < 2026-05-19  (Date before today)
+  Has Checks                 True
+
+  View  : Pivot
+  Measures: Paid Amount + Actual Paid Amount
+
+  Step  : subtract Paid Amount − Actual Paid Amount
+  Expected: 1,929,000.00 EGP ± 1 EGP
+
+  Note: UI snapshot may differ if new cheques were posted since script run.
+  Differences > 1,000 EGP should be investigated.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 7 — PHASE COMPLETE
+══════════════════════════════════════════════════════════════════════════════
+
+  Mini-discovery complete. 5 RPCs executed. No writes performed.
+
+  RPC budget:
+    RPC 1  search_count(late_domain)                     → 2,006 records
+    RPC 2  read_group(late_domain, 5 monetary fields)    → sums computed
+    RPC 3  search_count(late_domain + has_checks=True)   → 181 records
+    RPC 4  search_read(+ has_checks=True, limit=5)       → 5 sample records
+    RPC 5  standalone read_group(check_pending_amount)   → 1,929,000.00 EGP
+
+  PATH recommendation: PATH MIXED — PRESENT TO KHALED
+
+  Output teed to: D:\Khaled Elmasry\Odoo\LaVerde-ERP-AI-Engine\scripts\discover_kpi2_cheques_output.txt
+
+══════════════════════════════════════════════════════════════════════════════
+  KPI 2 CHEQUES MINI-DISCOVERY — PHASE COMPLETE
+══════════════════════════════════════════════════════════════════════════════
