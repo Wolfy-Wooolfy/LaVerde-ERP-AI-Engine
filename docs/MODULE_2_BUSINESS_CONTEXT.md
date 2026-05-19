@@ -544,6 +544,8 @@ This module will NOT do:
 - Per-salesperson operational dashboards — sales team management views are not a Board-level concern in this MVP
 - Predictive analytics, alerts, and notifications — deferred until the Board confirms what is "alert-worthy" through actual use
 
+> **Note:** KPI definition decisions (scope, overdue semantics, EXEC favorites treatment) are documented in §19.
+
 ---
 
 ## 18. Odoo UI Artifacts Reference
@@ -610,6 +612,8 @@ Our **KPI 2** implementation uses `date < today` — capturing ALL historically 
 **Critical note — `contract_id.state = confirm` vs `state = post`:**  
 All four named EXEC KPI filters scope to confirmed contracts. Our KPI implementations scope to `state = post` on `rs.installment`. These two scoping rules are not equivalent. The count overlap was not verified in Phase 0.5 and is flagged as Unknown U2 in `docs/PHASE_0_5_UI_DISCOVERY_FINDINGS.md`.
 
+> **Resolution status (2026-05-18):** See §19 (KPI Definition Canonical Decisions) for the final business decision. Summary: EXEC favorites classified as legacy; Module 2 canonical definitions retained.
+
 ### 18.4 Property Hierarchy Fields on rs.installment
 
 Each installment carries direct many2one links to all 4 levels of the property hierarchy (denormalized for query efficiency):
@@ -622,3 +626,78 @@ Each installment carries direct many2one links to all 4 levels of the property h
 | `unit_id` | `rs.structure.unit` | 1,873 |
 
 These fields enable future drill-down filters (Stage 5) and per-building / per-zone reporting without joining through contract or reservation.
+
+---
+
+## 19. KPI Definition Canonical Decisions
+
+> **Source:** Khaled responses to clarifying questions, 2026-05-18.  
+> **Related:** `docs/PHASE_0_5_UI_DISCOVERY_FINDINGS.md` §Objective 4.
+
+### 19.1 Background
+
+Phase 0.5 discovery (2026-05-18) surfaced 5 pre-existing saved searches on the All Installments view labelled "EXEC - KPI Base", "KPI – Overdue Installments", "KPI – Total Collected Amount", "KPI – Total Contracted Value", and "KPI – Total Outstanding Amount". These filters use definitions that differ from the Module 2 KPI implementations on two dimensions:
+
+- **SCOPE:** EXEC filters use `contract_id.state = 'confirm'`; Module 2 KPIs use `state = 'post'` on `rs.installment`.
+- **"OVERDUE" SEMANTICS:** EXEC "Overdue" uses a 1-day window (yesterday and today); Module 2 KPI 2 uses a stock metric (`date < today`).
+
+Khaled was asked three clarifying questions on 2026-05-18:
+
+1. Who is user_id 1947 (creator of the EXEC filters)?
+2. What is the current Board reporting practice?
+3. What does "Overdue" mean to the Board when they ask?
+
+Khaled's responses:
+
+1. Unknown — not an active stakeholder Khaled recognises.
+2. Manual reports from the finance manager; Module 2 will be the first automated Board dashboard.
+3. Aggregate totals (إجماليات) with drill-down for detail.
+
+Implication: the EXEC filters are LEGACY artifacts not reflected in current Board reporting. Module 2 is setting the canonical KPI definitions, not matching existing ones.
+
+### 19.2 Canonical Decisions for Module 2
+
+**Decision KD-1 — Installment Scope**
+
+All Module 2 KPIs scope by `state = 'post'` on `rs.installment` (the installment has been registered by RS Accounting). The alternative scope `contract_id.state = 'confirm'` is NOT adopted.
+
+Rationale: `state = 'post'` is the canonical lifecycle state for installments that should be visible in Board reporting. Confirming the parent contract is a different semantic axis and conflates installment processing with contract approval.
+
+Source: Khaled approval 2026-05-18.
+
+---
+
+**Decision KD-2 — "Overdue" / "Late" Definition**
+
+"Overdue" or "Late" in Module 2 means a STOCK metric:
+
+```
+state = 'post'
+AND payment_state IN ['unpaid', 'partial']
+AND date < today
+```
+
+This captures ALL accumulated past-due installments regardless of how long they have been overdue. The alternative 1-day flow definition (date in [yesterday, today]) is NOT adopted.
+
+Rationale: the Board reads aggregate totals, not daily operational flow. The drill-down architecture (Stage 5-6) provides the detail view; the headline KPI is the stock.
+
+Source: Khaled approval 2026-05-18.
+
+---
+
+**Decision KD-3 — EXEC Favorites Treatment**
+
+The 5 pre-existing EXEC KPI saved searches in `ir.filters` are classified as LEGACY ARTIFACTS. They are not adopted as canonical KPI definitions. They are not deleted (read-only project; no writes to Odoo).
+
+Future revisits: if the Board ever requests a daily flow view alongside the stock KPI 2, the EXEC "Overdue" filter definition is preserved here for reference.
+
+Source: Khaled approval 2026-05-18.
+
+### 19.3 Forward Compatibility
+
+If La Verde's stakeholders later request alignment with the EXEC favorites (e.g. for a future Board member who has been viewing the Odoo UI directly), the canonical decisions above are reversible. Specifically:
+
+- KD-1 can be replaced by a `contract_id.state = 'confirm'` scope by changing `_build_*_domain()` helpers in `backend/modules/collections/services/kpi_service.py` and re-running identity-equal verification.
+- KD-2 can be supplemented with a separate "Daily Flow" KPI without removing the stock KPI 2 (additive change).
+
+These reversibility paths are explicit so that the decision is not perceived as permanent. The current MVP launches with the stock-and-aggregate definition because it is what the Board has requested verbally.
