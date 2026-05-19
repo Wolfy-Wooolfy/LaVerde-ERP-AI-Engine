@@ -152,5 +152,14 @@
   "in pipeline": "في الانتظار",
   "MTD": "MTD",
   "YTD": "YTD",
-  "no_installments_due": "لا أقساط مستحقة في هذه الفترة"
+  "no_installments_due": "لا أقساط مستحقة في هذه الفترة",
+  "Portfolio Scale": "إجمالي المحفظة",
+  "Current Risk": "المخاطرة الحالية",
+  "Expected Collections": "التحصيل المتوقع",
+  "Performance & Trend": "الأداء والاتجاه",
+  "this_month": "هذا الشهر",
+  "this_quarter": "هذا الربع",
+  "this_half": "هذا النصف",
+  "this_year": "هذا العام",
+  "until": "حتى {date}"
 }

@@ -152,5 +152,14 @@
   "in pipeline": "in pipeline",
   "MTD": "MTD",
   "YTD": "YTD",
-  "no_installments_due": "No installments due in this period"
+  "no_installments_due": "No installments due in this period",
+  "Portfolio Scale": "Portfolio Scale",
+  "Current Risk": "Current Risk",
+  "Expected Collections": "Expected Collections",
+  "Performance & Trend": "Performance & Trend",
+  "this_month": "This Month",
+  "this_quarter": "This Quarter",
+  "this_half": "This Half",
+  "this_year": "This Year",
+  "until": "until {date}"
 }
