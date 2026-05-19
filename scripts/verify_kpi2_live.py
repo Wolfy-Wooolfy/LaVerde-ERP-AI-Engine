@@ -2,7 +2,7 @@
 Live verification for KPI 2 — Late Uncollected receivables.
 
 Usage:
-    python scripts/verify_kpi2_live.py [--url http://localhost:8000]
+    KPI2_VERIFY_CONFIRMED=1 python scripts/verify_kpi2_live.py [--url http://localhost:8000]
 
 Requires the FastAPI server to be running and reachable.
 Set VERIFY_USERNAME / VERIFY_PASSWORD env vars (or .env) to override
@@ -10,11 +10,20 @@ the default admin credentials.
 
 Exit 0  — all assertions passed
 Exit 1  — at least one assertion failed or the server was unreachable
+Exit 2  — Decision 6.4 ritual not confirmed (KPI2_VERIFY_CONFIRMED not set)
 
 Appends one CSV row to logs/kpi2_verification.log on each run.
+
+NOTE — Decision 6.4 restart ritual REQUIRED before running:
+    1. Kill any uvicorn --reload server
+    2. Purge __pycache__:  Get-ChildItem -Path . -Filter __pycache__ -Recurse -Directory | Remove-Item -Recurse -Force
+    3. Start clean:        python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    4. Set environment:    $env:KPI2_VERIFY_CONFIRMED = "1"
+    5. Re-run this script
 """
 
 import argparse
+import asyncio
 import csv
 import io
 import os
@@ -29,6 +38,23 @@ load_dotenv(dotenv_path=".env")
 # Force UTF-8 stdout (Windows consoles default to cp1252)
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+# ── Decision 6.4 ritual text ─────────────────────────────────────────────────
+
+_RITUAL = """
+┌─────────────────────────────────────────────────────────────────┐
+│  Decision 6.4 — Pre-Verification Ritual (Windows PowerShell)    │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Get-Process -Name python -EA SilentlyContinue |             │
+│       Stop-Process -Force                                       │
+│  2. Get-ChildItem -Path . -Filter __pycache__ -Recurse          │
+│       -Directory | Remove-Item -Recurse -Force                  │
+│  3. python -m uvicorn backend.main:app --host 0.0.0.0           │
+│       --port 8000        (NO --reload flag)                     │
+│  4. Set environment: $env:KPI2_VERIFY_CONFIRMED = "1"           │
+│  5. Re-run: python scripts/verify_kpi2_live.py                  │
+└─────────────────────────────────────────────────────────────────┘
+"""
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +74,7 @@ MIN_RECORD_COUNT = 1
 _PASS = "[PASS]"
 _FAIL = "[FAIL]"
 _INFO = "[INFO]"
+_WARN = "[WARN]"
 
 
 def _log(prefix: str, msg: str) -> None:
@@ -78,9 +105,43 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
     return condition
 
 
+# ── Cross-check via direct Odoo read_group ────────────────────────────────────
+
+async def _derive_cheques_directly(today_date_str: str) -> float:
+    """Independently derives cheques_in_pipeline via direct Odoo read_group.
+
+    Uses the same Candidate C late domain and Alternative B formula as the
+    service function. Result should match the API response within ±1.00 EGP.
+    """
+    from backend.shared.odoo.client import OdooClient  # noqa: PLC0415
+    late_domain_rpc = [
+        ("state", "=", "post"),
+        ("payment_state", "in", ["unpaid", "partial"]),
+        ("date", "<", today_date_str),
+    ]
+    async with OdooClient() as odoo:
+        rows = await odoo.execute_kw(
+            "rs.installment",
+            "read_group",
+            args=[late_domain_rpc, ["paid_amount", "x_studio_actual_paid_amount"], []],
+            kwargs={"lazy": False},
+        )
+    row = rows[0] if rows else {}
+    paid   = float(row.get("paid_amount") or 0.0)
+    actual = float(row.get("x_studio_actual_paid_amount") or 0.0)
+    return max(paid - actual, 0.0)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
+    # ── Decision 6.4 ritual guard ─────────────────────────────────────────────
+    if os.environ.get("KPI2_VERIFY_CONFIRMED") != "1":
+        print(_RITUAL)
+        print("REFUSED. Set KPI2_VERIFY_CONFIRMED=1 after completing")
+        print("the ritual above, then re-run this script.")
+        sys.exit(2)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=DEFAULT_URL, help="Backend base URL")
     args = parser.parse_args()
@@ -129,7 +190,10 @@ def main() -> int:
 
     # ── Step 3: Required keys ─────────────────────────────────────────────────
     required_keys = ("value", "currency", "record_count", "as_of",
-                     "cache_status", "rpc_duration_ms", "domain")
+                     "cache_status", "rpc_duration_ms", "domain",
+                     "cheques_in_pipeline", "cheques_record_count",
+                     "drill_down_domain", "cheques_drill_down_domain",
+                     "data_quality_warning")
     for k in required_keys:
         if not _check(f"key '{k}' present", k in body):
             failures.append(f"missing_key_{k}")
@@ -213,8 +277,54 @@ def main() -> int:
         except ValueError as exc:
             _log(_FAIL, f"domain[2][2] is not a valid ISO date — got {date_str!r}: {exc}")
             failures.append("domain_date_invalid")
+            date_str = ""
     else:
         failures.append("domain_shape")
+        date_str = ""
+
+    # ── Step 6b: Cheques fields ───────────────────────────────────────────────
+    cheques_in_pipeline: float = float(body.get("cheques_in_pipeline") or 0.0)
+    cheques_record_count = body.get("cheques_record_count")
+    drill_down_domain: list = body.get("drill_down_domain", [])
+    cheques_drill_down_domain = body.get("cheques_drill_down_domain")
+    data_quality_warning = body.get("data_quality_warning")
+
+    _log(_INFO, f"Cheques in pipeline:  EGP {cheques_in_pipeline:>16,.2f}")
+    _log(_INFO, f"Cheques record count: {str(cheques_record_count):>20}")
+    _log(_INFO, f"Cheques drill_down:   {str(cheques_drill_down_domain):>20}")
+
+    if not _check("cheques_in_pipeline >= 0",
+                  cheques_in_pipeline >= 0,
+                  f"{cheques_in_pipeline:,.2f}"):
+        failures.append("cheques_negative")
+
+    if not _check("cheques_in_pipeline <= value",
+                  cheques_in_pipeline <= value,
+                  f"{cheques_in_pipeline:,.2f} <= {value:,.2f}"):
+        failures.append("cheques_exceeds_value")
+
+    if not _check("cheques_record_count is null",
+                  cheques_record_count is None,
+                  f"got {cheques_record_count!r}"):
+        failures.append("cheques_record_count_not_null")
+
+    if _check("drill_down_domain has 3 clauses",
+              len(drill_down_domain) == 3,
+              f"got {len(drill_down_domain)}"):
+        if not _check("drill_down_domain == legacy domain",
+                      drill_down_domain == domain,
+                      f"drill_down={drill_down_domain!r}"):
+            failures.append("drill_down_domain_mismatch")
+    else:
+        failures.append("drill_down_domain_shape")
+
+    if not _check("cheques_drill_down_domain is null",
+                  cheques_drill_down_domain is None,
+                  f"got {cheques_drill_down_domain!r}"):
+        failures.append("cheques_drill_down_not_null")
+
+    if data_quality_warning is not None:
+        _log(_WARN, f"data_quality_warning present: {data_quality_warning!r}")
 
     # ── Step 7: Second request — cache hit ───────────────────────────────────
     _log(_INFO, "Issuing second request to verify cache hit ...")
@@ -230,6 +340,29 @@ def main() -> int:
                   f"got {body2.get('rpc_duration_ms')}"):
         failures.append("cache_rpc_ms_nonzero")
 
+    # ── Step 8: Cross-check cheques_in_pipeline via direct Odoo read_group ───
+    _log(_INFO, "Cross-checking cheques_in_pipeline against direct Odoo read_group ...")
+    if date_str:
+        try:
+            derived = asyncio.run(_derive_cheques_directly(date_str))
+            delta   = abs(cheques_in_pipeline - derived)
+            _log(_INFO, f"  API cheques_in_pipeline : EGP {cheques_in_pipeline:>16,.2f}")
+            _log(_INFO, f"  Odoo derived            : EGP {derived:>16,.2f}")
+            _log(_INFO, f"  Delta                   : EGP {delta:>16,.4f}")
+            if not _check(
+                "cross-check: |API cheques - Odoo derived| <= 1.00 EGP",
+                delta <= 1.0,
+                f"delta={delta:.4f}",
+            ):
+                failures.append("cheques_cross_check_delta")
+        except Exception as exc:
+            _log(_WARN, f"Cross-check failed — direct Odoo RPC error: {exc}")
+            _log(_WARN, "VERIFICATION INCOMPLETE — cheques cross-check did not run")
+            failures.append("cheques_cross_check_failed")
+    else:
+        _log(_WARN, "Cross-check skipped — domain date_str unavailable (domain shape failed earlier)")
+        failures.append("cheques_cross_check_skipped")
+
     # ── Result ────────────────────────────────────────────────────────────────
     if failures:
         log_row["error"] = "; ".join(failures)
@@ -243,11 +376,17 @@ def main() -> int:
     _log(_PASS, "All assertions passed.")
     print()
     print("Manual cross-check prompt (for Khaled):")
-    print("  Open Odoo → Collections Mgmt → Installments → filter: State=Posted,")
-    print("  Payment State IN [Unpaid, Partial], Due Date < today.")
+    print("  Open Odoo → Collections Mgmt → All Installments →")
+    print(f"    State=Posted, Payment State IN [Unpaid, Partial], Due Date < {date_str}")
     print(f"  The Due Amount aggregate should be approximately EGP {value:,.0f}.")
     print(f"  Record count should be approximately {record_count:,}.")
-    print("  ±drift is normal if data-entry activity occurred between the two checks.")
+    print()
+    print("  Cheques cross-check:")
+    print("    Add filter: Has Checks = True.")
+    print("    Switch to Pivot. Measures: Paid Amount + Actual Paid Amount.")
+    print("    Compute: Paid Amount − Actual Paid Amount.")
+    print(f"    Expected cheques_in_pipeline: EGP {cheques_in_pipeline:,.0f} ± 1,000 EGP")
+    print("    (Drift is normal if new cheques were posted since the server call.)")
     return 0
 
 

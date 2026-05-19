@@ -1353,3 +1353,163 @@ _Pending. Run `python scripts/verify_kpi7_live.py` against the running backend
 (after Decision 6.4 clean restart) and paste output for final Stage 1 sign-off._
 
 ---
+
+## Session 10 — 2026-05-19 — KPI 2 Cheques Extension
+
+**Scope:** D1 (service + schema), D2 (endpoint + response_model= adoption),
+D3 (unit tests: 4 service + 2 endpoint), D4 (verify script extension),
+D5 (this decisions entry).
+Checkpoint tag target: `checkpoint-C-stage2-kpi2-extended`
+
+---
+
+### Decision 10.1 — PATH C applied to KPI 2
+
+**Status:** Approved (Khaled, 2026-05-19)
+
+PATH C applied to KPI 2 cheques annotation: backend includes all 4 new cheques
+fields; Stage 3 frontend will suppress the amber annotation on the Risk Card.
+
+Rationale: 1,929,000 EGP / 0.49% of the 326M EGP late portfolio = visual noise.
+The EGP signal is 5.2× below the PATH C threshold (5M EGP). The 9.02% count
+signal is in the gray zone but the EGP signal dominates for Board decision-making.
+
+Cross-reference: `docs/KPI2_CHEQUES_DISCOVERY_FINDINGS.md` — mini-discovery
+evidence (Section 4 parity check, PATH MIXED recommendation).
+
+This overrides the original REFACTOR_SPEC v1.0 §7.6 which showed the amber
+annotation on the KPI 2 Risk Card. REFACTOR_SPEC will be updated in Stage 3.
+
+---
+
+### Decision 10.2 — Single read_group RPC extended; no additional RPC
+
+**Status:** Approved
+
+The existing `get_late_uncollected()` read_group fields list was extended from:
+```python
+["due_amount"]
+```
+to:
+```python
+["due_amount", "amount", "paid_amount", "x_studio_actual_paid_amount"]
+```
+
+3 additional fields added to the SAME call. Total RPCs: 1 (unchanged, per C3
+constraint). Proven safe by mini-discovery Section 4 Check A: combined read_group
+returns identical sums to standalone calls (delta = 0.00 EGP).
+
+---
+
+### Decision 10.3 — Legacy `domain` field preserved alongside `drill_down_domain`
+
+**Status:** Approved
+
+Both fields carry the same Candidate C value (3-clause domain). The duplication
+is intentional for backward compatibility with:
+- `verify_kpi2_live.py` Step 6 domain shape assertions (existing consumers)
+- Any external consumers of the `/kpi/late-uncollected` response
+- Frontend `api.js` code that may reference `data.domain` by name
+
+`drill_down_domain` is the canonical field for Stage 5 drill-down endpoints.
+`domain` will be deprecated (but not removed) in a future cleanup session.
+
+The service applies `list(domain)` to both fields (defensive copy — prevents
+shared-mutation cache corruption if downstream code ever mutates a returned list).
+
+---
+
+### Decision 10.4 — KPI 2 endpoint adopts `response_model=` and PATH P1 dual-return
+
+**Status:** Implemented (Commit 2, `ad7b5a3`)
+
+`GET /api/v1/collections/kpi/late-uncollected` is now decorated with:
+```python
+response_model=LateUncollectedResponse
+```
+
+KPI 2 is the second Collections endpoint to adopt this convention (KPI 7 was
+first, per Decision 9.5). The endpoint returns `dict` on success (so FastAPI
+validates via `response_model=`) and `JSONResponse` on error paths (preserving
+the `{"error": {"code": ...}}` shape expected by `api.js`).
+
+Stages 3–6 will retrofit the remaining 5 endpoints per Decision 9.6 tech-debt plan.
+
+---
+
+### Decision 10.5 — Future revisit trigger for KPI 2 PATH decision
+
+**Status:** Documented
+
+Re-open the PATH decision for KPI 2 cheques annotation if EITHER condition holds:
+- `cheques_in_pipeline` crosses **10M EGP** (currently 1.929M EGP — 5.2× headroom)
+- `late_with_checks_count` crosses **250** (12.5% of current 2,006 late universe)
+
+To check: re-run `scripts/discover_kpi2_cheques.py` and compare to these thresholds.
+No code change required until a threshold is crossed.
+
+---
+
+### Decision 10.6 — Out-of-scope insight: 2027+ cheques observed
+
+**Status:** Documented (no code change)
+
+Mini-discovery Image 2 (visible during Section 6 Odoo UI inspection) revealed
+~2.54M EGP in cheques attached to installments with `date > 2026-12-31` (i.e.,
+2027 and beyond). These are outside KPI 7's calendar-year scope and would not
+be counted in any current bucket.
+
+Not actionable in the current MVP. Documented as a future enhancement candidate
+if the Board requests a multi-year forecast beyond the `this_year` bucket.
+No code change required.
+
+---
+
+### Decision 10.7 — KPI 2 cache key unchanged
+
+**Status:** Approved
+
+The KPI 2 cache key continues to use `_cache.make_key(_CACHE_KEY_PREFIX)` which
+is date-stamped at UTC midnight. The 4 new fields are stored in the same cached
+payload — no separate cache key needed. Cache TTL unchanged at 60 seconds.
+
+This differs from KPI 7's Cairo-local cache key (Decision 9.3) because KPI 2's
+`date < today` boundary uses UTC date from `_cache.today_str()`. Changing this
+would require also changing the domain date source — deferred to a future
+standardization pass (Decision 3.5).
+
+---
+
+### Decision 10.8 — `data_quality_warning` is REQUIRED (not optional) in `LateUncollectedResponse`
+
+**Status:** Approved (Khaled schema correction, 2026-05-19)
+
+`LateUncollectedResponse.data_quality_warning` is typed `str | None` (not
+`str | None = None`), matching `ExpectedCollectionsForecastResponse` exactly.
+The service function always includes this key with value `None` in the normal
+case and `"negative_cheques"` on anomaly.
+
+Rationale: schema consistency across KPI endpoints simplifies Stage 3 frontend
+rendering (both KPIs pass through the same rendering code path) and future AI
+Chat response parsing (Pillar 2).
+
+---
+
+### KPI 2 Stage 2 Implementation Summary
+
+| Aspect | Detail |
+|---|---|
+| Endpoint | `GET /api/v1/collections/kpi/late-uncollected` |
+| Service function | `get_late_uncollected()` in `kpi_service.py` |
+| Pydantic schema | `LateUncollectedResponse` in `schemas.py` |
+| New fields | `cheques_in_pipeline`, `cheques_record_count`, `drill_down_domain`, `cheques_drill_down_domain` |
+| Required field | `data_quality_warning: str \| None` (always present, Decision 10.8) |
+| Legacy field | `domain` preserved (= `drill_down_domain` value, Decision 10.3) |
+| RPCs | 1 (unchanged — single read_group extended, Decision 10.2) |
+| PATH applied | C — backend includes fields, Stage 3 frontend suppresses annotation (Decision 10.1) |
+| Cheques value (2026-05-19) | 1,929,000.00 EGP / 0.49% of late portfolio |
+| Commits | 3 atomic commits per C7 |
+| Unit tests added | 4 service + 2 endpoint = 6 new; 1 existing extended (12-key set) |
+| `response_model=` | `LateUncollectedResponse` (PATH Y / PATH P1 — Decision 10.4) |
+
+---
