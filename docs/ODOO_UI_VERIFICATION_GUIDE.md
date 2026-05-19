@@ -1,184 +1,185 @@
-# Odoo UI Verification Guide — Collections Module
+# Odoo UI Verification Guide — La Verde Module 2
 
-> **Purpose:** Practical reference for manually verifying KPI figures against the Odoo UI.  
-> **Audience:** Khaled (verification) and future contributors (new KPI cross-checks).  
-> **Last updated:** 2026-05-18
+Practical reference for cross-checking Module 2 KPIs and data points against the live Odoo UI. Used when an identity-equal verification script needs a manual ground-truth comparison.
 
 ---
 
-## 1. Navigating to All Installments
+## 1. Access Path
 
-**Menu path:**  
-Apps grid → **Collections Mgmt** → top navigation bar → **All Installments**
+- URL: laverde.odoo.com
+- User: Khaled El Masry (or designated read-only Board reviewer)
+- Database: plementus-laverde1-master-... (visible in top-right of every Odoo page)
 
-**Direct action ID:** `/odoo/action-676`
-
----
-
-## 2. Switching to Pivot View
-
-1. Open All Installments (list view by default)
-2. Top-right corner: click the **grid/pivot icon** (squares grid — between list and chart icons)
-3. You are now in Pivot view with default groupings
-
-**To change the measure:**  
-Click **Measures** dropdown (top-right of pivot) → select the column you want to sum:
-- **Amount** → `amount`
-- **Paid Amount** → `paid_amount`
-- **Due Amount** → `due_amount`
-- **Actual Paid Amount** → `x_studio_actual_paid_amount`
-- **Total Due Amount** → `total_due_amount`
+Navigation:
+1. Log in to laverde.odoo.com
+2. From the apps grid (default landing), click **Collections Mgmt**
+3. From Collections Mgmt top-bar, click **All Installments**
+4. URL pattern after navigation: `/odoo/action-676`
 
 ---
 
-## 3. Applying Filters
+## 2. View Modes
 
-### Standard filters (via Search bar)
+- **List view** (default) — shows individual installments
+- **Pivot view** — toggle in top-right of action bar (the spreadsheet icon). Use this for SUM aggregates.
+- **Form view** — opens by clicking any individual installment
 
-Click the **search bar** (top-left, shows magnifying glass).  
-Click the **down arrow** to see filter options:
-
-| Filter option | Technical field | Common use |
-|--------------|-----------------|------------|
-| Status = Posted | `state = post` | Used by all our KPIs |
-| Payment Status = Unpaid | `payment_state = unpaid` | KPI 2, KPI 7 |
-| Payment Status = Partially Paid | `payment_state = partial` | KPI 2, KPI 7 |
-| Has Checks | `has_checks = True` | Checks pipeline analysis |
-| All Checks Collected | `all_checks_collected = True` | Fully cleared check installments |
-
-### Adding a custom date filter
-
-1. In search bar, click **down arrow** → **Filters** → **Add Custom Filter**
-2. Field: **Date** (installment due date = `rs.installment.date`)
-3. Operator: **≥** (is after or on) or **≤** (is before or on)
-4. Value: type the date in `YYYY-MM-DD` format
-5. Click **Add** then **Confirm**
-
-**For a date RANGE (two conditions):**  
-Add first condition (date ≥ start) → click **Add Filter** again → add second condition (date ≤ end) → **Confirm**. Both conditions are joined with AND by default.
+Switch to Pivot view for KPI cross-checks. The Total row at the bottom of the Pivot is the SUM aggregate.
 
 ---
 
-## 4. KPI 7 Verification Procedure
+## 3. Adding Filters
 
-### Standard domain (all 4 buckets):
-- Filter 1: **Status = Posted**
-- Filter 2: **Payment Status = Unpaid** AND **Payment Status = Partially Paid** (use OR between these two)
-- Filter 3: **Date ≥ today** (start of bucket)
-- Filter 4: **Date ≤ bucket_end** (varies per bucket)
-- Measure: **Amount**
+Three filter types appear on All Installments search bar dropdown:
 
-### Bucket date ranges (2026-05-18 run):
+### 3.1 Quick Filters (preset)
 
-| Bucket | Date ≥ | Date ≤ | Expected Records | Expected Amount EGP |
-|--------|--------|--------|-----------------|---------------------|
-| `this_month` | 2026-05-18 | 2026-05-31 | 133 | 22,719,871.00 |
-| `this_quarter` | 2026-05-18 | 2026-06-30 | 355 | 55,527,209.00 |
-| `this_half` | 2026-05-18 | 2026-06-30 | 355 | 55,527,209.00 |
-| `this_year` | 2026-05-18 | 2026-12-31 | 1,934 | 337,946,411.00 |
+- **Filters** → Date / Draft / Unpaid / Partially Paid / Fully Paid / Cancelled — preset toggles. Click to apply, click X on chip to remove.
 
-> `this_quarter` and `this_half` are identical in May 2026 — Q2 and H1 both end Jun 30. This is correct.
+### 3.2 Custom Filters
 
----
+For exact domain specification:
+1. Click search bar dropdown (arrow icon on right)
+2. Click **Filters** → **Add Custom Filter**
+3. Choose field, operator, value
+4. For DATE RANGES (most common KPI need): select Date field, operator "is between", and enter start and end dates.
 
-## 5. KPI 2 Verification Procedure
+### 3.3 Group By
 
-- Filter 1: **Status = Posted**
-- Filter 2: **Payment Status = Unpaid** + **Partially Paid**
-- Filter 3: **Date < today** (all past-due dates)
-- Measure: **Due Amount** (not Amount)
+Group By is a separate axis from Filter. It controls Pivot row grouping. Available group-by options:
+- State, Payment State, Customer, Installment Type, Payment Type
+- Project, Phase, Zone, Building, Unit
+- Has Checks, All Checks Collected
 
-> **Important:** "KPI – Overdue Installments (Confirmed)" in the Favorites menu uses a **1-day window** (yesterday to today). This is NOT equivalent to our KPI 2. Our KPI 2 captures ALL historically accumulated overdue installments. Do not use that saved filter for KPI 2 verification.
+The "Has Checks" and "All Checks Collected" group-by options reflect stored boolean fields on `rs.installment` (per Phase 0.5 Objective 2 findings).
 
 ---
 
-## 6. KPI 1 Verification Procedure
+## 4. Measures
 
-- Filter: **Status = Posted** only
-- Measure: **Amount**
-- No date filter
+The **Measures** dropdown (next to view-mode icons) controls which aggregate columns appear in Pivot view. Available measures for All Installments:
 
----
+| UI Measure | Technical Field | Used by Module 2 KPI |
+|---|---|---|
+| Count | `__count` | Record counts on all KPIs |
+| Amount | `amount` | KPI 1, KPI 7 |
+| Paid Amount | `paid_amount` | KPI 3, KPI 4 |
+| Due Amount | `due_amount` | KPI 2, KPI 5 |
+| Actual Paid Amount | `x_studio_actual_paid_amount` | KPI 3 |
+| Total Due Amount | `total_due_amount` | (drill-down only) |
 
-## 7. KPI 3 Verification Procedure (Pending Check Exposure)
-
-- Filter: **Status = Posted** only
-- Measures: **Paid Amount** AND **Actual Paid Amount** (add both to pivot)
-- `cheques_in_pipeline = Paid Amount − Actual Paid Amount`
-
----
-
-## 8. Pre-existing Saved Searches (Favorites)
-
-Six saved searches exist on the All Installments view. Their domains are documented below for reference:
-
-| Name | Domain | Notes |
-|------|--------|-------|
-| All Installments | `[]` | No filter |
-| EXEC - KPI Base | `contract_id.state = confirm` | All confirmed-contract installments |
-| KPI – Overdue Installments (Confirmed) | `date in [yesterday, today] AND due_amount > 0 AND contract_id.state = confirm` | **1-day window only — NOT equivalent to KPI 2** |
-| KPI – Total Collected Amount (Confirmed) | `contract_id.state = confirm` | Measure = paid_amount |
-| KPI – Total Contracted Value (Confirmed) | `[]` | Measure = amount |
-| KPI – Total Outstanding Amount (Confirmed) | `contract_id.state = confirm` | Measure = due_amount |
-
-> **Note on `contract_id.state = confirm`:** These EXEC filters scope to confirmed contracts only. Our KPI implementations scope to `state = post` on `rs.installment`. These are different scoping rules. See `docs/PHASE_0_5_UI_DISCOVERY_FINDINGS.md §Objective 4` for the discrepancy analysis.
+Default measure: Amount.
 
 ---
 
-## 9. Field Reference Table
+## 5. UI Label → Technical Field Reference
+
+Use this table to map between UI labels (what the user sees) and technical Odoo fields (what scripts query). Verified identity-equal in Phase 0.5 Section 5.
 
 | UI Label | Technical Field | Type | Notes |
-|----------|----------------|------|-------|
-| Amount | `amount` | monetary | Face value — includes paid and unpaid |
-| Paid Amount | `paid_amount` | monetary | Includes uncashed cheques |
-| Due Amount | `due_amount` | monetary | Cash still owed (not yet received) |
-| Actual Paid Amount | `x_studio_actual_paid_amount` | monetary | Actually cashed (bank + cash) |
-| Total Due Amount | `total_due_amount` | monetary | Cash owed + uncashed cheques |
-| Check Pending Amount | `check_pending_amount` | monetary | Computed from check_ids |
-| Check Approved Amount | `check_approved_amount` | monetary | Approved check total |
-| Has Checks | `has_checks` | boolean (stored) | True if any check_ids linked |
-| All Checks Collected | `all_checks_collected` | boolean (stored) | True if all linked checks are cashed |
-| Payment Period | `payment_type_id` | many2one | e.g., "Quarterly" |
-| Reservation | `reservation_id` | many2one → `rs.reservation` | Parent reservation |
-| Contract | `contract_id` | many2one → `rs.contract` | Parent contract |
-| Phase | `phase_id` | many2one → `rs.structure.phase` | 5 phases total |
-| Building | `building_id` | many2one → `rs.structure.building` | 277 buildings total |
-| Zone | `zone_id` | many2one → `rs.structure.zone` | 11 zones total |
-| Unit | `unit_id` | many2one → `rs.structure.unit` | 1,873 units total |
+|---|---|---|---|
+| Date | `date` | date | Installment due date |
+| Status | `state` | selection | Posted = 'post', Draft = 'draft', Cancelled = 'cancel' |
+| Payment Status | `payment_state` | selection | Unpaid = 'unpaid', Partially Paid = 'partial', Fully Paid = 'paid' |
+| Customer | `partner_id` | many2one → res.partner | |
+| Amount | `amount` | monetary | |
+| Paid Amount | `paid_amount` | monetary | Includes uncashed checks received |
+| Due Amount | `due_amount` | monetary | Cash gap only |
+| Actual Paid Amount | `x_studio_actual_paid_amount` | monetary | Cashed payments only (Odoo Studio field) |
+| Total Due Amount | `total_due_amount` | monetary | Cash + uncashed checks |
+| Payment Period | `payment_type_id` | many2one → rs.payment.type | Display: "Monthly", "Quarterly", etc. |
+| Installment Type | `installment_type_id` | many2one → rs.installment.type | |
+| Reservation | `reservation_id` | many2one → rs.reservation | |
+| Contract | `contract_id` | many2one → rs.contract | |
+| Project | `project_id` | many2one → rs.structure.project | |
+| Phase | `phase_id` | many2one → rs.structure.phase | |
+| Zone | `zone_id` | many2one → rs.structure.zone | |
+| Building | `building_id` | many2one → rs.structure.building | |
+| Unit | `unit_id` | many2one → rs.structure.unit | |
 
 ---
 
-## 10. Selection Field Values (Technical → UI Label)
+## 6. Selection Field Values
 
-### `state` (Accounting Status)
+When a script queries a selection field, it uses the technical value (left column). When viewing in UI, you see the label (right column).
 
-| Technical value | UI label | Count (2026-05-14) |
-|----------------|----------|--------------------|
-| `draft` | Draft | 19 |
-| `post` | Posted | 42,443 |
-| `cancel` | Cancelled | 508 |
+### state
+| Technical | UI Label | Record Count (2026-05-18) |
+|---|---|---|
+| post | Posted | 42,443 |
+| draft | Draft | 19 |
+| cancel | Cancelled | 508 |
 
-### `payment_state` (Payment Status)
-
-| Technical value | UI label | Count (2026-05-14) |
-|----------------|----------|--------------------|
-| `unpaid` | Unpaid | 12,994 |
-| `partial` | Partially Paid | 418 |
-| `paid` | Fully Paid | 29,558 |
-
----
-
-## 11. Screenshot Placeholders
-
-The following screenshots should be added to `docs/screenshots/odoo_ui/`:
-
-1. `all_installments_list.png` — List view with search bar visible
-2. `pivot_view_measures.png` — Pivot view with Measures dropdown open
-3. `custom_filter_date_range.png` — Adding a custom date range filter
-4. `kpi7_this_month_verification.png` — KPI 7 this_month bucket applied
-
-> Placeholders only — Khaled to provide actual screenshots.
+### payment_state
+| Technical | UI Label | Record Count (2026-05-18) |
+|---|---|---|
+| unpaid | Unpaid | 12,994 |
+| partial | Partially Paid | 418 |
+| paid | Fully Paid | 29,558 |
 
 ---
 
-*Created by Phase 0.5 discovery — 2026-05-18*
+## 7. Cross-Check Workflow (Standard Procedure)
+
+When a verification script reports a KPI value, follow these steps to manually verify against Odoo UI:
+
+1. Read the script's printed domain. Example:
+   `[('state','=','post'), ('payment_state','in',['unpaid','partial']),
+     ('date','>=','2026-05-18'), ('date','<=','2026-05-31')]`
+
+2. Translate to UI filters:
+   - `('state','=','post')` → Filters → Status = Posted
+   - `('payment_state','in',['unpaid','partial'])` → Filters → Unpaid (and) Partially Paid
+   - Date range → Add Custom Filter → Date is between [start] and [end]
+
+3. Switch to Pivot view (top-right icon).
+
+4. Confirm Measures includes the field the script reports (default: Amount).
+
+5. Compare the Total row's value with the script's reported SUM. Tolerance for identity-equal: ±1 EGP per bucket.
+
+---
+
+## 8. Pivot Cross-Reference Examples
+
+### Example A — KPI 2 (Late Uncollected)
+
+Script reports: 322.2M EGP, 1,995 records (as of date d).
+
+UI workflow:
+1. Apply: Status = Posted, Payment Status = Unpaid + Partially Paid, Date <= [yesterday relative to d]
+2. Pivot, Measures = Due Amount + Count
+3. Total row → match the 322.2M (within ±1 EGP)
+
+### Example B — KPI 7 (Expected Forecast, this_month bucket)
+
+Script reports: 22.7M EGP, 133 records (for May 18-31, 2026).
+
+UI workflow:
+1. Apply: Status = Posted, Payment Status = Unpaid + Partially Paid, Date is between 2026-05-18 and 2026-05-31
+2. Pivot, Measures = Amount + Count
+3. Total row → match the 22.7M
+
+---
+
+## 9. Troubleshooting
+
+- **Numbers don't match by a large factor (>10x):** Check the date filter. The most common error is applying only a lower bound (Date >=) without the upper bound (Date <=). This captures all future installments to infinity, not just the intended bucket.
+
+- **Numbers don't match by a small factor (~1%):** Live data drift. The Odoo instance is mutable; if the verification script ran 2 hours ago and you check now, a new installment may have been posted. Re-run the script and compare against UI within the same minute.
+
+- **A filter chip is grey/disabled:** The filter conflicts with another active filter. Remove conflicting filters first.
+
+- **Pivot Total row shows 0:** No records match. Check filter chips — likely an over-restrictive combination.
+
+---
+
+## 10. Document Maintenance
+
+Update this guide whenever:
+- A new field is added to `rs.installment` that scripts use
+- A new selection value appears in `state` or `payment_state`
+- The Odoo UI labels change after an Odoo version upgrade
+- A new measure is added to the Measures dropdown
+
+Always reference the source: Phase number + finding section.
