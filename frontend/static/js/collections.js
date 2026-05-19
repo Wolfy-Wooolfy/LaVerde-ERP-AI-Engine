@@ -111,7 +111,7 @@
     var BUCKETS = ['this_month', 'this_quarter', 'this_half', 'this_year'];
     for (var b = 0; b < BUCKETS.length; b++) {
       var key    = BUCKETS[b];
-      var bucket = forecast[key];
+      var bucket = (forecast.buckets || {})[key];
       if (!bucket) continue;
 
       var amtEl = document.getElementById('col-forecast-' + key + '-amount');
