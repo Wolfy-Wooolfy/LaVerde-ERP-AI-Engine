@@ -5,10 +5,10 @@
     '/api/v1/collections/kpi/late-uncollected',
     '/api/v1/collections/kpi/total-portfolio-value',
     '/api/v1/collections/kpi/late-uncollected-by-project',
-    '/api/v1/collections/kpi/pending-check-exposure',
     '/api/v1/collections/kpi/collection-trend-6m',
     '/api/v1/collections/kpi/collection-rate',
     '/api/v1/collections/kpi/collection-rate-by-project',
+    '/api/v1/collections/kpi/expected-forecast',
   ];
 
   var _lastFetchData       = null;
@@ -42,87 +42,119 @@
     return '';
   }
 
-  // D2.4 — KPI 2 Late Uncollected hero card
-  function renderKpi2(kpi) {
-    if (!kpi) return;
-    var s = window.COLLECTIONS_STRINGS || {};
+  // ── Section 1 — Portfolio Scale (KPI 1) ───────────────────────────────────
+
+  function renderSection1(state) {
+    var kpi1 = state.portfolio;
+    if (!kpi1) return;
+    var s    = window.COLLECTIONS_STRINGS || {};
     var lang = s.lang || 'en';
-    var fmt = window.CollectionsFormatters;
+    var fmt  = window.CollectionsFormatters;
+
+    var valueEl = document.getElementById('col-kpi1-value');
+    var subEl   = document.getElementById('col-kpi1-subtitle');
+    var card    = document.getElementById('col-kpi1-container');
+
+    var f1 = fmt.formatEGP(kpi1.value, lang);
+    if (valueEl) {
+      valueEl.textContent = f1;
+      valueEl.title = fmt.formatEGP(kpi1.value, lang, { fullValue: true });
+      fadeIn(valueEl);
+    }
+    if (subEl) {
+      subEl.textContent = fmt.formatCount(kpi1.record_count, lang) + ' ' + (s.installments || 'installments');
+      fadeIn(subEl);
+    }
+    if (card) card.setAttribute('aria-label', (s.total_portfolio || 'Total Portfolio Value') + ': ' + f1);
+  }
+
+  // ── Section 2 — Current Risk (KPI 2) ─────────────────────────────────────
+
+  function renderSection2(state) {
+    var kpi2 = state.late;
+    if (!kpi2) return;
+    var s    = window.COLLECTIONS_STRINGS || {};
+    var lang = s.lang || 'en';
+    var fmt  = window.CollectionsFormatters;
 
     var valueEl    = document.getElementById('col-kpi2-value');
     var recordsEl  = document.getElementById('col-kpi2-records');
     var asOfEl     = document.getElementById('col-kpi2-as-of');
     var subtitleEl = document.getElementById('col-kpi2-subtitle');
-    var card       = document.querySelector('[data-drilldown-target="kpi2"]');
+    var card       = document.getElementById('col-kpi2-container');
 
-    var formatted  = fmt.formatEGP(kpi.value, lang);
-    var fullVal    = fmt.formatEGP(kpi.value, lang, { fullValue: true });
-    var count      = fmt.formatCount(kpi.record_count, lang);
-    var asOf       = kpi.as_of
-      ? new Date(kpi.as_of).toLocaleDateString(
+    var formatted = fmt.formatEGP(kpi2.value, lang);
+    var count     = fmt.formatCount(kpi2.record_count, lang);
+    var asOf      = kpi2.as_of
+      ? new Date(kpi2.as_of).toLocaleDateString(
           lang === 'ar' ? 'ar-EG' : 'en-GB',
           { day: 'numeric', month: 'long', year: 'numeric' }
         )
       : '—';
 
-    if (valueEl) {
-      valueEl.textContent = formatted;
-      valueEl.title = fullVal;
-      fadeIn(valueEl);
-    }
-    if (recordsEl) recordsEl.textContent = count;
-    if (asOfEl)    asOfEl.textContent    = asOf;
+    if (valueEl)    { valueEl.textContent = formatted; valueEl.title = fmt.formatEGP(kpi2.value, lang, { fullValue: true }); fadeIn(valueEl); }
+    if (recordsEl)  recordsEl.textContent = count;
+    if (asOfEl)     asOfEl.textContent    = asOf;
     if (subtitleEl) fadeIn(subtitleEl);
     if (card) card.setAttribute('aria-label', (s.late_uncollected || 'Late Uncollected') + ': ' + formatted);
   }
 
-  // D2.5 — Row 2: KPI 1 (Portfolio), KPI 3 (Pending Checks), KPI 4 (Rate)
-  function renderRow2(state) {
-    var s   = window.COLLECTIONS_STRINGS || {};
+  // ── Section 3 — Expected Collections (KPI 7) ──────────────────────────────
+
+  function renderSection3(state) {
+    var forecast = state.forecast;
+    if (!forecast) return;
+    var s    = window.COLLECTIONS_STRINGS || {};
     var lang = s.lang || 'en';
-    var fmt = window.CollectionsFormatters;
+    var fmt  = window.CollectionsFormatters;
 
-    // KPI 1 — Total Portfolio Value
-    var kpi1 = state[1];
-    var v1   = document.getElementById('col-kpi1-value');
-    var s1   = document.getElementById('col-kpi1-subtitle');
-    var c1   = document.getElementById('col-kpi1-container');
-    if (v1 && kpi1) {
-      var f1 = fmt.formatEGP(kpi1.value, lang);
-      v1.textContent = f1;
-      v1.title = fmt.formatEGP(kpi1.value, lang, { fullValue: true });
-      fadeIn(v1);
-      if (c1) c1.setAttribute('aria-label', (s.total_portfolio || 'Total Portfolio Value') + ': ' + f1);
-    }
-    if (s1 && kpi1) {
-      s1.textContent = fmt.formatCount(kpi1.record_count, lang) + ' ' + (s.installments || 'installments');
-      fadeIn(s1);
-    }
+    var BUCKETS = ['this_month', 'this_quarter', 'this_half', 'this_year'];
+    for (var b = 0; b < BUCKETS.length; b++) {
+      var key    = BUCKETS[b];
+      var bucket = forecast[key];
+      if (!bucket) continue;
 
-    // KPI 3 — Pending Check Exposure
-    var kpi3 = state[3];
-    var v3   = document.getElementById('col-kpi3-value');
-    var s3   = document.getElementById('col-kpi3-subtitle');
-    var c3   = document.getElementById('col-kpi3-container');
-    if (v3 && kpi3) {
-      var f3 = fmt.formatEGP(kpi3.value, lang);
-      v3.textContent = f3;
-      v3.title = fmt.formatEGP(kpi3.value, lang, { fullValue: true });
-      fadeIn(v3);
-      if (c3) c3.setAttribute('aria-label', (s.pending_check || 'Pending Check Exposure') + ': ' + f3);
+      var amtEl = document.getElementById('col-forecast-' + key + '-amount');
+      var subEl = document.getElementById('col-forecast-' + key + '-subtitle');
+      var card  = document.getElementById('col-forecast-' + key + '-container');
+
+      var amount          = fmt.formatEGP(bucket.amount, lang);
+      var countStr        = fmt.formatCount(bucket.record_count, lang);
+      var installmentsLbl = s.installments || 'installments';
+      var subtitle        = '';
+      if (bucket.period_end) {
+        var d = new Date(bucket.period_end);
+        var dateStr = d.toLocaleDateString(
+          lang === 'ar' ? 'ar-EG' : 'en-GB',
+          { day: 'numeric', month: 'long' }
+        );
+        var untilStr = (s.until || 'until {date}').replace('{date}', dateStr);
+        subtitle = countStr + ' ' + installmentsLbl + ' · ' + untilStr;
+      } else {
+        subtitle = countStr + ' ' + installmentsLbl;
+      }
+
+      if (amtEl) { amtEl.textContent = amount; amtEl.title = fmt.formatEGP(bucket.amount, lang, { fullValue: true }); fadeIn(amtEl); }
+      if (subEl) { subEl.textContent = subtitle; fadeIn(subEl); }
+      if (card)  card.setAttribute('aria-label', (s[key] || key) + ': ' + amount);
     }
-    if (s3) {
-      s3.textContent = s.in_pipeline || 'in pipeline';
-      fadeIn(s3);
-    }
+  }
+
+  // ── Section 4 — Performance & Trend (KPI 4, KPI 5a/5b, KPI 6) ────────────
+
+  function renderSection4(state) {
+    var s    = window.COLLECTIONS_STRINGS || {};
+    var lang = s.lang || 'en';
+    var fmt  = window.CollectionsFormatters;
 
     // KPI 4 — Collection Rate MTD / YTD
-    var kpi4 = state[5];
-    var mtdEl = document.getElementById('col-kpi4-mtd');
-    var ytdEl = document.getElementById('col-kpi4-ytd');
-    var s4    = document.getElementById('col-kpi4-subtitle');
-    var c4    = document.getElementById('col-kpi4-container');
+    var kpi4 = state.rate;
     if (kpi4) {
+      var mtdEl = document.getElementById('col-kpi4-mtd');
+      var ytdEl = document.getElementById('col-kpi4-ytd');
+      var s4    = document.getElementById('col-kpi4-subtitle');
+      var c4    = document.getElementById('col-kpi4-container');
+
       var mtdUnavail = isRateUnavailable(kpi4.mtd);
       var ytdUnavail = isRateUnavailable(kpi4.ytd);
       var mtdRate = mtdUnavail ? '—' : fmt.formatRate(kpi4.mtd.rate_percent, lang);
@@ -138,59 +170,45 @@
       }
       if (c4) c4.setAttribute('aria-label', (s.collection_rate || 'Collection Rate') + ': MTD ' + mtdRate + ' / YTD ' + ytdRate);
     }
-  }
 
-  // D2.6 — Row 3: Top 3 Projects
-  function renderRow3(state) {
-    var kpi5a = state[2];
-    var kpi5b = state[6];
-    if (!kpi5a || !kpi5a.projects) return;
-    var s    = window.COLLECTIONS_STRINGS || {};
-    var lang = s.lang || 'en';
-    var fmt  = window.CollectionsFormatters;
+    // KPI 5a/5b — Per-project performance
+    var kpi5a = state.perProject;
+    var kpi5b = state.rateByProject;
+    if (kpi5a && kpi5a.projects) {
+      for (var i = 0; i < kpi5a.projects.length; i++) {
+        var p    = kpi5a.projects[i];
+        var idx  = i + 1;
+        var card   = document.getElementById('col-proj' + idx + '-card');
+        var nameEl = document.getElementById('col-proj' + idx + '-name');
+        var lateEl = document.getElementById('col-proj' + idx + '-late');
+        var rateEl = document.getElementById('col-proj' + idx + '-rate');
 
-    for (var i = 0; i < kpi5a.projects.length; i++) {
-      var p    = kpi5a.projects[i];
-      var idx  = i + 1;
-      var card   = document.getElementById('col-proj' + idx + '-card');
-      var nameEl = document.getElementById('col-proj' + idx + '-name');
-      var lateEl = document.getElementById('col-proj' + idx + '-late');
-      var rateEl = document.getElementById('col-proj' + idx + '-rate');
+        var displayName = (s.project_names && s.project_names[p.project_name]) || p.project_name;
+        var lateAmt     = fmt.formatEGP(p.late_uncollected, lang);
 
-      var displayName = (s.project_names && s.project_names[p.project_name]) || p.project_name;
-      var lateAmt     = fmt.formatEGP(p.late_uncollected, lang);
+        var proj5b = null;
+        if (kpi5b && kpi5b.projects) {
+          for (var j = 0; j < kpi5b.projects.length; j++) {
+            if (kpi5b.projects[j].project_id === p.project_id) { proj5b = kpi5b.projects[j]; break; }
+          }
+        }
+        var rateUnavail = isRateUnavailable(proj5b);
+        var rateStr     = rateUnavail ? '—' : fmt.formatRate(proj5b.rate_percent, lang);
+        var rateTip     = rateUnavail ? getRateTooltip(proj5b, s) : '';
 
-      var proj5b = null;
-      if (kpi5b && kpi5b.projects) {
-        for (var j = 0; j < kpi5b.projects.length; j++) {
-          if (kpi5b.projects[j].project_id === p.project_id) { proj5b = kpi5b.projects[j]; break; }
+        if (nameEl) { nameEl.textContent = displayName; fadeIn(nameEl); }
+        if (lateEl) { lateEl.textContent = lateAmt; lateEl.title = fmt.formatEGP(p.late_uncollected, lang, { fullValue: true }); fadeIn(lateEl); }
+        if (rateEl) { rateEl.textContent = rateStr; rateEl.title = rateTip; fadeIn(rateEl); }
+        if (card) {
+          card.setAttribute('data-drilldown-target', 'kpi5-proj-' + p.project_id);
+          card.setAttribute('aria-label', displayName + ': ' + lateAmt + ' · ' + rateStr);
         }
       }
-      var rateUnavail = isRateUnavailable(proj5b);
-      var rateStr     = rateUnavail ? '—' : fmt.formatRate(proj5b.rate_percent, lang);
-      var rateTip     = rateUnavail ? getRateTooltip(proj5b, s) : '';
-
-      if (nameEl) { nameEl.textContent = displayName; fadeIn(nameEl); }
-      if (lateEl) {
-        lateEl.textContent = lateAmt;
-        lateEl.title = fmt.formatEGP(p.late_uncollected, lang, { fullValue: true });
-        fadeIn(lateEl);
-      }
-      if (rateEl) { rateEl.textContent = rateStr; rateEl.title = rateTip; fadeIn(rateEl); }
-      if (card) {
-        card.setAttribute('data-drilldown-target', 'kpi5-proj-' + p.project_id);
-        card.setAttribute('aria-label', displayName + ': ' + lateAmt + ' · ' + rateStr);
-      }
     }
-  }
 
-  // D2.7 — Row 4: 6-Month Collection Trend
-  function renderRow4(state) {
-    var kpi6 = state[4];
+    // KPI 6 — 6-Month Collection Trend
+    var kpi6 = state.trend;
     if (!kpi6 || !kpi6.months) return;
-    var s    = window.COLLECTIONS_STRINGS || {};
-    var lang = s.lang || 'en';
-    var fmt  = window.CollectionsFormatters;
 
     var canvas  = document.getElementById('col-kpi6-chart');
     var emptyEl = document.getElementById('col-kpi6-chart-empty');
@@ -279,12 +297,13 @@
     registerChart('col-kpi6-chart', _kpi6Chart);
   }
 
-  // D2.8 — Data-entry banner auto-hide
+  // ── Data-entry banner ─────────────────────────────────────────────────────
+
   function shouldShowDataEntryBanner(state) {
     if (new URLSearchParams(window.location.search).get('show_banner') === '1') return true;
-    var kpi4 = state[5];
+    var kpi4 = state.rate;
     if (kpi4 && (isRateUnavailable(kpi4.mtd) || isRateUnavailable(kpi4.ytd))) return true;
-    var kpi6 = state[4];
+    var kpi6 = state.trend;
     if (kpi6 && kpi6.months) {
       var nonZero = kpi6.months.filter(function (m) { return m.amount > 0; }).length;
       if (nonZero < 5) return true;
@@ -310,15 +329,30 @@
     })).then(function (results) {
       var elapsed = Math.round(performance.now() - t0);
       console.log('[Collections] Fetched 7 KPIs in ' + elapsed + 'ms');
-      _lastFetchData = results;
+      var state = {
+        late:          results[0],
+        portfolio:     results[1],
+        perProject:    results[2],
+        trend:         results[3],
+        rate:          results[4],
+        rateByProject: results[5],
+        forecast:      results[6],
+      };
+      _lastFetchData = state;
+      if (state.late && state.late.data_quality_warning) {
+        console.warn('[Collections] KPI 2 data_quality_warning:', state.late.data_quality_warning);
+      }
+      if (state.forecast && state.forecast.data_quality_warning) {
+        console.warn('[Collections] KPI 7 data_quality_warning:', state.forecast.data_quality_warning);
+      }
       hideErrorBanner();
       updateTimestamps();
-      renderKpi2(results[0]);
-      renderRow2(results);
-      renderRow3(results);
-      renderRow4(results);
-      updateDataEntryBanner(results);
-      return results;
+      renderSection1(state);
+      renderSection2(state);
+      renderSection3(state);
+      renderSection4(state);
+      updateDataEntryBanner(state);
+      return state;
     }).catch(function (err) {
       showErrorBanner();
       throw err;
@@ -372,7 +406,6 @@
   }
 
   function init() {
-    // Redirect the topbar Refresh button to our handler on this page.
     var topbarBtn = document.getElementById('refresh-btn');
     if (topbarBtn) topbarBtn.onclick = collectionsRefresh;
 
