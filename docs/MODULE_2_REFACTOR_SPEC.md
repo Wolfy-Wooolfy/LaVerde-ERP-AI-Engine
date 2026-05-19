@@ -13,6 +13,16 @@
 
 ---
 
+> ⚠️ **Cross-check notice (2026-05-19) — this document is partially stale**
+>
+> Decisions 11.13 through 11.17 in `docs/MODULE_2_IMPLEMENTATION_DECISIONS.md` Session 11 override portions of this spec. Most notably:
+>
+> - **§7.6 / Decision 10.1 (PATH C on KPI 2)** is reversed by **Decision 11.13** (PATH A — KPI 2 formula will be redefined from `Amount - paid_amount` to `Amount - actual_paid_amount` in Stage 2.5; the cheques amount becomes a subset annotation on the new total).
+> - **§9 Stage sequence** is amended to insert **Stage 2.5** between Stages 3 and 4 (see `docs/STAGE_2_5_PLAN.md`).
+> - **§9 Stage 5 deliverables** now include the deferred KPI 7 `cheques_record_count` per **Decision 11.14**.
+>
+> Treat this spec as the architectural baseline, but always cross-check `MODULE_2_IMPLEMENTATION_DECISIONS.md` Session 11+ and `docs/MODULE_2_STAGE_TRACKER.md` before acting on any specific section. A full spec refresh (v1.2) is scheduled for the post-Stage-2.5 documentation pass.
+
 ## Changelog
 - **v1.1 (2026-05-18)** — Applied PATH C from Phase 0.5 findings. KPI 7 cheques annotation removed from frontend cards (backend response unchanged). Section 7.1 layout updated. Sections 4.5, 4.6, 7.1, 7.4, 7.6, 8.2, 8.5 amended. §11 open questions resolved. §16 cross-references added.
 - **v1.0 (2026-05-18)** — Initial draft, approved by Khaled.

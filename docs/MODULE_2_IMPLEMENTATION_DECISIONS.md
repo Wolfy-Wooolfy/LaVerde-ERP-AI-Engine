@@ -1513,3 +1513,311 @@ Chat response parsing (Pillar 2).
 | `response_model=` | `LateUncollectedResponse` (PATH Y / PATH P1 — Decision 10.4) |
 
 ---
+
+## Session 11 — 2026-05-17 to 2026-05-19 — Stage 3 Frontend Restructure + Closure Review
+
+**Scope:** Stage 3 frontend restructure (4-section dashboard layout,
+KPI 3 DOM removal, state-as-named-object refactor, KPI 7 fetch
+addition) — Commits 1-4 + Commit 4.5 smoke test fix. Closure review
+on 2026-05-19 added 5 forward-looking decisions (11.13-11.17).
+
+**Format note:** Decisions 11.1-11.12 use a hybrid format
+(title + spec reference + code reference + capture note) because
+they were taken and applied during Stage 3 implementation but their
+detailed rationale was not captured in this log in the moment. The
+spec section and code path together encode the decision intent; no
+post-hoc rationale prose is invented. Decisions 11.13-11.17 use the
+standard full-rationale format because they originate in the
+current closure review.
+
+Checkpoint tag target:
+`checkpoint-D-stage3-frontend-restructure-complete`
+
+---
+
+### Decision 11.1 — 4 sections with typed h2 headers (REFACTOR_SPEC §7.2 styling)
+
+- **Status:** Implemented in Commit 3 (`9f5c496`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §7.2
+- **Code Reference:** `frontend/templates/collections/dashboard.html`
+  — 4 `<section>` blocks with section-header h2 elements
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.2 — KPI 3 removal: DOM-only (endpoint preserved per §6.2)
+
+- **Status:** Implemented in Commit 3 (`9f5c496`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §6.2
+- **Code Reference:** `frontend/templates/collections/dashboard.html`
+  (no `col-kpi3-*` elements present) and
+  `backend/api/v1/endpoints/collections.py` (KPI 3 endpoint
+  route preserved)
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.3 — data_quality_warning: silent console.warn after state build
+
+- **Status:** Implemented in Commit 4 (`b9a1e84`)
+- **Spec Reference:** Procedural — no dedicated spec section. `data_quality_warning` field is defined in the response schemas for KPI 2 (per Decision 10.8) and KPI 7 (per Session 9 schema work). The frontend's choice to log silently via `console.warn` instead of surfacing in UI is a Stage 3 implementation detail.
+- **Code Reference:** `frontend/static/js/collections.js` — `fetchAllKPIs()`, the `console.warn` block immediately after `_lastFetchData = state` assignment, guards on `state.late.data_quality_warning` and `state.forecast.data_quality_warning`
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.4 — border-primary-500 for forecast cards (no info palette)
+
+- **Status:** Implemented in Commit 2 (`6a43992`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §7.4 (Color Palette per Section) — spec calls for `border-info-500` for Section 3 Expected Collections
+- **Code Reference:** `frontend/templates/components/_forecast_card.html` (uses `border-primary-500`) and `frontend/tailwind.config.js` (no `info` palette key defined; spec's `border-info-500` mapped to the existing primary palette as the closest blue available)
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.5 — kpi-card CSS class as the actual class name
+
+- **Status:** Implemented in Commit 2 (`6a43992`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §7.5 (Card Templates) — spec describes card template structure without naming a CSS class; `kpi-card` is the implementation's actual class name
+- **Code Reference:** `frontend/src/css/input.css` line 53 (`.kpi-card` utility class definition; compiled into `frontend/static/css/app.css`) and the 3 new macros (`_portfolio_card.html`, `_risk_card.html`, `_forecast_card.html`) consume the `kpi-card` class
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.6 — State clean break: explicit object literal, not dynamic loop
+
+- **Status:** Implemented in Commit 4 (`b9a1e84`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §6.3 (state refactor
+  intent)
+- **Code Reference:** `frontend/static/js/collections.js` —
+  `fetchAllKPIs()` builds `state` as a named object literal
+  (late, portfolio, perProject, trend, rate, rateByProject,
+  forecast); zero `state[N]` array indexing in the file
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.7 — CSS rebuild required when new Tailwind classes are introduced
+
+- **Status:** Implemented in Commit 3 (`9f5c496`)
+- **Spec Reference:** (procedural — no spec section)
+- **Code Reference:** `frontend/static/css/app.css` — rebuilt to
+  include Tailwind classes added in Stage 3 (sm:grid-cols-2,
+  lg:grid-cols-4, tracking-wider, sm:grid-cols-3)
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.8 — data-drilldown-target attributes on Stage 3 macro cards
+
+- **Status:** Implemented in Commit 2 (`6a43992`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §9 (drill-down
+  architecture, Stages 5/6 prep)
+- **Code Reference:**
+  `frontend/templates/components/_portfolio_card.html`,
+  `frontend/templates/components/_risk_card.html`,
+  `frontend/templates/components/_forecast_card.html` —
+  `data-drilldown-target` attribute on each card's root element
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.9 — Forecast bucket collapse (Q2=H1 in Apr-Jun, Q4=H2 in Oct-Dec) is expected
+
+- **Status:** Implemented in Commit 4.5 (`2fb18ef`)
+- **Spec Reference:** (emergent from KPI 7 backend semantics — calendar
+  boundary coincidence; see Session 9 KPI 7 implementation summary
+  for the Q2/H1 cross-check on 2026-05-19)
+- **Code Reference:**
+  `backend/modules/collections/services/kpi_service.py` —
+  `get_expected_collections_forecast()` calendar boundary
+  computation; this_quarter and this_half period_end values
+  coincide in Apr-Jun and Oct-Dec by design
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.10 — Section 4 layout: Option C (rate full-width row 1, projects row 2)
+
+- **Status:** Implemented in Commit 3 (`9f5c496`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §7.1 (Section 4
+  area + amendment)
+- **Code Reference:**
+  `frontend/templates/collections/dashboard.html` — Section 4
+  structure: rate card outside any grid container, then
+  `sm:grid-cols-3` projects, then full-width trend chart
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.11 — KPI 7 forecast cards suppress cheques_in_pipeline annotation (PATH C)
+
+- **Status:** Implemented in Commit 2 (`6a43992`)
+- **Spec Reference:** `MODULE_2_REFACTOR_SPEC.md` §10 Decision Log, R.11
+- **Code Reference:**
+  `frontend/templates/components/_forecast_card.html` (no cheques
+  annotation rendered) and `frontend/static/js/collections.js` —
+  `renderSection3()` does not consume `cheques_in_pipeline`
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.12 — KPI 2 risk card suppresses cheques_in_pipeline annotation (Decision 10.1 applied to UI)
+
+- **Status:** Implemented in Commit 2 (`6a43992`)
+- **Spec Reference:** Decision 10.1 (Session 10, applied at frontend
+  layer) — this entry is the frontend application of the prior
+  backend-side decision
+- **Code Reference:**
+  `frontend/templates/components/_risk_card.html` (no cheques
+  annotation rendered) and `frontend/static/js/collections.js` —
+  `renderSection2()` does not consume `cheques_in_pipeline`
+- **Capture Note:** Decision taken and applied during the Stage 3
+  implementation session (Session 11 in-flight). Detailed rationale
+  was not captured in this log in the moment; preserved here as
+  title + verifiable references for audit trail continuity. The
+  spec and code together encode the full decision intent and
+  implementation.
+
+### Decision 11.13 — KPI 2 redefinition deferred to Stage 2.5
+
+- **Status:** Approved 2026-05-19 (fully reverses Decision 10.1)
+- **Trigger:** Stage 3 smoke test review revealed semantic
+  ambiguity in the current KPI 2 formula. `paid_amount` includes
+  postdated cheques received (1.929M EGP), which is "received but
+  not yet cleared" — risk-material regardless of the 0.49%
+  proportion that drove the original PATH C decision.
+- **Change:** Replace formula
+  `Late Uncollected = Amount - paid_amount` (currently 326.4M)
+  with `Late Uncollected = Amount - actual_paid_amount` (target
+  ~328.3M, exact value pending Pre-Implementation Discovery in
+  Stage 2.5). Add annotation "منهم 1.9 مليون شيكات مستلمة لم
+  تتحصل بعد" as a mathematically-correct subset of the new total.
+- **Scope:** ~4 hours across backend service, ~12 unit test
+  updates, `verify_kpi2_live.py` update, Odoo UI view creation
+  (human-side), identity-equal re-verification, frontend
+  annotation rendering. Full breakdown in
+  `docs/STAGE_2_5_PLAN.md`.
+- **Reversal of Decision 10.1:** Decision 10.1 (Session 10,
+  2026-05-19) applied PATH C to KPI 2 based on EGP signal
+  proportion (1.9M / 326.4M = 0.49%). This decision concludes
+  proportion-based suppression was the wrong lens — the
+  categorical distinction (cleared vs uncleared cheques) is
+  risk-material regardless of proportion. Decision 10.1 entry
+  stays in the log as historical record; this decision marks
+  PATH C → PATH A reversal.
+- **Identity-equal consequence:** Stage 2 V5 verified
+  326,374,203.40 EGP. Stage 2.5 V5 will verify a new ground
+  truth (~328.3M, exact value TBD). This is not a regression —
+  it is the corrected ground truth per the redefined formula.
+- **Risk gate:** Finding 8b from Module 2 Phase 2 Discovery
+  established that `x_studio_actual_paid_amount` does not
+  satisfy `Amount = actual_paid_amount + due_amount` on the
+  full portfolio. The Stage 2.5 Pre-Implementation Discovery
+  script must prove the mismatch is absent on the Late subset
+  (state='post', payment unpaid/partial) before any code change.
+  If the hypothesis fails, Decision 11.13 must be re-evaluated.
+
+### Decision 11.14 — KPI 7 cheques_record_count deferred to Stage 5
+
+- **Status:** Approved 2026-05-19
+- **Observation:** Stage 3 forecast cards display `record_count`
+  per bucket (e.g., "112 installments") but the ideal display
+  would include a cheques sub-count (e.g., "112 installments —
+  50 منهم شيكات"). The KPI 7 backend currently returns
+  `cheques_record_count: null` (Alternative B limitation per
+  Decision 9.X).
+- **Decision:** Defer the backend extension that would compute
+  per-bucket `cheques_record_count` to Stage 5 (Drill-Down
+  Backend session), paired with the drill-down endpoint work.
+  Rationale: the same per-installment query infrastructure
+  needed for drill-down detail is what unlocks
+  `cheques_record_count`. Bundling avoids duplicated query design.
+- **Frontend consequence:** Stage 3 forecast cards display
+  `record_count` only. Stage 5 backend + a follow-up frontend
+  update will add the sub-count.
+
+### Decision 11.15 — Per-card drill-down confirmed for Stages 5+6
+
+- **Status:** Approved 2026-05-19 (re-confirms REFACTOR_SPEC §9)
+- **Confirmation:** All clickable KPI elements (KPI 1 hero, KPI 2
+  risk card, the 4 KPI 7 forecast cards, the 3 KPI 5 project
+  cards, KPI 6 trend chart months) will get drill-down per
+  REFACTOR_SPEC §8.6 (5 backend endpoints) and §9 Stages 5+6.
+- **No scope change.** This entry exists to mark the
+  confirmation as part of the Session 11 close so future
+  sessions do not re-litigate the question.
+
+### Decision 11.16 — KPI 4 visual emptiness is data-state, not regression
+
+- **Status:** Approved 2026-05-19 (documentation only)
+- **Observation:** Stage 3 smoke test showed Section 4 Rate card
+  rendering empty with the "البيانات تحت الإدخال" fallback. KPI 4
+  backend returns `rate_percent=0.0`, `numerator_egp=0.0`,
+  `denominator_egp=50,380,117`. The `isRateUnavailable()` third
+  clause fires correctly.
+- **Root cause:** La Verde Collections team has not entered
+  May 2026 paid amounts in Odoo yet. Numerator is legitimately
+  zero because no collections have been recorded for the
+  current period.
+- **Self-correction trigger:** When the Collections team
+  completes May 2026 data entry, `numerator_egp > 0` and the
+  card will render the rate naturally. No code change required.
+- **Verification:** Confirm in Stage 2.5 V5 or a later
+  verification run that once `numerator_egp > 0`, the rate
+  renders.
+
+### Decision 11.17 — Smoke test lesson: include exact JSON response shape in Stage prompts
+
+- **Status:** Approved 2026-05-19 (process improvement)
+- **Lesson source:** Stage 3 Commit 4 introduced a shape
+  mismatch — `renderSection3()` read `forecast[key]` but the
+  KPI 7 response shape is `forecast.buckets[key]`. The browser
+  smoke test caught the bug; unit tests did not because no
+  unit test asserted the JS render function against the actual
+  backend response shape.
+- **Process change:** All future Stage prompts that involve
+  frontend rendering of a backend KPI response MUST include
+  the exact JSON response shape (keys at every nesting level)
+  verbatim in the prompt's Context section. Do not assume
+  Claude Code can derive the runtime shape from Pydantic
+  schemas — schemas describe types, not nested object names.
+- **Template addition:** Future Stage prompts for frontend
+  work include a section titled "Backend Response Shape" with
+  pasted JSON sample (1 example per KPI consumed) before any
+  rendering work begins.
+- **Applies to:** All Stage 4, 5, 6 prompts, and any
+  subsequent module's frontend work.

@@ -701,3 +701,15 @@ If La Verde's stakeholders later request alignment with the EXEC favorites (e.g.
 - KD-2 can be supplemented with a separate "Daily Flow" KPI without removing the stock KPI 2 (additive change).
 
 These reversibility paths are explicit so that the decision is not perceived as permanent. The current MVP launches with the stock-and-aggregate definition because it is what the Board has requested verbally.
+
+**KPI 2 Formula Status (2026-05-19 — Tentative pending Stage 2.5 discovery):**
+
+The current Module 2 backend computes KPI 2 (Late Uncollected)
+using `paid_amount` (which includes postdated cheques received).
+Per Decision 11.13, this formula is under review for Stage 2.5
+amendment. The tentative corrected formula will use
+`actual_paid_amount` (cash + cleared cheques only). The exact
+target value will be determined by Pre-Implementation Discovery
+script in Stage 2.5 (Finding 8b structural mismatch must be
+resolved on the Late subset before formula commitment). See
+`docs/STAGE_2_5_PLAN.md` for full specification.
