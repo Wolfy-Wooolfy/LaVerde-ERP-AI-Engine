@@ -1,0 +1,165 @@
+══════════════════════════════════════════════════════════════════════════════
+  Stage 2.5 — KPI 2 Redefinition Pre-Implementation Discovery
+══════════════════════════════════════════════════════════════════════════════
+  Run timestamp (UTC)   : 2026-05-20T08:56:58.226669+00:00
+  Run timestamp (Cairo) : 2026-05-20T11:56:58.226669+03:00
+  Late domain today date: 2026-05-20
+  ALLOWED_METHODS       : ['fields_get', 'name_get', 'name_search', 'read', 'read_group', 'search', 'search_count', 'search_read']
+  READ-ONLY. No writes. No OpenAI. AI cost = $0.00
+══════════════════════════════════════════════════════════════════════════════
+
+  Purpose: verify 4 hypotheses on Late subset before KPI 2 formula change.
+  Decision 11.13 (PATH A): value = amount - actual_paid_amount
+  Reverses Decision 10.1 (PATH C): value = due_amount
+  Late domain: [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '<', '2026-05-20')]
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 0.5 — Field Discovery (fields_get on rs.installment)
+══════════════════════════════════════════════════════════════════════════════
+
+  0a. fields_get(rs.installment, attributes=['string', 'type'])
+      → 85 fields returned  (1218 ms)
+
+  [PASS] Primary candidate 'total_due_amount' found.
+        type  = 'monetary'
+        label = 'Total Due Amount'
+
+  Using field name: 'total_due_amount' throughout remaining sections.
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 1 — Late Domain Universe Baseline
+══════════════════════════════════════════════════════════════════════════════
+
+  1a. read_group(late_domain, [amount, due_amount, paid_amount,
+                               x_studio_actual_paid_amount, total_due_amount], [])
+      → 1 row(s) returned  (93 ms)
+
+  Universe sums:
+    record_count                           : 2,013
+    SUM(amount)                            : 390,344,036.00 EGP
+    SUM(due_amount)                        : 327,916,453.40 EGP
+    SUM(paid_amount)                       : 62,427,582.60 EGP
+    SUM(x_studio_actual_paid_amount)       : 60,498,582.60 EGP
+    SUM(total_due_amount              ) : 329,845,453.40 EGP
+
+  Derived values:
+    PATH C value  (due_amount)             : 327,916,453.40 EGP
+    PATH A value  (amount - actual_paid)   : 329,845,453.40 EGP
+    Cheques delta (paid - actual_paid)     : 1,929,000.00 EGP
+    PATH A − PATH C delta                  : 1,929,000.00 EGP
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 2 — H1: SUM(amount) = SUM(paid_amount) + SUM(due_amount)
+            [PATH C identity — validates existing formula is consistent]
+══════════════════════════════════════════════════════════════════════════════
+
+    SUM(amount)                = 390,344,036.00 EGP
+    SUM(paid_amount)           = 62,427,582.60 EGP
+    SUM(due_amount)            = 327,916,453.40 EGP
+    SUM(paid) + SUM(due)       = 390,344,036.00 EGP
+    delta                      = 0.00 EGP
+    tolerance                  = 1.00 EGP
+
+  [PASS] H1 PASS: identity holds (delta = 0.0000 EGP < 1.00 EGP)
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 3 — H2: SUM(amount) = SUM(actual_paid) + SUM(total_due_amount)
+            [PATH A identity — validates new formula is safe to use]
+══════════════════════════════════════════════════════════════════════════════
+
+  Identity mismatch thresholds (Amendment 2):
+    delta < 1.00 EGP           : PASS — identity holds exactly
+    1.00 ≤ delta < 1,000 EGP : PASS — micro-drift, acceptable
+    delta ≥ 1,000 EGP         : FAIL — identity mismatch
+
+    SUM(amount)                = 390,344,036.00 EGP
+    SUM(actual_paid_amount)    = 60,498,582.60 EGP
+    SUM(total_due_amount      ) = 329,845,453.40 EGP
+    SUM(actual) + SUM(total_due) = 390,344,036.00 EGP
+    delta                      = 0.000000 EGP [exact]
+
+  [PASS] H2 PASS: identity holds exactly (delta = 0.000000 EGP)
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 4 — H3: SUM(paid) − SUM(actual_paid) > 0
+            AND ≈ SUM(check_pending_amount) on same domain
+══════════════════════════════════════════════════════════════════════════════
+
+  4a. Standalone read_group(late_domain, [check_pending_amount], [])
+      Purpose: cross-check derived cheques against Odoo computed field.
+      → 1,929,000.00 EGP  (78 ms)
+
+  H3 — Condition 1: SUM(paid_amount) − SUM(actual_paid_amount) > 0
+    SUM(paid_amount)             = 62,427,582.60 EGP
+    SUM(actual_paid_amount)      = 60,498,582.60 EGP
+    Derived (paid - actual)      = 1,929,000.00 EGP
+    Derived clamped ≥ 0          = 1,929,000.00 EGP
+  [PASS] Condition 1 PASS: 1,929,000.00 EGP > 0 — cheques in pipeline confirmed
+
+  H3 — Condition 2: derived ≈ SUM(check_pending_amount)
+    Derived cheques (from RPC 1) = 1,929,000.00 EGP
+    Stored  (check_pending_amount) = 1,929,000.00 EGP
+    Parity delta                 = 0.0000 EGP
+    Tolerance                    = 1.00 EGP
+  [PASS] Condition 2 PASS: derived ≈ stored (delta = 0.0000 EGP)
+
+  [PASS] H3 PASS: both conditions hold
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 5 — H4: record_count invariant (domain-only, formula-independent)
+══════════════════════════════════════════════════════════════════════════════
+
+  H4 asserts the KPI 2 redefinition is a VALUE change, not a DOMAIN change.
+  The Late domain is the same 3-clause Candidate C domain regardless of
+  whether the value is computed as due_amount or amount − actual_paid_amount.
+  Therefore record_count (= __count from read_group) is identical under
+  both formulas — it is determined solely by the domain.
+
+    record_count from RPC 1 (single read_group, Late domain): 2,013
+
+  [PASS] H4 PASS: record_count = 2,013 > 0
+         Domain is valid and populated. Count is formula-independent
+         (domain unchanged between PATH C and PATH A).
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 6 — GATE VERDICT
+══════════════════════════════════════════════════════════════════════════════
+
+  Hypothesis results:
+    H1 (PATH C identity — amount = paid + due)     : PASS
+    H2 (PATH A identity — amount = actual + total) : PASS
+    H3 (cheques > 0 AND derived ≈ stored)          : PASS
+    H4 (record_count invariant)                    : PASS
+
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │                       GATE PASS — proceed to Phase B                       │
+  │                                                                            │
+  │       Decision 11.13 PATH A is verified safe for KPI 2 redefinition.       │
+  │     All 4 hypotheses PASS. Backend service formula change may proceed.     │
+  └────────────────────────────────────────────────────────────────────────────┘
+
+══════════════════════════════════════════════════════════════════════════════
+SECTION 7 — PHASE COMPLETE
+══════════════════════════════════════════════════════════════════════════════
+
+  3 RPCs executed. No writes performed.
+
+  RPC budget:
+    RPC 0  fields_get(rs.installment)               → 85 fields
+    RPC 1  read_group(late_domain, 5 fields)         → 2,013 records
+    RPC 2  read_group(check_pending_amount)          → 1,929,000.00 EGP
+
+  Key values captured:
+    PATH C value  (due_amount)           : 327,916,453.40 EGP
+    PATH A value  (amount - actual_paid) : 329,845,453.40 EGP
+    Delta (PATH A − PATH C)              : 1,929,000.00 EGP
+    Cheques in pipeline                  : 1,929,000.00 EGP
+    Total due field name used            : 'total_due_amount'
+
+  Gate: PASS  |  Failures: none
+
+  Output teed to: D:\Khaled Elmasry\Odoo\LaVerde-ERP-AI-Engine\scripts\discover_kpi2_redefinition_output.txt
+
+══════════════════════════════════════════════════════════════════════════════
+  STAGE 2.5 PRE-IMPLEMENTATION DISCOVERY — PHASE COMPLETE
+══════════════════════════════════════════════════════════════════════════════
