@@ -89,26 +89,34 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
     """Return KPI 2 — Late Uncollected.
 
     Queries rs.installment for posted, partially-paid-or-unpaid installments
-    whose due date is before today, and returns SUM(due_amount) plus cheques
-    derivation fields via Alternative B (Decision 10.2).
+    whose due date is before today, and returns SUM(amount) − SUM(actual_paid_amount)
+    plus the cheques subset annotation via Alternative B (Decision 10.2).
+
+    Formula: PATH A (Decision 11.13, Session 12) — reverses Decision 10.1 PATH C.
+    Pre-implementation discovery confirmed safe on live Odoo (commit 14600f3,
+    2026-05-20): H2 identity exact to 0.000000 EGP on the Late subset.
 
     A single read_group call aggregates all monetary fields simultaneously
-    (due_amount, amount, paid_amount, x_studio_actual_paid_amount) — 1 RPC
-    total, unchanged from the original implementation (C3 constraint).
+    (amount, paid_amount, x_studio_actual_paid_amount, total_due_amount) — 1 RPC
+    total, C3 constraint preserved.
 
-    Cheques formula (Alternative B, Decision 9.1 analog):
+    Value formula (PATH A, Decision 11.13):
+        value = SUM(amount) − SUM(x_studio_actual_paid_amount)
+
+    Identity cross-check: value ≈ SUM(total_due_amount). Tiered thresholds:
+        delta < 1 EGP: no flag; 1–999 EGP: INFO log; ≥ 1000 EGP: WARNING + flag.
+
+    Cheques formula (Alternative B, Decision 10.2 / Decision 9.1 analog):
         cheques_in_pipeline = max(SUM(paid_amount) - SUM(x_studio_actual_paid_amount), 0)
     cheques_record_count is null (Alternative B limitation — per-installment
     count unavailable via read_group net formula).
 
-    PATH C (Decision 10.1): backend includes cheques fields; Stage 3 frontend
-    will suppress the annotation because 1.929M EGP = 0.49% of the late
-    portfolio is visual noise below the 5M EGP PATH C threshold.
+    data_quality_warning priority: "negative_cheques" > "kpi2_identity_mismatch".
 
     Return shape::
 
         {
-            "value":                     float,  # EGP total due_amount
+            "value":                     float,  # EGP SUM(amount) − SUM(actual_paid_amount)
             "currency":                  "EGP",
             "record_count":              int,    # matched installment count
             "cheques_in_pipeline":       float,  # EGP uncashed cheques (Alt B)
@@ -119,7 +127,7 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
             "cache_status":              str,    # "fresh" or "cached"
             "rpc_duration_ms":           int,    # 0 if served from cache
             "domain":                    list,   # legacy field — same value as drill_down_domain
-            "data_quality_warning":      str | None,  # "negative_cheques" or null
+            "data_quality_warning":      str | None,  # "negative_cheques", "kpi2_identity_mismatch", or null
         }
 
     Raises:
@@ -152,7 +160,7 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
         rows = await _client.execute_kw(
             _MODEL,
             "read_group",
-            args=[domain, ["due_amount", "amount", "paid_amount", "x_studio_actual_paid_amount"], []],
+            args=[domain, ["amount", "paid_amount", "x_studio_actual_paid_amount", "total_due_amount"], []],
             kwargs={"lazy": False},
         )
     except Exception as exc:
@@ -167,19 +175,41 @@ async def get_late_uncollected(client: Optional[OdooClient] = None) -> dict:
     logger.info(f"Odoo read_group on {_MODEL} in {rpc_ms}ms | cache_key={cache_key}")
 
     row = rows[0] if rows else {}
-    value        = float(row.get("due_amount") or 0.0)
+    amount_sum   = float(row.get("amount") or 0.0)
     count        = int(row.get("__count") or 0)
     paid_amount  = float(row.get("paid_amount") or 0.0)
     actual_paid  = float(row.get("x_studio_actual_paid_amount") or 0.0)
-    cheques_raw  = paid_amount - actual_paid
+    total_due    = float(row.get("total_due_amount") or 0.0)
+    value        = amount_sum - actual_paid
+
+    cheques_raw         = paid_amount - actual_paid
     cheques_in_pipeline = max(cheques_raw, 0.0)
 
+    # "negative_cheques" takes priority over "kpi2_identity_mismatch" (Risk 3, §6).
+    data_quality_warning: Optional[str] = None
     if cheques_raw < 0:
         logger.warning(
-            "KPI 2: negative cheques_raw detected — paid_amount < x_studio_actual_paid_amount. "
-            "This is a data quality anomaly in Odoo Studio fields."
+            "KPI 2: negative cheques_raw — paid_amount < x_studio_actual_paid_amount. "
+            "Data quality anomaly in Odoo Studio fields."
         )
-    data_quality_warning: Optional[str] = "negative_cheques" if cheques_raw < 0 else None
+        data_quality_warning = "negative_cheques"
+    else:
+        identity_delta = abs(value - total_due)
+        if identity_delta < 1.0:
+            pass
+        elif identity_delta < 1000.0:
+            logger.info(
+                "KPI 2: PATH A identity micro-drift — value=%.2f, total_due=%.2f, "
+                "delta=%.2f EGP (acceptable, < 1,000 EGP threshold).",
+                value, total_due, identity_delta,
+            )
+        else:
+            logger.warning(
+                "KPI 2: PATH A identity mismatch — value=%.2f, total_due=%.2f, "
+                "delta=%.2f EGP (>= 1,000 EGP threshold).",
+                value, total_due, identity_delta,
+            )
+            data_quality_warning = "kpi2_identity_mismatch"
 
     result: dict = {
         "value":                     value,
