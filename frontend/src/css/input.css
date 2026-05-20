@@ -225,6 +225,14 @@
     padding: 8px 12px;
     animation: breathe-subtle 4s ease-in-out infinite;
   }
+
+  /* Pillar 5 — Cheques pill text tones on dark canvas (R7 pattern) */
+  .collections-canvas-dark .cheques-label {
+    color: #fcd34d; /* amber-300 */
+  }
+  .collections-canvas-dark .cheques-value {
+    color: #f5f5f5; /* neutral-100 */
+  }
 }
 
 /* ── Print styles ── */
