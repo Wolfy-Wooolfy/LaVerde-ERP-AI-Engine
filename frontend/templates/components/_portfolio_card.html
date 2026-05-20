@@ -8,16 +8,18 @@
 
 {% macro portfolio_card() %}
 <div id="col-kpi1-container"
-     class="kpi-card border-l-4 border-emerald-500 hover:border-l-[6px]
+     class="kpi-card gradient-stroke border-l-4 border-emerald-500 hover:border-l-[6px]
             focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
      data-drilldown-target="kpi1"
      tabindex="0"
-     aria-label="{{ _t('Total Portfolio Value') }}: —">
-  <p class="text-xs font-semibold uppercase tracking-widest text-neutral-500 dark:text-neutral-400 mb-4">
+     aria-label="{{ _t('Total Portfolio Value') }}: —"
+     style="--pulse-color: rgba(93,202,165,0.6); --stroke-gradient: linear-gradient(90deg, transparent 0%, #5DCAA5 30%, #9FE1CB 50%, #5DCAA5 70%, transparent 100%); --accent-300-color: #6ee7b7">
+  <p class="flex items-center gap-2 text-[10px] font-semibold uppercase [letter-spacing:0.15em] text-neutral-500 dark:text-neutral-400 mb-4">
+    <span id="col-kpi1-live-dot" class="live-dot" style="background-color: #5DCAA5; flex-shrink: 0;"></span>
     {{ _t("Total Portfolio Value") }}
   </p>
   <p id="col-kpi1-value"
-     class="text-5xl md:text-6xl font-bold tabular text-emerald-700 dark:text-emerald-400 mb-3
+     class="text-6xl md:text-7xl font-medium tabular kpi-headline text-emerald-700 dark:text-emerald-400 mb-3
             opacity-0 transition-opacity duration-200"
      title="">—</p>
   <p id="col-kpi1-subtitle"

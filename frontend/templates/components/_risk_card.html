@@ -11,21 +11,23 @@
 
 {% macro risk_card() %}
 <div id="col-kpi2-container"
-     class="kpi-card border-l-4 border-danger-500 hover:border-l-[6px]
+     class="kpi-card gradient-stroke border-l-4 border-danger-500 hover:border-l-[6px]
             focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
      data-drilldown-target="kpi2"
      tabindex="0"
-     aria-label="{{ _t('Late Uncollected') }}: —">
-  <p class="text-xs font-semibold uppercase tracking-widest text-neutral-500 dark:text-neutral-400 mb-4">
+     aria-label="{{ _t('Late Uncollected') }}: —"
+     style="--pulse-color: rgba(226,75,74,0.6); --stroke-gradient: linear-gradient(90deg, transparent 0%, #E24B4A 30%, #F09595 50%, #E24B4A 70%, transparent 100%); --accent-300-color: #fda4af">
+  <p class="flex items-center gap-2 text-[10px] font-semibold uppercase [letter-spacing:0.15em] text-neutral-500 dark:text-neutral-400 mb-4">
+    <span id="col-kpi2-live-dot" class="live-dot" style="background-color: #E24B4A; flex-shrink: 0;"></span>
     {{ _t("Late Uncollected") }}
   </p>
   <p id="col-kpi2-value"
-     class="text-5xl md:text-6xl font-bold tabular text-danger-700 dark:text-danger-400 mb-3
+     class="text-6xl md:text-7xl font-medium tabular kpi-headline text-danger-700 dark:text-danger-400 mb-3
             opacity-0 transition-opacity duration-200"
      title="">—</p>
   <p id="col-kpi2-subtitle"
      class="text-sm text-neutral-500 dark:text-neutral-400 opacity-0 transition-opacity duration-200">
-    <span id="col-kpi2-records">—</span>
+    <span id="col-kpi2-records" class="kpi-records-count">—</span>
     {{ _t("records") }}
     &middot;
     {{ _t("as of") }}
