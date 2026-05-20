@@ -28,7 +28,19 @@ from backend.modules.collections.services.kpi_service import (
     get_total_portfolio_value,
 )
 
-_MOCK_RESPONSE = [{"due_amount": 312_604_879.40, "__count": 1971}]
+_MOCK_AMOUNT       = 500_000.0
+_MOCK_PAID         = 200_000.0
+_MOCK_ACTUAL_PAID  = 150_000.0
+_MOCK_TOTAL_DUE    = 350_000.0   # = _MOCK_AMOUNT - _MOCK_ACTUAL_PAID (exact H2 identity)
+_MOCK_RECORD_COUNT = 1971
+
+_MOCK_RESPONSE = [{
+    "amount":                      _MOCK_AMOUNT,
+    "paid_amount":                 _MOCK_PAID,
+    "x_studio_actual_paid_amount": _MOCK_ACTUAL_PAID,
+    "total_due_amount":            _MOCK_TOTAL_DUE,
+    "__count":                     _MOCK_RECORD_COUNT,
+}]
 
 
 @pytest.fixture(autouse=True)
@@ -106,8 +118,8 @@ async def test_return_shape_has_all_required_keys(mock_client: MagicMock) -> Non
 async def test_return_values_match_mock_response(mock_client: MagicMock) -> None:
     result = await get_late_uncollected(client=mock_client)
 
-    assert result["value"] == pytest.approx(312_604_879.40)
-    assert result["record_count"] == 1971
+    assert result["value"] == pytest.approx(_MOCK_AMOUNT - _MOCK_ACTUAL_PAID)  # PATH A formula
+    assert result["record_count"] == _MOCK_RECORD_COUNT
     assert result["cache_status"] == "fresh"
     assert result["rpc_duration_ms"] >= 0
 
