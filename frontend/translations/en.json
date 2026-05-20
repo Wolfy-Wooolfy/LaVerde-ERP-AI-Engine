@@ -163,5 +163,12 @@
   "this_year": "This Year",
   "until": "until {date}",
   "cheques_annotation_prefix": "of which",
-  "cheques_annotation_suffix": "are received cheques not yet cleared"
+  "cheques_annotation_suffix": "are received cheques not yet cleared",
+
+  "live": "Live",
+  "updated": "Updated",
+  "ago": "ago",
+  "seconds_short": "s",
+  "minute_short": "min",
+  "minutes_short": "mins"
 }

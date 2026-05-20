@@ -163,5 +163,12 @@
   "this_year": "هذا العام",
   "until": "حتى {date}",
   "cheques_annotation_prefix": "منها",
-  "cheques_annotation_suffix": "شيكات مستلمة لم تتحصل بعد"
+  "cheques_annotation_suffix": "شيكات مستلمة لم تتحصل بعد",
+
+  "live": "مباشر",
+  "updated": "محدّث",
+  "ago": "منذ",
+  "seconds_short": "ثانية",
+  "minute_short": "دقيقة",
+  "minutes_short": "دقائق"
 }

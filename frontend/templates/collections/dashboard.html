@@ -11,22 +11,29 @@
 
 {% block content %}
 
-{# ── Page header ─────────────────────────────────────────────────────────── #}
-<div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+{# ── Premium page header (Stage 4 — Phase E) ─────────────────────────────── #}
+<header class="flex items-center justify-between mb-6">
   <div>
-    <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
+    <h1 id="col-page-title"
+        class="text-2xl font-medium text-neutral-900 dark:text-neutral-100">
       {{ _t("Collections Dashboard") }}
     </h1>
-    <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+    <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
       {{ _t("as of") }}
       <span id="col-as-of" class="font-mono">{{ _t("Loading...") }}</span>
     </p>
   </div>
   <div class="flex items-center gap-3 shrink-0">
-    <div class="flex items-center gap-1.5 text-xs text-neutral-400">
-      <span id="col-live-dot" class="w-1.5 h-1.5 rounded-full bg-neutral-300"></span>
-      <span>{{ _t("Last updated") }}:</span>
-      <span id="col-last-updated" class="font-mono">—</span>
+    <div class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs"
+         style="background-color: rgba(93,202,165,0.06); border: 0.5px solid rgba(93,202,165,0.2);">
+      <span class="live-dot"
+            style="background-color: #5DCAA5; flex-shrink: 0;"
+            aria-hidden="true"></span>
+      <span class="text-emerald-300 font-medium">{{ _t("live") }}</span>
+      <span class="text-neutral-500">·</span>
+      <span class="text-neutral-400">{{ _t("updated") }}</span>
+      <span id="col-last-updated"
+            class="text-neutral-300 font-medium">—</span>
     </div>
     <button id="col-refresh-btn"
       onclick="collectionsRefresh()"
@@ -38,7 +45,7 @@
       {{ _t("Refresh") }}
     </button>
   </div>
-</div>
+</header>
 
 {# ── Data entry notice ───────────────────────────────────────────────────── #}
 <div id="col-data-entry-notice"
@@ -204,6 +211,12 @@ window.COLLECTIONS_STRINGS = {
   },
   cheques_annotation_prefix: {{ _t("cheques_annotation_prefix") | tojson }},
   cheques_annotation_suffix: {{ _t("cheques_annotation_suffix") | tojson }},
+  live:          {{ _t("live")          | tojson }},
+  updated:       {{ _t("updated")       | tojson }},
+  ago:           {{ _t("ago")           | tojson }},
+  seconds_short: {{ _t("seconds_short") | tojson }},
+  minute_short:  {{ _t("minute_short")  | tojson }},
+  minutes_short: {{ _t("minutes_short") | tojson }},
   lang: {{ lang | tojson }}
 };
 </script>
