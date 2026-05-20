@@ -376,7 +376,6 @@
     var now     = new Date();
     var strings = window.COLLECTIONS_STRINGS || {};
     var asOf    = document.getElementById('col-as-of');
-    var dot     = document.getElementById('col-live-dot');
 
     _lastFetchTime = now;
 
@@ -386,9 +385,8 @@
         { day: 'numeric', month: 'long', year: 'numeric' }
       );
     }
-    if (dot) {
-      dot.className = 'w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse';
-    }
+    // col-live-dot removed in Phase E (Stage 4); live indicator
+    // is now the always-on .live-dot in the header pill
     // col-last-updated is owned by the heartbeat (tickHeartbeat)
   }
 
