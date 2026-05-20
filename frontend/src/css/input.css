@@ -161,6 +161,70 @@
     @apply rounded text-xs font-mono text-center py-1.5 cursor-default
            transition-all duration-150 hover:scale-110 hover:z-10 hover:relative;
   }
+
+  /* ── Stage 4: Collections Dashboard — Premium Visual Identity ── */
+
+  /* Pillar 1 — Dark Canvas Foundation */
+  .collections-canvas-dark {
+    background-color: #050505;
+    background-image: radial-gradient(ellipse 800px 600px at top right, rgba(226,75,74,0.04) 0%, #050505 60%);
+  }
+  .collections-canvas-dark .kpi-card {
+    @apply bg-neutral-900 border-neutral-800;
+  }
+  .collections-canvas-dark .chart-panel {
+    @apply bg-neutral-900 border-neutral-800;
+  }
+
+  /* Pillar 2 — KPI Headline Typography */
+  .kpi-headline {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    font-weight: 500;
+  }
+  .collections-canvas-dark .kpi-headline {
+    color: var(--accent-300-color);
+  }
+
+  /* Pillar 2 — Records count slight emphasis on dark canvas */
+  .collections-canvas-dark .kpi-records-count {
+    @apply text-neutral-300;
+  }
+
+  /* Pillar 3 — Gradient Stroke Top Accent */
+  .gradient-stroke {
+    position: relative;
+  }
+  .gradient-stroke::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--stroke-gradient, linear-gradient(90deg, transparent, #888780, transparent));
+    opacity: 0.5;
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+  }
+
+  /* Pillar 4 — Live Dot */
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  /* Pillar 5 — Premium Cheques Annotation Pill */
+  .cheques-pill {
+    background-color: rgba(239, 159, 39, 0.05);
+    border: 0.5px solid rgba(239, 159, 39, 0.15);
+    border-left: 2px solid #EF9F27;
+    border-radius: 0 6px 6px 0;
+    padding: 8px 12px;
+    animation: breathe-subtle 4s ease-in-out infinite;
+  }
 }
 
 /* ── Print styles ── */
@@ -169,4 +233,15 @@
   .main-content { margin: 0 !important; padding: 1rem !important; }
   .kpi-card, .chart-panel { break-inside: avoid; box-shadow: none !important; border: 1px solid #e5e5e5 !important; }
   h1, h2 { break-after: avoid; }
+}
+
+/* ── Stage 4 keyframes (outside Tailwind layers — browser-scoped) ── */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--pulse-color, rgba(226, 75, 74, 0.6)); }
+  50%      { box-shadow: 0 0 0 8px transparent; }
+}
+
+@keyframes breathe-subtle {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
 }

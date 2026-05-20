@@ -83,6 +83,15 @@ module.exports = {
           900: '#064e3b',
           950: '#022c22',
         },
+        amber: {
+          300: '#fcd34d',
+          400: '#fbbf24',
+          700: '#b45309',
+        },
+        info: {
+          300: '#85b7eb',
+          400: '#378add',
+        },
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
@@ -129,6 +138,16 @@ module.exports = {
       },
     },
   },
+  safelist: [
+    // Stage 4 component classes — not yet in templates (added in Phases C–E);
+    // safelist ensures they survive the content scan until template wiring is done.
+    'kpi-headline',
+    'live-dot',
+    'cheques-pill',
+    'gradient-stroke',
+    'kpi-records-count',
+    'collections-canvas-dark',
+  ],
   plugins: [
     require('@tailwindcss/forms'),
     require('@tailwindcss/typography'),
