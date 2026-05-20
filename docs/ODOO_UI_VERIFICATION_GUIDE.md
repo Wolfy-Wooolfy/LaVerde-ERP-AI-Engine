@@ -64,9 +64,9 @@ The **Measures** dropdown (next to view-mode icons) controls which aggregate col
 | Count | `__count` | Record counts on all KPIs |
 | Amount | `amount` | KPI 1, KPI 7 |
 | Paid Amount | `paid_amount` | KPI 3, KPI 4 |
-| Due Amount | `due_amount` | KPI 2, KPI 5 |
-| Actual Paid Amount | `x_studio_actual_paid_amount` | KPI 3 |
-| Total Due Amount | `total_due_amount` | (drill-down only) |
+| Due Amount | `due_amount` | KPI 5 (KPI 2 pre-Stage 2.5 PATH C — superseded) |
+| Actual Paid Amount | `x_studio_actual_paid_amount` | KPI 2 (PATH A formula), KPI 3 |
+| Total Due Amount | `total_due_amount` | KPI 2 (cross-check, H2 identity — Decision 12.2) |
 
 Default measure: Amount.
 

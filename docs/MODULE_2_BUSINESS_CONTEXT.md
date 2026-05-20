@@ -702,14 +702,20 @@ If La Verde's stakeholders later request alignment with the EXEC favorites (e.g.
 
 These reversibility paths are explicit so that the decision is not perceived as permanent. The current MVP launches with the stock-and-aggregate definition because it is what the Board has requested verbally.
 
-**KPI 2 Formula Status (2026-05-19 — Tentative pending Stage 2.5 discovery):**
+**KPI 2 Formula Status (2026-05-20 — Confirmed, Stage 2.5 complete):**
 
-The current Module 2 backend computes KPI 2 (Late Uncollected)
-using `paid_amount` (which includes postdated cheques received).
-Per Decision 11.13, this formula is under review for Stage 2.5
-amendment. The tentative corrected formula will use
-`actual_paid_amount` (cash + cleared cheques only). The exact
-target value will be determined by Pre-Implementation Discovery
-script in Stage 2.5 (Finding 8b structural mismatch must be
-resolved on the Late subset before formula commitment). See
-`docs/STAGE_2_5_PLAN.md` for full specification.
+Module 2 KPI 2 (Late Uncollected) is computed using PATH A (Decision 11.13 /
+Decision 12.1):
+
+    value = SUM(amount) − SUM(x_studio_actual_paid_amount)
+
+Identity-equal verified against live Odoo on 2026-05-20 (Phase F):
+- **Final value: 329,845,453.40 EGP / 2,013 records**
+- Cheques in pipeline (subset annotation): **1,929,000.00 EGP** ✓
+- H2 identity delta: 0.0000 EGP (exact)
+- All `verify_kpi2_live.py` cross-check assertions: PASS
+
+PATH C formula (`SUM(amount) − SUM(paid_amount)` = 326.4M EGP) is superseded.
+See Decision 12.1 in `docs/MODULE_2_IMPLEMENTATION_DECISIONS.md` for full
+rationale and commit trail. See `docs/STAGE_2_5_PLAN.md` for the discovery
+specification that gated this change.

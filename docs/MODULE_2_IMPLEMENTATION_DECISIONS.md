@@ -1873,3 +1873,119 @@ Checkpoint tag target:
   read-only investigation per the diagnostic-first protocol. Full
   report transcript preserved in the Claude Chat session for this
   closure cycle.
+
+---
+
+## Session 12 — 2026-05-20 — Stage 2.5: KPI 2 Redefinition (PATH A)
+
+### Decision 12.1 — KPI 2 formula redefined to PATH A (amount − actual_paid_amount)
+
+- **Status:** CLOSED — fully implemented and live-verified (Phase F PASSED, 2026-05-20)
+- **Trigger:** Decision 11.13 (Session 11, 2026-05-19) — Khaled's Stage 3 smoke test
+  identified semantic ambiguity in the PATH C headline. Reversed Decision 10.1.
+- **Change:** KPI 2 (Late Uncollected) headline formula changed from
+  `PATH C: SUM(amount) − SUM(paid_amount)` (= `SUM(due_amount)`)
+  to
+  `PATH A: SUM(amount) − SUM(x_studio_actual_paid_amount)`
+  The cheques delta (`paid_amount − actual_paid_amount = 1,929,000.00 EGP`) is
+  now surfaced as an explicit amber annotation below the headline. The annotation
+  is mathematically correct under PATH A because the cheques ARE a subset of the
+  headline value — they were not under PATH C (they were subtracted out).
+- **Scope:** Backend service (`kpi_service.py`), backend tests, live verification
+  script (`verify_kpi2_live.py`), frontend template (`_risk_card.html`), frontend
+  JS (`renderSection2()`), i18n (`en.json` / `ar.json`).
+- **Identity-equal confirmation (Phase F, 2026-05-20):**
+  - Backend value: **329,845,453.40 EGP** / **2,013 records**
+  - Cheques in pipeline: **1,929,000.00 EGP** (exact)
+  - All 4 cross-check assertions in `verify_kpi2_live.py` PASSED
+  - H2 identity delta: 0.0000 EGP; Total Due delta: 0.0000 EGP
+  - Cheques subset assertion: PASS; legacy cheques delta: 0.0000 EGP
+  - Odoo UI manual cross-check: identity-equal confirmed
+- **Commit trail:**
+  - Phase A (discovery gate): `14600f3` — `discover_kpi2_redefinition.py`, all 4 hypotheses PASS
+  - Phase B (service formula): `5b8457b` — `kpi_service.get_late_uncollected()` PATH C → PATH A
+  - Phase C (backend tests): `3db2e83` — 14 tests for PATH A formula
+  - Phase D (verify script): `ab70770` — `verify_kpi2_live.py` PATH A assertions
+  - Phase E (frontend): `37913b6` — cheques annotation markup + JS + i18n
+  - Phase G (docs + tag): this commit
+- **Supersedes:** Decision 10.1 (PATH C suppression of cheques annotation on KPI 2).
+  Decision 11.12 (frontend suppression of `cheques_in_pipeline` on risk card).
+  Both are now superseded — the annotation is rendered and the formula is corrected.
+
+### Decision 12.2 — H2 unknown field confirmed as `total_due_amount` (native monetary)
+
+- **Status:** CLOSED — confirmed in Phase A discovery script (`14600f3`), 2026-05-20
+- **Finding:** The field completing the H2 identity equation
+  `SUM(amount) = SUM(actual_paid_amount) + SUM(?)` on the Late subset
+  is `total_due_amount` — a **native** `monetary` field on `rs.installment`
+  (label: "Total Due Amount"). It carries NO `x_studio_` prefix; it is a
+  first-class Odoo field, not a Studio extension.
+- **How confirmed:** Phase A discovery script ran `fields_get` on `rs.installment`
+  (Amendment 1 / Section 0.5). The field was found under key `total_due_amount`
+  with `type: monetary`. H2 identity delta on the Late subset: **0.000000 EGP**
+  (exact to the cent, confirmed live on 2026-05-20 at 11:56 Cairo time).
+- **Significance:** Finding 8b (STAGE_2_5_PLAN.md §2.4) hypothesised that the
+  structural mismatch observed on the full portfolio disappears on the Late subset.
+  H2 PASS at 0.0 EGP confirms this hypothesis. The `x_studio_actual_paid_amount`
+  field is safe to use as the PATH A formula component on the Late domain.
+- **Implication for verification:** `total_due_amount` is now used in
+  `verify_kpi2_live.py` cross-check (b): every verify run confirms H2 holds on
+  the current live dataset.
+- **ODOO_UI_VERIFICATION_GUIDE.md §4 update:** The "Total Due Amount" row in the
+  Measures table is updated from "(drill-down only)" to
+  "KPI 2 (cross-check, H2 identity — Decision 12.2)".
+
+### Decision 12.3 — Tiered identity-mismatch thresholds for `data_quality_warning`
+
+- **Status:** CLOSED — implemented in Phase A discovery script (Amendment 2) and
+  Phase B service code (`5b8457b`), 2026-05-20
+- **Thresholds (applied in `get_late_uncollected()` and `discover_kpi2_redefinition.py`):**
+  - `delta < 1.00 EGP`: no flag, no log — float rounding noise
+  - `1.00 ≤ delta < 1000.00 EGP`: `logger.info` (micro-drift label), no `data_quality_warning` flag
+  - `delta ≥ 1000.00 EGP`: `logger.warning` + `data_quality_warning = "kpi2_identity_mismatch"`
+- **Rationale:** The Late subset aggregates 2,013 monetary rows. Float arithmetic
+  and Odoo ORM rounding can introduce sub-1-EGP deltas that are not meaningful.
+  The 1 EGP lower bound eliminates noise. The 1,000 EGP INFO tier creates an
+  observable middle zone where small systematic drift is logged without alarming
+  the dashboard consumer. The ≥1,000 EGP tier catches true formula or data
+  anomalies that require investigation before presenting to the Chairman.
+- **Priority rule (Risk 3, confirmed Session 11):** `"negative_cheques"` warning
+  takes priority over `"kpi2_identity_mismatch"`. If `paid_amount < actual_paid_amount`,
+  the negative-cheques branch fires and the identity-mismatch check is skipped.
+- **Test coverage:** Phase C test 12 (`test_kpi2_identity_mismatch_sets_data_quality_warning`,
+  parametrized) — 3 tiers: delta=0.50, 500.0, 5000.0 — all pass. Loguru sink
+  fixture verifies INFO log on tier 2, WARNING log on tier 3.
+
+### Decision 12.4 — AR annotation includes "جنيه" — as-rendered string is canonical
+
+- **Status:** CLOSED — documented as improvement (not a deviation), 2026-05-20
+- **Original Phase E spec text:** `"منها X مليون شيكات مستلمة لم تتحصل بعد"`
+- **As-rendered in Phase F browser verification:** `"منها 1.9 مليون جنيه شيكات مستلمة لم تتحصل بعد"`
+- **Why "جنيه" appears:** `fmt.formatEGP(cheques, lang)` (reused from the headline
+  per Phase E requirement) returns `"1.9 مليون جنيه"` when `lang = 'ar'` because
+  `COLLECTIONS_STRINGS.egp = 'جنيه'` (from `ar.json`). The formatter injects the
+  currency word as part of the formatted number, placing "جنيه" before "شيكات".
+- **Assessment:** The word "جنيه" provides explicit currency context for the Arabic
+  audience — the annotation reads "of which 1.9 million EGP are received cheques
+  not yet cleared." This is strictly more informative than the original spec.
+  **Do not revert.** The as-rendered string is the canonical AR annotation.
+- **No code change required:** The formatter behaviour is correct and consistent
+  with all other EGP displays on the Collections dashboard.
+
+### Decision 12.5 — Per-module `conftest.py` established as test pattern
+
+- **Status:** CLOSED — file created in Phase C (`3db2e83`), 2026-05-20
+- **File:** `backend/modules/collections/tests/conftest.py`
+- **Purpose:** Sets env-var defaults (`ODOO_URL`, `ODOO_DB`, `ODOO_API_KEY`, etc.)
+  at module import time so that the `backend` package can be imported during pytest
+  collection without a live `.env` file present.
+- **Why needed:** Test runs scoped to `backend/modules/collections/tests/` do not
+  pick up the root-level `tests/conftest.py` because there is no intermediate
+  conftest in the `backend/` subtree. Without this file, `from backend.core.config
+  import Settings` raises `ValidationError` during collection as required env vars
+  are absent.
+- **Scope:** Test-only, zero production impact. `os.environ.setdefault()` ensures
+  no real env values are overwritten (CI, staging, and production are unaffected).
+- **Pattern for future modules:** Any new module whose tests are run as
+  `pytest backend/modules/<name>/tests/` should add a matching `conftest.py`
+  with env-var defaults. This is the first instance of this pattern in the codebase.
