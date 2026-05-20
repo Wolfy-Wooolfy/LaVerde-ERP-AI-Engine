@@ -1,5 +1,10 @@
 """
-Live verification for KPI 2 — Late Uncollected receivables.
+Live verification for KPI 2 — Late Uncollected receivables (PATH A).
+
+Formula: SUM(amount) − SUM(x_studio_actual_paid_amount)
+Decision 11.13 (Session 12) — reverses Decision 10.1 PATH C.
+Pre-implementation discovery gate: commit 14600f3 (Phase A, 2026-05-20).
+Service formula change: commit 5b8457b (Phase B, 2026-05-20).
 
 Usage:
     KPI2_VERIFY_CONFIRMED=1 python scripts/verify_kpi2_live.py [--url http://localhost:8000]
@@ -71,7 +76,9 @@ PASSWORD = os.environ.get("VERIFY_PASSWORD", "password")
 ENDPOINT = "/api/v1/collections/kpi/late-uncollected"
 LOG_FILE = "logs/kpi2_verification.log"
 
-# Sanity bounds — adjust after data-entry sprint completes (~2026-06-16)
+# Sanity bounds — PATH A per Decision 11.13; previously bounded PATH C value.
+# Both limits still bracket the new ~329M EGP figure correctly.
+# Adjust after data-entry sprint completes (~2026-06-16).
 MIN_VALUE_EGP = 1_000_000.0       # at least 1M EGP (data-entry in progress)
 MAX_VALUE_EGP = 2_000_000_000.0   # at most 2B EGP (sanity upper bound)
 MIN_RECORD_COUNT = 1
@@ -114,11 +121,13 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
 
 # ── Cross-check via direct Odoo read_group ────────────────────────────────────
 
-async def _derive_cheques_directly(today_date_str: str) -> float:
-    """Independently derives cheques_in_pipeline via direct Odoo read_group.
+async def _derive_cheques_directly(today_date_str: str) -> dict:
+    """Independently derives KPI 2 field sums via direct Odoo read_group.
 
-    Uses the same Candidate C late domain and Alternative B formula as the
-    service function. Result should match the API response within ±1.00 EGP.
+    Uses the same Candidate C late domain as the service function.
+    Returns a dict with all four monetary sums needed for PATH A
+    cross-checks (H2 identity, Total Due, cheques subset).
+    Single read_group call — 1 RPC total.
     """
     from backend.shared.odoo.client import OdooClient  # noqa: PLC0415
     late_domain_rpc = [
@@ -130,13 +139,23 @@ async def _derive_cheques_directly(today_date_str: str) -> float:
         rows = await odoo.execute_kw(
             "rs.installment",
             "read_group",
-            args=[late_domain_rpc, ["paid_amount", "x_studio_actual_paid_amount"], []],
+            args=[late_domain_rpc,
+                  ["amount", "paid_amount", "x_studio_actual_paid_amount", "total_due_amount"],
+                  []],
             kwargs={"lazy": False},
         )
     row = rows[0] if rows else {}
-    paid   = float(row.get("paid_amount") or 0.0)
-    actual = float(row.get("x_studio_actual_paid_amount") or 0.0)
-    return max(paid - actual, 0.0)
+    amount_sum  = float(row.get("amount") or 0.0)
+    paid_sum    = float(row.get("paid_amount") or 0.0)
+    actual_sum  = float(row.get("x_studio_actual_paid_amount") or 0.0)
+    total_due   = float(row.get("total_due_amount") or 0.0)
+    return {
+        "amount_sum":          amount_sum,
+        "paid_sum":            paid_sum,
+        "actual_paid_sum":     actual_sum,
+        "total_due_sum":       total_due,
+        "cheques_in_pipeline": max(paid_sum - actual_sum, 0.0),
+    }
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -347,24 +366,69 @@ def main() -> int:
                   f"got {body2.get('rpc_duration_ms')}"):
         failures.append("cache_rpc_ms_nonzero")
 
-    # ── Step 8: Cross-check cheques_in_pipeline via direct Odoo read_group ───
-    _log(_INFO, "Cross-checking cheques_in_pipeline against direct Odoo read_group ...")
+    # ── Step 8: Cross-check via direct Odoo read_group (PATH A — Decision 11.13) ──
+    _log(_INFO, "Cross-checking KPI 2 PATH A assertions against direct Odoo read_group ...")
     if date_str:
         try:
-            derived = asyncio.run(_derive_cheques_directly(date_str))
-            delta   = abs(cheques_in_pipeline - derived)
-            _log(_INFO, f"  API cheques_in_pipeline : EGP {cheques_in_pipeline:>16,.2f}")
-            _log(_INFO, f"  Odoo derived            : EGP {derived:>16,.2f}")
-            _log(_INFO, f"  Delta                   : EGP {delta:>16,.4f}")
+            odoo_sums        = asyncio.run(_derive_cheques_directly(date_str))
+            amount_sum       = odoo_sums["amount_sum"]
+            paid_sum         = odoo_sums["paid_sum"]
+            actual_paid_sum  = odoo_sums["actual_paid_sum"]
+            total_due_sum    = odoo_sums["total_due_sum"]
+            derived_cheques  = odoo_sums["cheques_in_pipeline"]
+
+            _log(_INFO, f"  Odoo amount_sum              : EGP {amount_sum:>16,.2f}")
+            _log(_INFO, f"  Odoo paid_sum                : EGP {paid_sum:>16,.2f}")
+            _log(_INFO, f"  Odoo actual_paid_sum         : EGP {actual_paid_sum:>16,.2f}")
+            _log(_INFO, f"  Odoo total_due_sum           : EGP {total_due_sum:>16,.2f}")
+            _log(_INFO, f"  Derived cheques_in_pipeline  : EGP {derived_cheques:>16,.2f}")
+            _log(_INFO, f"  API backend_value            : EGP {value:>16,.2f}")
+            _log(_INFO, f"  API cheques_in_pipeline      : EGP {cheques_in_pipeline:>16,.2f}")
+
+            # (a) H2 identity: backend value must equal amount_sum − actual_paid_sum to ±1 EGP.
+            h2_delta = abs(value - (amount_sum - actual_paid_sum))
+            _log(_INFO, f"  H2 identity delta            : EGP {h2_delta:>16,.4f}")
             if not _check(
-                "cross-check: |API cheques - Odoo derived| <= 1.00 EGP",
-                delta <= 1.0,
-                f"delta={delta:.4f}",
+                "cross-check (a): |backend_value - (amount_sum - actual_paid_sum)| <= 1.00 EGP",
+                h2_delta <= 1.0,
+                f"delta={h2_delta:.4f}",
+            ):
+                failures.append("cross_check_h2_identity")
+
+            # (b) Total Due cross-check: backend value must match total_due_sum to ±1 EGP.
+            #     Live confirmation of Phase A H2 on every verify run.
+            td_delta = abs(value - total_due_sum)
+            _log(_INFO, f"  Total Due delta              : EGP {td_delta:>16,.4f}")
+            if not _check(
+                "cross-check (b): |backend_value - total_due_sum| <= 1.00 EGP",
+                td_delta <= 1.0,
+                f"delta={td_delta:.4f}",
+            ):
+                failures.append("cross_check_total_due")
+
+            # (c) Cheques subset: derived cheques must be <= backend_value.
+            #     Under PATH A this is mathematically required (cheques ⊂ value).
+            #     Under PATH C it was not — cheques were subtracted out of the headline.
+            if not _check(
+                "cross-check (c): derived cheques_in_pipeline <= backend_value (PATH A subset)",
+                derived_cheques <= value,
+                f"cheques={derived_cheques:,.2f}, value={value:,.2f}",
+            ):
+                failures.append("cross_check_cheques_subset")
+
+            # Legacy: API cheques_in_pipeline must match Odoo-derived value to ±1 EGP.
+            cheques_delta = abs(cheques_in_pipeline - derived_cheques)
+            _log(_INFO, f"  Cheques API vs derived delta : EGP {cheques_delta:>16,.4f}")
+            if not _check(
+                "cross-check (legacy): |API cheques - Odoo derived| <= 1.00 EGP",
+                cheques_delta <= 1.0,
+                f"delta={cheques_delta:.4f}",
             ):
                 failures.append("cheques_cross_check_delta")
+
         except Exception as exc:
             _log(_WARN, f"Cross-check failed — direct Odoo RPC error: {exc}")
-            _log(_WARN, "VERIFICATION INCOMPLETE — cheques cross-check did not run")
+            _log(_WARN, "VERIFICATION INCOMPLETE — PATH A cross-checks did not run")
             failures.append("cheques_cross_check_failed")
     else:
         _log(_WARN, "Cross-check skipped — domain date_str unavailable (domain shape failed earlier)")
