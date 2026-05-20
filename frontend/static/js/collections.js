@@ -14,6 +14,8 @@
   var _lastFetchData       = null;
   var _kpi6Chart           = null;
   var _autoRefreshInterval = null;
+  var _heartbeatInterval   = null;
+  var _lastFetchTime       = null;
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -371,11 +373,12 @@
   }
 
   function updateTimestamps() {
-    var now = new Date();
+    var now     = new Date();
     var strings = window.COLLECTIONS_STRINGS || {};
-    var asOf = document.getElementById('col-as-of');
-    var lastUpdated = document.getElementById('col-last-updated');
-    var dot = document.getElementById('col-live-dot');
+    var asOf    = document.getElementById('col-as-of');
+    var dot     = document.getElementById('col-live-dot');
+
+    _lastFetchTime = now;
 
     if (asOf) {
       asOf.textContent = now.toLocaleDateString(
@@ -383,15 +386,10 @@
         { day: 'numeric', month: 'long', year: 'numeric' }
       );
     }
-    if (lastUpdated) {
-      lastUpdated.textContent = now.toLocaleTimeString(
-        strings.lang === 'ar' ? 'ar-EG' : 'en-GB',
-        { hour: '2-digit', minute: '2-digit' }
-      );
-    }
     if (dot) {
       dot.className = 'w-1.5 h-1.5 rounded-full bg-success-500 animate-pulse';
     }
+    // col-last-updated is owned by the heartbeat (tickHeartbeat)
   }
 
   function showErrorBanner() {
@@ -406,6 +404,7 @@
 
   // D2.9 — 60s auto-refresh with Visibility API pause
   function startAutoRefresh() {
+    if (_autoRefreshInterval) return;
     _autoRefreshInterval = setInterval(fetchAllKPIs, 60000);
   }
 
@@ -416,6 +415,51 @@
     }
   }
 
+  // ── Live-time heartbeat (Pillar 4) ────────────────────────────────────────
+
+  function relativeTime(date) {
+    var s    = window.COLLECTIONS_STRINGS || {};
+    var lang = s.lang || 'en';
+    if (!date) return s.just_now || (lang === 'ar' ? 'الآن' : 'Just now');
+    var diffSec = Math.round((Date.now() - date.getTime()) / 1000);
+    if (diffSec < 10) {
+      return s.just_now || (lang === 'ar' ? 'الآن' : 'Just now');
+    }
+    if (diffSec < 60) {
+      var secLabel = s.seconds_short || (lang === 'ar' ? 'ثانية' : 's');
+      var agoWord  = s.ago           || (lang === 'ar' ? 'منذ'   : '');
+      return lang === 'ar'
+        ? agoWord + ' ' + diffSec + ' ' + secLabel
+        : diffSec + secLabel + ' ago';
+    }
+    var mins     = Math.floor(diffSec / 60);
+    var minLabel = mins === 1
+      ? (s.minute_short  || (lang === 'ar' ? 'دقيقة'  : 'min'))
+      : (s.minutes_short || (lang === 'ar' ? 'دقائق' : 'mins'));
+    var agoWord  = s.ago || (lang === 'ar' ? 'منذ' : '');
+    return lang === 'ar'
+      ? agoWord + ' ' + mins + ' ' + minLabel
+      : mins + ' ' + minLabel + ' ago';
+  }
+
+  function tickHeartbeat() {
+    var el = document.getElementById('col-last-updated');
+    if (el) el.textContent = relativeTime(_lastFetchTime);
+  }
+
+  function startHeartbeat() {
+    if (_heartbeatInterval) return;
+    tickHeartbeat();
+    _heartbeatInterval = setInterval(tickHeartbeat, 10000);
+  }
+
+  function stopHeartbeat() {
+    if (_heartbeatInterval) {
+      clearInterval(_heartbeatInterval);
+      _heartbeatInterval = null;
+    }
+  }
+
   function init() {
     var topbarBtn = document.getElementById('refresh-btn');
     if (topbarBtn) topbarBtn.onclick = collectionsRefresh;
@@ -423,8 +467,11 @@
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
         stopAutoRefresh();
+        stopHeartbeat();
       } else {
+        stopAutoRefresh();
         fetchAllKPIs().then(startAutoRefresh);
+        startHeartbeat();
       }
     });
 
@@ -432,12 +479,19 @@
       get state() { return _lastFetchData; },
       fetchAll: fetchAllKPIs
     };
-    window.collectionsDashboard.fetchAll().then(startAutoRefresh);
+    window.collectionsDashboard.fetchAll().then(function () {
+      startAutoRefresh();
+      startHeartbeat();
+    });
   }
 
   window.collectionsRefresh = function () {
     stopAutoRefresh();
-    fetchAllKPIs().then(startAutoRefresh);
+    stopHeartbeat();
+    fetchAllKPIs().then(function () {
+      startAutoRefresh();
+      startHeartbeat();
+    });
   };
 
   document.addEventListener('DOMContentLoaded', init);
