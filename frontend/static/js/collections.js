@@ -444,7 +444,9 @@
 
   function tickHeartbeat() {
     var el = document.getElementById('col-last-updated');
-    if (el) el.textContent = relativeTime(_lastFetchTime);
+    if (!el) return;
+    if (!_lastFetchTime) return;
+    el.textContent = relativeTime(_lastFetchTime);
   }
 
   function startHeartbeat() {
