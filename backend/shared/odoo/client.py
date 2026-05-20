@@ -156,6 +156,10 @@ class OdooClient:
             [self._db, uid, self._api_key, model, method, args or [], kwargs or {}],
         )
 
+    @property
+    def is_read_only(self) -> bool:
+        return True
+
     async def fetch_recent_messages(
         self,
         lead_id: int,

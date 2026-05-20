@@ -1287,8 +1287,8 @@ async def get_expected_collections_forecast(
     Cache key uses the Cairo-local date so the cache invalidates at
     Cairo midnight, not UTC midnight (Decision 9.3).
 
-    8 RPCs per uncached call (2 per bucket × 4 buckets), 60-second TTL
-    (Decision 9.4).
+    12 RPCs per uncached call (2 amount RPCs + 1 cheques_count RPC per bucket × 4 buckets),
+    60-second TTL (Decision 9.4; cheques_record_count added Stage 5, Decision 14.6).
 
     Return shape::
 
@@ -1316,7 +1316,7 @@ async def get_expected_collections_forecast(
             "record_count":              int,
             "due_amount":                float, # SUM(due_amount) EGP
             "cheques_in_pipeline":       float, # clamped to >= 0
-            "cheques_record_count":      None,  # Alt B limitation
+            "cheques_record_count":      int,   # count of installments with pending cheque (Stage 5, Decision 14.6)
             "drill_down_domain":         list,  # 4-clause Odoo domain
             "cheques_drill_down_domain": None,  # Alt B limitation
         }
@@ -1342,7 +1342,7 @@ async def get_expected_collections_forecast(
         logger.debug(f"Cache hit: {cache_key}")
         return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
 
-    logger.info(f"Cache miss: {cache_key} — querying Odoo (8 RPCs)")
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (12 RPCs)")
 
     _client = odoo_client if odoo_client is not None else OdooClient()
 
@@ -1353,6 +1353,21 @@ async def get_expected_collections_forecast(
             raw[bname] = await _fetch_bucket(
                 _client, today_str, bucket_ends[bname].isoformat()
             )
+        # 4 search_count RPCs for cheques_record_count (Decision 14.6, Stage 5).
+        # Uses check_pending_amount > 0 (stored monetary field, Decision 4.5/9.1).
+        cheques_counts: dict[str, int] = {}
+        for bname in _BUCKET_NAMES:
+            cheques_counts[bname] = int(await _client.execute_kw(
+                _MODEL,
+                "search_count",
+                args=[[
+                    ("state", "=", "post"),
+                    ("payment_state", "in", ["unpaid", "partial"]),
+                    ("date", ">=", today_str),
+                    ("date", "<=", bucket_ends[bname].isoformat()),
+                    ("check_pending_amount", ">", 0),
+                ]],
+            ))
     except Exception as exc:
         raise OdooQueryError(f"KPI 7 read_group failed: {exc}") from exc
     finally:
@@ -1361,7 +1376,7 @@ async def get_expected_collections_forecast(
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
-        f"KPI 7: 8 read_group RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
+        f"KPI 7: 12 read_group/search_count RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
     )
 
     # Check for data quality anomaly — negative raw cheques (Decision 4.4 analog).
@@ -1388,7 +1403,7 @@ async def get_expected_collections_forecast(
             "record_count": count,
             "due_amount":   due_amount,
             "cheques_in_pipeline":       cheques_clamped,
-            "cheques_record_count":      None,
+            "cheques_record_count":      cheques_counts[bname],
             "drill_down_domain": [
                 ["state", "=", "post"],
                 ["payment_state", "in", ["unpaid", "partial"]],

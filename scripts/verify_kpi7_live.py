@@ -259,11 +259,14 @@ def main() -> int:
                       f"got {b.get('record_count')!r}"):
             failures.append(f"{bname}_record_count_negative")
 
-        # null fields (Alternative B — Decision 9.1)
-        if not _check(f"  {bname}.cheques_record_count is null (Alt B)",
-                      b.get("cheques_record_count") is None,
-                      f"got {b.get('cheques_record_count')!r}"):
-            failures.append(f"{bname}_cheques_record_count_not_null")
+        # cheques_record_count — int >= 0 from Stage 5 (Decision 14.6)
+        _cr = b.get("cheques_record_count")
+        if not _check(
+            f"  {bname}.cheques_record_count is int >= 0 (Stage 5, Decision 14.6)",
+            isinstance(_cr, int) and _cr >= 0,
+            f"got {_cr!r}",
+        ):
+            failures.append(f"{bname}_cheques_record_count_not_int")
 
         if not _check(f"  {bname}.cheques_drill_down_domain is null (Alt B)",
                       b.get("cheques_drill_down_domain") is None,
@@ -366,7 +369,7 @@ def main() -> int:
     print()
     print(f"  data_quality_warning : {data_quality_warning!r}")
     print(f"  cache_status         : {cache_status}")
-    print(f"  rpc_duration_ms      : {rpc_ms}  (8 RPCs expected on cache miss)")
+    print(f"  rpc_duration_ms      : {rpc_ms}  (12 RPCs expected on cache miss: 8 amount + 4 cheques_count)")
     print()
 
     print("  ─── MANUAL CROSS-CHECK (REQUIRED for Stage 1 sign-off) ──────────")
