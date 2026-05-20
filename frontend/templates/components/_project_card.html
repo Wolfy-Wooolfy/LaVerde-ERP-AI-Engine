@@ -1,16 +1,18 @@
 {% macro project_card(idx) %}
 <div id="col-proj{{ idx }}-card"
-     class="kpi-card border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+     class="kpi-card gradient-stroke border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
      data-drilldown-target="kpi5-placeholder-{{ idx }}"
      tabindex="0"
-     aria-label="—">
-  <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-3 truncate">
+     aria-label="—"
+     style="--pulse-color: rgba(95,94,90,0.5); --stroke-gradient: linear-gradient(90deg, transparent 0%, #5F5E5A 30%, #888780 50%, #5F5E5A 70%, transparent 100%); --accent-300-color: #fda4af">
+  <p class="flex items-center gap-2 text-[10px] font-medium text-neutral-500 dark:text-neutral-400 uppercase [letter-spacing:0.15em] mb-3">
+    <span id="col-proj{{ idx }}-live-dot" class="live-dot" style="background-color: #5F5E5A; flex-shrink: 0;"></span>
     <span id="col-proj{{ idx }}-name"
-          class="opacity-0 transition-opacity duration-200">—</span>
+          class="truncate opacity-0 transition-opacity duration-200">—</span>
   </p>
   <p class="text-xs text-neutral-400 dark:text-neutral-500 mb-0.5">{{ _t("Late") }}</p>
   <p id="col-proj{{ idx }}-late"
-     class="text-3xl font-bold tabular text-danger-700 dark:text-danger-400 mb-1 opacity-0 transition-opacity duration-200"
+     class="text-3xl font-medium tabular kpi-headline text-danger-700 dark:text-danger-400 mb-1 opacity-0 transition-opacity duration-200"
      title="">—</p>
   <div class="flex items-center gap-2 mt-auto pt-2 border-t border-neutral-100 dark:border-neutral-800">
     <span class="text-xs text-neutral-400 dark:text-neutral-500">{{ _t("Rate") }}</span>

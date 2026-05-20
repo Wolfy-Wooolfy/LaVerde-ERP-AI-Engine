@@ -13,16 +13,18 @@
 
 {% macro forecast_card(bucket_key) %}
 <div id="col-forecast-{{ bucket_key }}-container"
-     class="kpi-card border-l-4 border-primary-500 hover:border-l-[6px]
+     class="kpi-card gradient-stroke border-l-4 border-primary-500 hover:border-l-[6px]
             focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
      data-drilldown-target="forecast-{{ bucket_key }}"
      tabindex="0"
-     aria-label="{{ _t(bucket_key) }}: —">
-  <p class="text-xs font-semibold uppercase tracking-widest text-neutral-500 dark:text-neutral-400 mb-4">
+     aria-label="{{ _t(bucket_key) }}: —"
+     style="--pulse-color: rgba(55,138,221,0.6); --stroke-gradient: linear-gradient(90deg, transparent 0%, #378ADD 30%, #85B7EB 50%, #378ADD 70%, transparent 100%); --accent-300-color: #85b7eb">
+  <p class="flex items-center gap-2 text-[10px] font-semibold uppercase [letter-spacing:0.15em] text-neutral-500 dark:text-neutral-400 mb-4">
+    <span id="col-forecast-{{ bucket_key }}-live-dot" class="live-dot" style="background-color: #378ADD; flex-shrink: 0;"></span>
     {{ _t(bucket_key) }}
   </p>
   <p id="col-forecast-{{ bucket_key }}-amount"
-     class="text-3xl font-bold tabular text-primary-700 dark:text-primary-400 mb-3
+     class="text-3xl font-medium tabular kpi-headline text-primary-700 dark:text-primary-400 mb-3
             opacity-0 transition-opacity duration-200"
      title="">—</p>
   <p id="col-forecast-{{ bucket_key }}-subtitle"
