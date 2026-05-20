@@ -460,7 +460,42 @@
     }
   }
 
+  // ── Dark canvas activation (Pillar 1) ──────────────────────────────────────
+
+  function evaluateCanvas() {
+    var theme = localStorage.getItem('crmTheme') || 'system';
+    var main  = document.querySelector('main.main-content');
+    if (!main) return;
+    if (theme === 'light') {
+      main.classList.remove('collections-canvas-dark');
+      main.style.backgroundColor = '';
+      main.style.backgroundImage = '';
+    } else {
+      main.classList.add('collections-canvas-dark');
+      // Inline style required: bg-neutral-50 utility (@layer utilities) beats
+      // .collections-canvas-dark (@layer components) at equal specificity.
+      main.style.backgroundColor = '#050505';
+      main.style.backgroundImage =
+        'radial-gradient(ellipse 800px 600px at top right, rgba(226,75,74,0.04) 0%, #050505 60%)';
+    }
+  }
+
+  function activateDarkCanvas() {
+    evaluateCanvas();
+    // Cross-tab: storage event fires when another tab calls setTheme()
+    window.addEventListener('storage', function (e) {
+      if (e.key === 'crmTheme') evaluateCanvas();
+    });
+    // Same-tab: setTheme() → applyTheme() toggles 'dark' class on <html>
+    new MutationObserver(evaluateCanvas).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+  }
+
   function init() {
+    activateDarkCanvas();
+
     var topbarBtn = document.getElementById('refresh-btn');
     if (topbarBtn) topbarBtn.onclick = collectionsRefresh;
 
