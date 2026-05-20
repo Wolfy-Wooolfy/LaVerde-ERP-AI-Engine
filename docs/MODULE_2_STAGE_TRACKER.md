@@ -1,6 +1,6 @@
 # Module 2 — Stage Tracker
 
-**Last updated:** 2026-05-20
+**Last updated:** 2026-05-20 (Stage 4 closed)
 
 This is the single source of truth for "where are we?" in
 Module 2. Update at the close of every stage.
@@ -13,7 +13,7 @@ Module 2. Update at the close of every stage.
 | 2 — KPI 2 cheques extension | ✅ Closed | `checkpoint-C-stage2-kpi2-extended` | Session 10 (10.1-10.9) | 5 | KPI 2 backend extended (PATH C) |
 | 3 — Frontend Restructure | ✅ Closed | `checkpoint-D-stage3-frontend-restructure-complete` | Session 11 (11.1-11.18) | 5 + 1 fix + 1 doc | 4-section layout, state refactor |
 | 2.5 — KPI 2 redefinition | ✅ Closed | `checkpoint-C-stage2-5-kpi2-redefined` | Session 12 | 6 | KPI 2 formula PATH A; +1.93M EGP cheques annotation |
-| 4 — Premium Visual Polish | ⏳ Planned | — | (Session 13) | TBD | "From the future" tier UX |
+| 4 — Premium Visual Identity | ✅ Closed | `checkpoint-D-stage4-premium-visual-identity-complete` | Session 13 | 10 | Dark canvas, heartbeat, premium cards, cheques pill, D2.9 fix |
 | 5 — Drill-down Backend | ⏳ Planned | — | (Session 14) | TBD | Drill-down endpoints + KPI 7 cheques count |
 | 6 — Drill-down Frontend | ⏳ Planned | — | (Session 15) | TBD | Drill-down UI integration |
 
@@ -47,6 +47,7 @@ Module 2. Update at the close of every stage.
 | `checkpoint-C-stage2-kpi2-extended` | Stage 2 close | 2026-05-19 |
 | `checkpoint-D-stage3-frontend-restructure-complete` | Stage 3 close | 2026-05-19 |
 | `checkpoint-C-stage2-5-kpi2-redefined` | Stage 2.5 close | 2026-05-20 |
+| `checkpoint-D-stage4-premium-visual-identity-complete` | Stage 4 close | 2026-05-20 |
 
 ## Maintenance instructions
 

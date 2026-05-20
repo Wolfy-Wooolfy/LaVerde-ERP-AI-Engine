@@ -133,3 +133,83 @@ When language = Arabic:
 - Chart.js legends automatically reflow
 
 Toggle via the language switcher in the topbar. Language is stored in both `localStorage.crmLang` and a `lang` cookie (for server-side detection).
+
+---
+
+## Collections Dashboard — Premium Visual Identity (Stage 4)
+
+Stage 4 (Session 13, 2026-05-20) delivered a full visual identity upgrade to the Collections Dashboard. The page now renders on a near-black `#050505` canvas by default (respecting an explicit Light theme choice), with tonal accent colors, animated live-status indicators, and a premium cheques annotation pill — a 6-pillar system built into `frontend/src/css/input.css` and driven by `activateDarkCanvas()` in `collections.js`. The upgrade targets a Chairman/Board audience and covers all 4 dashboard sections uniformly. Detailed rationale for every design decision is in `docs/MODULE_2_IMPLEMENTATION_DECISIONS.md` Session 13 (Decisions 13.1–13.6).
+
+### 6 Pillars
+
+| Pillar | Description |
+|---|---|
+| 1 — Dark Canvas | `#050505` background with a subtle danger-red radial gradient; activated at JS runtime via `collections-canvas-dark` class + inline style on `<main>` |
+| 2 — KPI Headline Typography | `.kpi-headline` class: `tabular-nums`, `letter-spacing: -0.02em`, `font-weight: 500`; on dark canvas, value color overrides to per-section `-300` accent tone via CSS custom property `--accent-300-color` |
+| 3 — Gradient Stroke Top Accent | `.gradient-stroke::before` pseudo-element: 1px top edge gradient fading transparent → section-accent → transparent, at 0.5 opacity |
+| 4 — Live Status Indicators | `.live-dot` (6px circle) with `pulse-glow` keyframe box-shadow animation; one per card section with section-accent background color; heartbeat relative-time counter in the page header updates every 10s |
+| 5 — Premium Cheques Annotation Pill | `.cheques-pill`: amber left-border pill with `breathe-subtle` opacity animation (0.85→1, 4s); shown only when `cheques_in_pipeline > 0` |
+| 6 — D2.9 Auto-refresh Fix | `startAutoRefresh()` and `startHeartbeat()` both guard against interval stacking; `visibilitychange` handler stops both intervals before restarting; verified: exactly 7 fetches on load, no stacking across DevTools toggles |
+
+### Dark Canvas Activation
+
+`activateDarkCanvas()` is called as the first action in `init()` inside `collections.js`. Logic:
+
+```
+if localStorage.crmTheme === 'light'
+  → remove collections-canvas-dark class; clear inline styles (standard light mode)
+else (null / 'system' / 'dark')
+  → add collections-canvas-dark class; set inline backgroundColor + backgroundImage
+```
+
+Two change listeners keep it reactive:
+- **Cross-tab:** `window.storage` event fires when another tab calls `setTheme()`.
+- **Same-tab:** `MutationObserver` on `document.documentElement` (watches `class`
+  attribute) fires when the global theme toggle calls `applyTheme()`.
+
+The inline style is required because `bg-neutral-50` (a Tailwind utility on `<main>`)
+has higher effective specificity than `.collections-canvas-dark` (a component-layer
+class) in the generated stylesheet. See Pitfalls below.
+
+### CSS Custom Properties Per Section
+
+Each card's root element carries three inline CSS variables:
+
+| Variable | Purpose |
+|---|---|
+| `--accent-300-color` | KPI headline color on dark canvas (consumed by `.collections-canvas-dark .kpi-card .kpi-headline`) |
+| `--pulse-color` | Glow ring color for `.live-dot` `pulse-glow` keyframe |
+| `--stroke-gradient` | Gradient definition for the `::before` top-edge stroke |
+
+Section accent colors: emerald (#6ee7b7 / #5DCAA5) for Portfolio, danger (#fda4af / #E24B4A) for Risk, info (#85b7eb / #378ADD) for Expected Collections, neutral (#5F5E5A) for Performance.
+
+### Pitfalls
+
+**Tailwind v3 dark-mode specificity tie.** Tailwind v3 compiles `dark:text-X` to
+`.dark\:text-X:is(.dark *)`. The `:is()` pseudo-class contributes the specificity
+of its most-specific argument — `.dark *` yields **(0,1,0)** — giving the total
+selector **(0,2,0)**. A simple 2-class descendant selector like
+`.collections-canvas-dark .kpi-headline` also has **(0,2,0)**. Since Tailwind
+utilities are emitted later in the stylesheet, source order hands the win to the
+utility and the custom color override is silently ignored.
+
+**Fix pattern:** Always chain through a guaranteed structural ancestor to reach
+**(0,3,0)**:
+
+```css
+/* Wrong — ties with dark:text-*-400 at (0,2,0); utility wins by source order */
+.collections-canvas-dark .kpi-headline { color: var(--accent-300-color); }
+
+/* Correct — (0,3,0) beats (0,2,0) regardless of source order */
+.collections-canvas-dark .kpi-card .kpi-headline { color: var(--accent-300-color); }
+```
+
+Any future override of a Tailwind dark-mode color utility via a descendant selector
+must include at least one structural ancestor class (`.kpi-card`, `.chart-panel`,
+etc.) as the third class in the chain. A 2-class selector is never sufficient.
+
+**`bg-neutral-50` vs dark canvas background.** The `<main class="main-content">` element
+carries `bg-neutral-50` (a Tailwind utility). Utility layer rules beat component layer
+rules at equal specificity. Solution: set `main.style.backgroundColor` and
+`main.style.backgroundImage` directly in JS — inline styles override all stylesheet
+rules regardless of specificity.

@@ -1989,3 +1989,170 @@ Checkpoint tag target:
 - **Pattern for future modules:** Any new module whose tests are run as
   `pytest backend/modules/<name>/tests/` should add a matching `conftest.py`
   with env-var defaults. This is the first instance of this pattern in the codebase.
+
+---
+
+## Session 13 — 2026-05-20 — Stage 4: Premium Visual Identity
+
+**Scope:** Stage 4 close. Dark canvas foundation (Pillar 1), KPI
+headline typography (Pillar 2), gradient stroke top accents (Pillar 3),
+live-dot status indicators (Pillar 4), premium cheques annotation pill
+(Pillar 5), D2.9 auto-refresh stacking fix (Pillar 6). All 4 dashboard
+sections covered. CSS delta +1,847 bytes (23% of +8,192 budget).
+
+**Commits (10 total):**
+- Phase A (`2b63354`) — D2.9 fix + heartbeat infrastructure
+- Phase A.1 (`eafb712`) — tickHeartbeat() null guards
+- Phase B (`28b3ff0`) — Tailwind config amber/info ramps + CSS layer
+- Phase C (`0324c2b`) — portfolio + risk cards (Pillars 1-4)
+- Phase D (`a2f3fa4`) — forecast + project cards (Pillars 1-4)
+- Phase E (`a7e9bc1`) — dashboard header + live status pill
+- Phase E.1 (`f4b11cf`) — remove dead col-live-dot reference
+- Phase F (`5c546b9`) — cheques annotation pill upgrade (Pillar 5)
+- Phase F.1 (`9e540dd`) — activateDarkCanvas() in collections.js
+- Phase F.2 (`789b9c9`) — kpi-headline cascade specificity fix
+
+---
+
+### Decision 13.1 — Visual identity v2 (Option B) selected over polish-only or full redesign
+
+- **Status:** CLOSED — chosen by Khaled 2026-05-20; implemented across Phase A–F.2
+- **Trigger:** Khaled's framing: "عايز أعلى درجات الاحترافية. المشروع يكون جاي من
+  المستقبل من كوكب تاني." Three options were compared via written mockups before
+  any code was touched:
+  - **Option A (polish-only):** Tighten spacing, refine typography, smooth
+    transitions. Safe, low-effort, low-risk. Estimated 2 hours.
+  - **Option B (visual identity v2):** Introduce a dark canvas default, tonal
+    color hierarchy (-300 accent tones on dark), gradient stroke top accents,
+    live-dot pulse animations, premium cheques pill. Full 6-pillar system built
+    into the CSS layer. Estimated 6-8 hours.
+  - **Option C (full redesign / signature moments):** Everything in B plus
+    count-up animation on KPI values, vs-Yesterday delta context, % of Portfolio
+    context on risk card, sparklines on project cards. Estimated 12+ hours.
+- **Choice:** Option B. Delivers ~80% of Option C's perceived premium feel at
+  ~30% of the effort. Option A was visually insufficient given the Board audience
+  requirement. Option C's signature moments are deferred — they require additional
+  data fetches and animation infrastructure not yet present.
+- **Deferred (Option C scope, not abandoned):** count-up animation on KPI refresh,
+  vs-Yesterday delta badge, % of Portfolio context on KPI 2 risk card, sparklines
+  on project cards. These are explicit future enhancements for a Stage 4b if
+  Khaled decides the Chairman audience warrants them.
+
+### Decision 13.2 — All 4 dashboard sections covered uniformly (not hero-only)
+
+- **Status:** CLOSED — implemented across Phases C, D, E
+- **Observation:** An early alternative scoped Stage 4 to Section 1 (Portfolio)
+  and Section 2 (Risk) only — the two "hero" sections — leaving Sections 3 and 4
+  in the original Stage 3 styling.
+- **Rejection rationale:** Partial premium creates more visual inconsistency than
+  it resolves. If the dark canvas applies to Sections 1-2 but not 3-4, the page
+  reads as broken rather than refined. A Chairman-audience page must feel
+  deliberate end-to-end.
+- **Implementation nuance:** Section 4 (Performance & Trend) receives a more
+  reserved treatment — neutral-toned gradient stroke (#5F5E5A), neutral live-dot
+  color — consistent with its informational role vs. the hero KPI sections. The
+  premium system is uniform but not monotone.
+
+### Decision 13.3 — Collections dashboard dark canvas by default; respects explicit Light choice
+
+- **Status:** CLOSED — implemented in Phase F.1 (`9e540dd`)
+- **Mechanism:** `activateDarkCanvas()` in `frontend/static/js/collections.js`
+  is called as the first action inside `init()`. It reads
+  `localStorage.getItem('crmTheme')` (values: `'light'`, `'dark'`, `'system'`,
+  or `null`).
+  - If theme is `'light'` (explicit user choice): no class applied, no inline
+    style set; the page uses standard `bg-neutral-50` light-mode design.
+  - For any other value (`'dark'`, `'system'`, or `null`): `collections-canvas-dark`
+    class is added to `<main class="main-content">`, and inline
+    `backgroundColor`/`backgroundImage` styles are set (necessary to override the
+    `bg-neutral-50` utility — see Decision 13.5).
+- **Reactivity:** Two change listeners are registered by `activateDarkCanvas()`:
+  - `storage` event on `window` — fires when another tab calls `setTheme()` and
+    writes to `localStorage.crmTheme`.
+  - `MutationObserver` on `document.documentElement` watching the `class`
+    attribute — fires when the same-tab global theme toggle calls `applyTheme()`,
+    which toggles the `dark` class on `<html>`. Both paths call `evaluateCanvas()`,
+    which re-reads `localStorage` and re-applies or removes the class atomically.
+- **Design principle:** The dark canvas is a page-level identity feature, not a
+  second dark mode. It is independent of the global dark/light toggle. In light
+  mode, the Collections page uses the standard `neutral-50` background; in dark
+  or system mode, the `#050505` canvas is the deliberate page-level choice for
+  this dashboard specifically.
+
+### Decision 13.4 — D2.9 auto-refresh stacking fix (Decision 11.18 resolved)
+
+- **Status:** CLOSED — implemented in Phase A (`2b63354`); verified by Khaled
+  2026-05-20 (DevTools Network panel, 5 consecutive hide/show cycles)
+- **Two compounding root causes fixed together (Option 3 from Decision 11.18):**
+  1. `startAutoRefresh()` now opens with `if (_autoRefreshInterval) return;` —
+     any caller that fires when an interval is already running is a no-op. This
+     prevents the primary stacking vector.
+  2. The `visibilitychange` restore branch now calls `stopAutoRefresh()` before
+     `fetchAllKPIs().then(startAutoRefresh)` — mirroring the correct pattern that
+     `collectionsRefresh()` already used. This closes the DevTools-toggle stacking
+     vector.
+- **Heartbeat interval mirrors the same discipline:** `startHeartbeat()` guards
+  with `if (_heartbeatInterval) return;`; the `visibilitychange` handler calls
+  `stopHeartbeat()` on hide and restarts it via `startHeartbeat()` on show.
+  `collectionsRefresh()` stops both intervals before fetching and starts both
+  after the fetch resolves.
+- **Verification:** Khaled confirmed exactly 7 fetches on page load (one per KPI
+  endpoint), no additional fetches during 5 consecutive DevTools panel open/close
+  cycles, and correct 60s auto-refresh cadence in the Network timeline.
+
+### Decision 13.5 — Tailwind v3 `:is(.dark *)` specificity bypass
+
+- **Status:** CLOSED — root-caused in Phase F.2 investigation; fixed in Phase F.2
+  (`789b9c9`) 2026-05-20
+- **Discovery:** After Phase F.1 activated `collections-canvas-dark`, browser
+  inspection showed KPI headline values retaining their dark-mode palette colors
+  (`text-danger-400`, `text-emerald-400`, etc.) instead of switching to the `-300`
+  accent tones defined by `.collections-canvas-dark .kpi-headline`.
+- **Root cause:** Tailwind v3 with `darkMode: 'class'` strategy compiles
+  `dark:text-danger-400` to the selector
+  `.dark\:text-danger-400:is(.dark *)`. The `:is()` pseudo-class takes the
+  specificity of its most-specific argument — `.dark *` contributes (0,1,0)
+  (one class selector, universal selector contributes nothing). Combined with
+  the utility's own class selector, the total specificity is **(0,2,0)**. The
+  rule appears at byte offset 61,363 in the built `app.css`.
+  Our `.collections-canvas-dark .kpi-headline` rule (two class selectors) also
+  has specificity **(0,2,0)** and appears at offset 55,807 — earlier in the
+  stylesheet. Equal specificity → source order → the Tailwind utility wins.
+- **Fix:** Changed the selector to
+  `.collections-canvas-dark .kpi-card .kpi-headline` (three class selectors),
+  raising specificity to **(0,3,0)**. The `.kpi-card` ancestor is structurally
+  guaranteed — every KPI headline in every section lives inside a `.kpi-card`
+  container. The (0,3,0) rule wins the cascade cleanly regardless of source
+  order.
+- **Lesson for future maintainers:** When writing custom descendant-selector
+  overrides for Tailwind dark-mode utilities (`dark:text-*`, `dark:bg-*`), the
+  override must reach specificity **(0,3,0) or higher** to beat the
+  `:is(.dark *)` form. A 2-class selector is never sufficient. The safe pattern
+  is to chain through one guaranteed ancestor class (e.g., `.kpi-card`,
+  `.chart-panel`) as the third class in the selector chain.
+
+### Decision 13.6 — Visual nits accepted as "good enough" for Stage 4 close
+
+- **Status:** CLOSED — Khaled browser verification 2026-05-20
+- **Honest assessment after Phase F.2 fix and hard-refresh:**
+  - Headline `-300` accent tones now render correctly on all 4 sections
+    after the Phase F.2 cascade fix.
+  - Gradient stroke `::before` pseudo-elements are visible but intentionally
+    subtle (0.5 opacity, as specced). At this opacity they read as "refined
+    glass edge" rather than a decorative stripe — appropriate for a
+    Chairman-audience dashboard.
+  - Live-dot pulse animations run smoothly. The `pulse-glow` keyframe uses
+    `box-shadow` growth (0 → 8px ring → transparent), which avoids layout
+    reflow and is GPU-composited on all modern browsers.
+  - Cheques pill `breathe-subtle` animation (opacity 0.85→1 over 4s) is
+    visible when the annotation is shown. The effect is subtle by design —
+    it draws the eye without being distracting in a data-dense view.
+- **Remaining gap vs Option C (acknowledged, not closed):** The deferred
+  signature moments from Decision 13.1 (count-up animation, vs-Yesterday
+  context, % of Portfolio, sparklines) are not present. This is the known
+  and accepted scope boundary for Stage 4. The Chairman audience priority
+  has now shifted to drill-down functionality (Stages 5-6); further visual
+  polish is a lower-priority follow-on.
+- **CSS budget:** +1,847 bytes used of the +8,192 byte budget (23%). The
+  remaining 77% headroom is available for Stages 5-6 UI additions without
+  requiring a CSS audit.
