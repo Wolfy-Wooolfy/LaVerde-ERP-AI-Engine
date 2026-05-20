@@ -182,7 +182,7 @@
     letter-spacing: -0.02em;
     font-weight: 500;
   }
-  .collections-canvas-dark .kpi-headline {
+  .collections-canvas-dark .kpi-card .kpi-headline {
     color: var(--accent-300-color);
   }
 
