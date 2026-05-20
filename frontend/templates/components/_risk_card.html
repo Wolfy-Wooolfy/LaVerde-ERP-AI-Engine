@@ -4,8 +4,9 @@
    Section 2 — Current Risk
    KPI 2: Late Uncollected, danger accent hero card
    Element IDs: col-kpi2-container, col-kpi2-value, col-kpi2-subtitle,
-                col-kpi2-records, col-kpi2-as-of
-   PATH C: no cheques annotation rendered (Decision 10.1)
+                col-kpi2-records, col-kpi2-as-of,
+                col-kpi2-cheques-annotation, col-kpi2-cheques-value
+   PATH A: cheques annotation rendered (Decision 11.13) — reverses Decision 10.1
 #}
 
 {% macro risk_card() %}
@@ -29,6 +30,14 @@
     &middot;
     {{ _t("as of") }}
     <span id="col-kpi2-as-of">—</span>
+  </p>
+  <p id="col-kpi2-cheques-annotation"
+     class="text-sm text-amber-700 dark:text-amber-400 mt-2
+            opacity-0 transition-opacity duration-200"
+     hidden>
+    {{ _t("cheques_annotation_prefix") }}
+    <span id="col-kpi2-cheques-value">—</span>
+    {{ _t("cheques_annotation_suffix") }}
   </p>
 </div>
 {% endmacro %}

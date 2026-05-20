@@ -97,6 +97,17 @@
     if (asOfEl)     asOfEl.textContent    = asOf;
     if (subtitleEl) fadeIn(subtitleEl);
     if (card) card.setAttribute('aria-label', (s.late_uncollected || 'Late Uncollected') + ': ' + formatted);
+
+    // Cheques annotation — PATH A (Decision 11.13).
+    // cheques_in_pipeline is a SUBSET of value; show only when > 0.
+    var annotationEl = document.getElementById('col-kpi2-cheques-annotation');
+    var chequesValEl = document.getElementById('col-kpi2-cheques-value');
+    var cheques      = kpi2.cheques_in_pipeline;
+    if (annotationEl && chequesValEl && cheques) {
+      chequesValEl.textContent = fmt.formatEGP(cheques, lang);
+      annotationEl.removeAttribute('hidden');
+      fadeIn(annotationEl);
+    }
   }
 
   // ── Section 3 — Expected Collections (KPI 7) ──────────────────────────────

@@ -161,5 +161,7 @@
   "this_quarter": "This Quarter",
   "this_half": "This Half",
   "this_year": "This Year",
-  "until": "until {date}"
+  "until": "until {date}",
+  "cheques_annotation_prefix": "of which",
+  "cheques_annotation_suffix": "are received cheques not yet cleared"
 }

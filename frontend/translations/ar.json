@@ -161,5 +161,7 @@
   "this_quarter": "هذا الربع",
   "this_half": "هذا النصف",
   "this_year": "هذا العام",
-  "until": "حتى {date}"
+  "until": "حتى {date}",
+  "cheques_annotation_prefix": "منها",
+  "cheques_annotation_suffix": "شيكات مستلمة لم تتحصل بعد"
 }
