@@ -2743,3 +2743,32 @@ confirms the bug. Retained for future regression checks.
 ability to FILTER by paid, because no drill-down endpoint's schema accepts
 it. These are two different things: what the endpoint RETURNS by default
 vs. what it can FILTER on.
+
+---
+
+### Decision 15.16 — §8.3 column set was under-implemented: due_amount and pending_cheque added (Session 15 follow-up)
+
+**Context:** REFACTOR_SPEC §8.3 specifies 7 columns for installment rows:
+Customer, Project, Due Date, Amount, **Due Amount**, **Pending Cheque**,
+Payment State. The initial `_makeInstallmentRow` implementation rendered
+only Customer, Project, Date, Amount, and Status badge — two columns short.
+
+**Root cause:** Both `due_amount` and `pending_cheque` are returned by the
+backend on every `InstallmentRow` (confirmed in schemas.py). The omission
+was a frontend coding gap, not a backend limitation.
+
+**Fix (commit 03ddf4f):**
+- `dueAmtStr`: formatted via `F.formatEGP` / `_fmtEgp(row.due_amount)`,
+  labelled `S.dd_due` (EN: "Due", AR: "المستحق").
+- `chequeAmtStr`: formatted when `row.pending_cheque > 0`, literal `'—'`
+  when zero. The "—" convention follows §8.3 "show only when relevant".
+- Both rendered in the right column between amount and the status badge.
+
+**i18n keys:** `dd_due` and `dd_pending_cheque` — both already in
+`COLLECTIONS_STRINGS` from D8. No additions needed.
+
+**No backend change.** Frontend-only.
+
+**Unit tests:** 52/52 pass. The new fields are inside `_makeInstallmentRow`
+which is not a pure function (it creates DOM elements), so no new unit tests
+added — browser verification is the appropriate check for rendered output.
