@@ -147,6 +147,16 @@ module.exports = {
     'gradient-stroke',
     'kpi-records-count',
     'collections-canvas-dark',
+    // Stage 6 — drilldown.js renders rows dynamically; class names not scannable
+    // until drilldown.js exists. Safelist base + variant classes together.
+    'dd-row',
+    'dd-payment-badge',
+    'dd-filter-chip',
+    'dd-filter-chip--active',
+    'dd-sort-btn',
+    'dd-sort-btn--active',
+    'dd-portfolio-breakdown-row',
+    { pattern: /^dd-payment-badge--/ },
   ],
   plugins: [
     require('@tailwindcss/forms'),

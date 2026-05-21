@@ -145,6 +145,68 @@
   .dataTables_wrapper .dataTables_info {
     @apply text-sm text-neutral-500 dark:text-neutral-400;
   }
+
+  /* ── Stage 6: Drill-down Panel ──────────────────────────────────────────── */
+
+  /* Installment / portfolio customer row */
+  .dd-row {
+    @apply transition-colors duration-150;
+  }
+  .dd-row:hover {
+    @apply bg-neutral-50 dark:bg-neutral-800/60;
+  }
+
+  /* Payment state badge */
+  .dd-payment-badge {
+    @apply inline-flex items-center px-1.5 py-0.5 rounded
+           text-[10px] font-semibold uppercase tracking-wide;
+  }
+  .dd-payment-badge--not_paid {
+    @apply bg-danger-100 text-danger-700
+           dark:bg-danger-900/30 dark:text-danger-400;
+  }
+  .dd-payment-badge--partial {
+    @apply bg-warning-100 text-warning-700
+           dark:bg-warning-900/30 dark:text-warning-400;
+  }
+  .dd-payment-badge--paid {
+    @apply bg-success-100 text-success-700
+           dark:bg-success-900/30 dark:text-success-400;
+  }
+  .dd-payment-badge--reversed {
+    @apply bg-neutral-100 text-neutral-500
+           dark:bg-neutral-700 dark:text-neutral-400;
+  }
+
+  /* Portfolio project breakdown sub-row (always-visible, flat) */
+  .dd-portfolio-breakdown-row {
+    @apply flex items-center justify-between gap-2 py-1.5
+           text-xs text-neutral-500 dark:text-neutral-400
+           border-t border-neutral-100 dark:border-neutral-800/50;
+  }
+
+  /* Filter bar — payment-state / pending-cheque toggle chips */
+  .dd-filter-chip {
+    @apply px-2.5 py-1 rounded-full text-xs font-medium transition-colors duration-150
+           text-neutral-600 dark:text-neutral-400
+           bg-neutral-100 dark:bg-neutral-800
+           hover:bg-neutral-200 dark:hover:bg-neutral-700;
+  }
+  .dd-filter-chip--active {
+    @apply bg-primary-100 text-primary-700
+           dark:bg-primary-900/40 dark:text-primary-300;
+  }
+
+  /* Sort direction buttons */
+  .dd-sort-btn {
+    @apply px-2.5 py-1 rounded text-xs font-medium transition-colors duration-150
+           text-neutral-500 dark:text-neutral-500
+           hover:text-neutral-700 dark:hover:text-neutral-300
+           hover:bg-neutral-100 dark:hover:bg-neutral-800;
+  }
+  .dd-sort-btn--active {
+    @apply text-primary-600 dark:text-primary-400;
+  }
 }
 
 /* ── Utilities ── */
