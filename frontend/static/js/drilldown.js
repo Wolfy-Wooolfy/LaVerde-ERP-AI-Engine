@@ -212,17 +212,31 @@
 
       _renderData(envelope);
 
+      // D6: load-more with shown/total count annotation
       if (_state.hasNext) {
+        var shown = _listBody.children.length;
+        var total = meta.total_count || 0;
+        _loadMoreBtn.textContent = (S.dd_load_more || 'Load more')
+          + (total ? ' (' + shown + ' / ' + total + ')' : '');
         _loadMoreBtn.classList.remove('hidden');
       }
+      // D6: data-quality note with optional unassigned count
       if (meta.data_quality) {
-        _dataQualityNote.textContent = S.dd_dq_unassigned || 'Some records have no project assigned.';
+        var dq  = meta.data_quality;
+        var cnt = dq.unassigned_count || dq.count || null;
+        var msg = S.dd_dq_unassigned || 'Some records have no project assigned.';
+        if (cnt) msg = cnt + ' ' + (S.records || 'records') + ': ' + msg;
+        _dataQualityNote.textContent = msg;
         _dataQualityNote.classList.remove('hidden');
       }
     }).catch(function (err) {
       _state.isLoading = false;
       _loadingSentinel.classList.add('hidden');
-      _errorMsg.textContent = (S.dd_error_fetch || 'Failed to load. Please try again.');
+      // D6: error state with inline retry button
+      _errorMsg.innerHTML = ''
+        + '<span>' + _esc(S.dd_error_fetch || 'Failed to load. Please try again.') + '</span>'
+        + ' <button type="button" class="underline ms-1 focus-visible:ring-2 focus-visible:ring-danger-500"'
+        + ' data-dd-retry="1">' + _esc(S.try_again || 'Try again') + '</button>';
       _errorMsg.classList.remove('hidden');
     });
   }
@@ -558,6 +572,15 @@
     _backdrop.addEventListener('click', close);
     _loadMoreBtn.addEventListener('click', function () {
       if (_state.hasNext && !_state.isLoading) _fetchPage();
+    });
+
+    // D6: retry button inside error message
+    _errorMsg.addEventListener('click', function (e) {
+      if (e.target.closest('[data-dd-retry]')) {
+        _hide(_errorMsg);
+        _loadingSentinel.classList.remove('hidden');
+        _fetchPage();
+      }
     });
 
     // Delegated click handler for all [data-drilldown-target] cards.
