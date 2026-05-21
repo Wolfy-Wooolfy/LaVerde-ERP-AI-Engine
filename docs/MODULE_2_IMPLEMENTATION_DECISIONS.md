@@ -2628,3 +2628,36 @@ query param) but is NOT implemented in Stage 6 filter bar — portfolio
 is the only endpoint without sort/state filters, and the Board's
 primary use of the portfolio view is the full breakdown, not filtering
 by project.
+
+### Decision 15.13 — project_id null vs. 0: different handling per endpoint type
+
+This is the D-6/Q4 finding from Stage 6 Phase 1 discovery.
+
+**Installment rows** (late / forecast / project / trend endpoints):
+
+`_serialize_row()` in the backend converts Odoo's `project_id=False`
+to `project_id=0` (int), and `project_name_ar/en = ""` (empty string,
+because `_PROJECT_NAMES_*.get(0, "")` has no entry for key 0).
+The JS renderer `_makeInstallmentRow()` receives `project_name_en=""`
+(falsy) and falls through to `S.dd_no_project || 'No Project'`.
+`project_id === 0` on an installment row means "no project assigned in
+Odoo" — it is never a real project ID.
+
+**Portfolio breakdown** (portfolio endpoint only):
+
+`get_portfolio_drilldown()` uses Python `None` for `project_id` when
+Odoo returns `project_id=False`, and sets explicit sentinel labels:
+`project_name_en = "No Project Assigned"`, `project_name_ar = "بدون مشروع"`.
+The JS renderer `_makePortfolioRow()` receives a truthy string and
+renders it directly — no fallback needed.
+
+**Why the difference:** The portfolio endpoint aggregates by
+`(partner_id, project_id)` via `read_group` and surfaces the
+no-project group explicitly per Decision 14.13. Installment row
+serialization uses a simple int-keyed lookup; `project_id=False`
+falls out to 0, and the display layer handles the empty-name case.
+
+**Code invariant:** Do NOT add an explicit `if project_id === 0`
+guard in `_makeInstallmentRow()` — the empty-name fallback is
+intentional. Do NOT expect `project_id=0` in portfolio breakdown
+rows — that path always uses `null`.
