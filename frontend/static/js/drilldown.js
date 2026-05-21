@@ -417,6 +417,26 @@
     _loadMoreBtn.addEventListener('click', function () {
       if (_state.hasNext && !_state.isLoading) _fetchPage();
     });
+
+    // Delegated click handler for all [data-drilldown-target] cards.
+    // Also fires on keyboard Enter/Space for accessibility (D7 adds full focus trap).
+    document.addEventListener('click', function (e) {
+      var el = e.target.closest('[data-drilldown-target]');
+      if (!el) return;
+      var target = el.getAttribute('data-drilldown-target');
+      if (!target) return;
+      open(target, {}, el);
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var el = e.target.closest('[data-drilldown-target]');
+      if (!el) return;
+      var target = el.getAttribute('data-drilldown-target');
+      if (!target) return;
+      e.preventDefault();
+      open(target, {}, el);
+    });
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────

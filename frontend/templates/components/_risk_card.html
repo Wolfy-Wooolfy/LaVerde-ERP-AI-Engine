@@ -34,7 +34,12 @@
     <span id="col-kpi2-as-of">—</span>
   </p>
   <div id="col-kpi2-cheques-annotation"
-       class="mt-3 opacity-0 transition-opacity duration-200"
+       class="mt-3 opacity-0 transition-opacity duration-200 cursor-pointer
+              focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 rounded"
+       data-drilldown-target="kpi2-cheques"
+       tabindex="0"
+       role="button"
+       aria-label="{{ _t('Late Uncollected') }} — {{ _t('cheques_annotation_prefix') }}"
        hidden>
     <div class="cheques-pill flex items-center gap-2">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"

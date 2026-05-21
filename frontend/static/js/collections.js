@@ -279,6 +279,22 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        onClick: function (event, elements) {
+          if (!elements || !elements.length) return;
+          if (elements[0].datasetIndex !== 0) return;
+          var idx      = elements[0].index;
+          var trendData = window.collectionsDashboard && window.collectionsDashboard.state;
+          if (!trendData || !trendData.trend || !trendData.trend.months) return;
+          var monthStr = trendData.trend.months[idx] && trendData.trend.months[idx].month;
+          if (!monthStr) return;
+          if (window.drilldownController) {
+            window.drilldownController.open('trend-' + monthStr, {}, event.native && event.native.target);
+          }
+        },
+        onHover: function (event, elements) {
+          var c = event.native && event.native.target;
+          if (c) c.style.cursor = elements && elements.length && elements[0].datasetIndex === 0 ? 'pointer' : 'default';
+        },
         plugins: {
           legend: {
             display: true,

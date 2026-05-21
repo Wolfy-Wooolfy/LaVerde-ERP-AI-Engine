@@ -4,6 +4,7 @@
 {% from "components/_forecast_card.html" import forecast_card with context %}
 {% from "components/_project_card.html" import project_card with context %}
 {% from "components/_chart_container.html" import chart_container %}
+{% from "components/_drilldown_panel.html" import drilldown_panel with context %}
 
 {% block title %}{{ _t("Collections Dashboard") }} — LaVerde ERP AI Engine{% endblock %}
 
@@ -106,10 +107,7 @@
   {# KPI 4 — Collection Rate MTD/YTD (full-width row 1) #}
   <div id="col-kpi4-container"
        class="kpi-card border border-neutral-200 dark:border-neutral-700
-              group flex flex-col overflow-hidden
-              focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-       data-drilldown-target="kpi4"
-       tabindex="0"
+              group flex flex-col overflow-hidden"
        aria-label="{{ _t('Collection Rate') }}: — / —">
     <div class="mb-3">
       <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
@@ -163,6 +161,8 @@
     {{ _t("Try again") }}
   </button>
 </div>
+
+{{ drilldown_panel() }}
 
 {% endblock %}
 
@@ -252,4 +252,5 @@ window.COLLECTIONS_STRINGS = {
 </script>
 <script src="/static/js/formatters.js"></script>
 <script src="/static/js/collections.js"></script>
+<script src="/static/js/drilldown.js"></script>
 {% endblock %}
