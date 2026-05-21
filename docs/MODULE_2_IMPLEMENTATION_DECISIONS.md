@@ -2672,3 +2672,27 @@ falls out to 0, and the display layer handles the empty-name case.
 guard in `_makeInstallmentRow()` — the empty-name fallback is
 intentional. Do NOT expect `project_id=0` in portfolio breakdown
 rows — that path always uses `null`.
+
+### Decision 15.14 — Decision 13.5 specificity trap does NOT apply to panel CSS
+
+**Context:** Decision 13.3 introduced `collections-canvas-dark` on
+`<main class="main-content">` as a page-level identity feature (the
+`#050505` dark canvas). Decision 13.5 documented a Tailwind specificity
+trap: when a `dark:` utility on a descendant element ties in specificity
+with an override applied via a descendant selector under
+`.collections-canvas-dark`, the override wins unexpectedly.
+
+**Non-applicability:** All drill-down panel CSS classes (`.dd-row`,
+`.dd-payment-badge`, `.dd-filter-chip`, `.dd-sort-btn`, etc.) are
+defined in `@layer components` with `dark:` utilities only — no
+`.collections-canvas-dark` descendant selector ever references them.
+After the body-portal move (commit 820af74), the panel DOM is a direct
+`<body>` child and is outside `<main>` entirely, so no
+`.collections-canvas-dark` context exists for any panel element.
+
+**Maintenance note:** The panel's dark-mode styling comes exclusively
+from `<html class="dark">` toggled by the theme script in `base.html`.
+Do NOT add overrides to panel classes via a `.collections-canvas-dark .dd-*`
+selector — that would introduce the exact trap Decision 13.5 warns about.
+Dark-mode panel changes belong in the `dark:` utility on the class
+definition in `input.css`.

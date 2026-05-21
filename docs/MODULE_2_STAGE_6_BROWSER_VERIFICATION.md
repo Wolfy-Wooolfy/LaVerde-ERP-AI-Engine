@@ -159,7 +159,7 @@ brief loading skeleton. No JS errors in console.
 | 10.1 | Dark mode (default) | Panel background `bg-neutral-900`; text readable | |
 | 10.2 | Light mode | Panel background `bg-white`; borders visible | |
 | 10.3 | Payment badges in dark mode | Danger/warning/success colours readable | |
-| 10.4 | **Body-portal dark-mode check** — panel uses `dark:bg-neutral-900` driven by `<html class="dark">`, NOT by `collections-canvas-dark`; confirm no regression after moving panel outside `<main>` | Same dark background and border colours as before the portal move | |
+| 10.4 | **Body-portal dark-mode visual check** — in dark mode (`crmTheme = dark` or `system`), open any drill-down panel over the Collections dashboard. The panel background (`dark:bg-neutral-900`) must read as visually consistent with the `.kpi-card` backgrounds. It must NOT appear as a lighter-grey panel floating on the `#050505` canvas — both the panel and the KPI cards use `bg-neutral-900`; they should match. (Panel is now outside `<main class="main-content">` and relies solely on `<html class="dark">` — confirm this renders identically to before the portal move.) | Panel background matches KPI card dark backgrounds; no visible tone mismatch against the `#050505` canvas | |
 | 10.5 | **Body-portal z-index check** — panel `z-50`, backdrop `z-40`; sidebar `z-30`, topbar `z-10` | Panel and backdrop are fully above sidebar and topbar with no layering regressions | |
 
 ---
