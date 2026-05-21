@@ -1,0 +1,136 @@
+{# _drilldown_panel.html
+   Usage: {% from "components/_drilldown_panel.html" import drilldown_panel with context %}
+          {{ drilldown_panel() }}
+   Stage 6 D1 — read-only drill-down side panel.
+   Triggered by window.drilldownController.open(target, presetFilters, triggerEl).
+   Animation and visibility are fully managed by drilldown.js.
+   IDs: dd-backdrop, dd-panel, dd-panel-inner, dd-title, dd-close-btn,
+        dd-filter-bar, dd-data-quality-note, dd-loading-sentinel,
+        dd-list-body, dd-empty-msg, dd-error-msg, dd-load-more-btn
+#}
+
+{% macro drilldown_panel() %}
+
+{# ── Backdrop ─────────────────────────────────────────────────────────────── #}
+<div id="dd-backdrop"
+     class="fixed inset-0 z-40 bg-black/50 hidden"
+     aria-hidden="true">
+</div>
+
+{# ── Panel shell ──────────────────────────────────────────────────────────── #}
+{# At ≥lg: fixed side panel from inline-end edge (right in LTR, left in RTL). #}
+{# At  <lg: full-screen overlay.                                               #}
+{# Animation (translate) is injected by drilldown.js open()/close().          #}
+<aside id="dd-panel"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="dd-title"
+       class="fixed inset-y-0 end-0 z-50
+              w-full lg:w-[440px]
+              bg-white dark:bg-neutral-900
+              border-s border-neutral-200 dark:border-neutral-800
+              shadow-2xl
+              transition-transform duration-300 ease-in-out"
+       hidden
+       tabindex="-1">
+
+  {# Inner wrapper — full height flex column #}
+  <div id="dd-panel-inner" class="flex flex-col h-full">
+
+    {# ── Header ───────────────────────────────────────────────────────────── #}
+    <header class="flex items-center justify-between gap-3
+                   px-5 py-4 shrink-0
+                   border-b border-neutral-200 dark:border-neutral-700">
+      <h2 id="dd-title"
+          class="text-base font-semibold
+                 text-neutral-900 dark:text-neutral-100
+                 truncate">
+        —
+      </h2>
+      <button id="dd-close-btn"
+              type="button"
+              class="shrink-0 p-1.5 rounded-lg
+                     text-neutral-500 dark:text-neutral-400
+                     hover:bg-neutral-100 dark:hover:bg-neutral-800
+                     focus-visible:ring-2 focus-visible:ring-primary-500
+                     transition-colors"
+              aria-label="{{ _t('Close') }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </header>
+
+    {# ── Filter bar (populated by drilldown.js for endpoints that support it) #}
+    <div id="dd-filter-bar"
+         class="px-5 py-3 shrink-0
+                border-b border-neutral-200 dark:border-neutral-700
+                hidden">
+    </div>
+
+    {# ── Scrollable list body ─────────────────────────────────────────────── #}
+    <div class="flex-1 overflow-y-auto min-h-0">
+
+      {# Data-quality note — visible only when meta.data_quality is set (portfolio) #}
+      <div id="dd-data-quality-note"
+           class="mx-5 mt-4 px-3 py-2 rounded-lg hidden
+                  bg-warning-50 dark:bg-warning-950/30
+                  border border-warning-200 dark:border-warning-800
+                  text-xs text-warning-700 dark:text-warning-300">
+      </div>
+
+      {# Loading skeleton — shown while first page is fetching #}
+      <div id="dd-loading-sentinel" class="px-5 py-6 space-y-4 hidden">
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-5/6"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-2/3"></div>
+        <div class="mt-6 h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-4/5"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+      </div>
+
+      {# Row list — installment rows or portfolio customer rows appended by JS #}
+      <ul id="dd-list-body"
+          class="divide-y divide-neutral-100 dark:divide-neutral-800"
+          aria-live="polite">
+      </ul>
+
+      {# Empty state #}
+      <p id="dd-empty-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-neutral-400 dark:text-neutral-500">
+        {{ _t("dd_no_results") }}
+      </p>
+
+      {# Error state — message text set by JS #}
+      <p id="dd-error-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-danger-600 dark:text-danger-400">
+      </p>
+
+    </div>{# /.scrollable body #}
+
+    {# ── Load-more footer ─────────────────────────────────────────────────── #}
+    <footer class="px-5 py-3 shrink-0
+                   border-t border-neutral-200 dark:border-neutral-700">
+      <button id="dd-load-more-btn"
+              type="button"
+              class="w-full py-2 text-sm font-medium rounded-lg
+                     text-primary-600 dark:text-primary-400
+                     hover:bg-primary-50 dark:hover:bg-primary-950/30
+                     focus-visible:ring-2 focus-visible:ring-primary-500
+                     transition-colors hidden">
+        {{ _t("dd_load_more") }}
+      </button>
+    </footer>
+
+  </div>{# /#dd-panel-inner #}
+
+</aside>
+
+{% endmacro %}
