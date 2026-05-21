@@ -683,5 +683,10 @@ window.CHAT_STRINGS = {
 
 {% block extra_scripts %}{% endblock %}
 
+{# Portal block: place fixed-position overlays (drill-down panel, etc.)
+   here so they are direct children of <body> and outside <main>.
+   inert on <main.main-content> must NOT cover the drill-down panel. #}
+{% block portal %}{% endblock %}
+
 </body>
 </html>

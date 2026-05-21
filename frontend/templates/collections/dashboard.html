@@ -162,9 +162,9 @@
   </button>
 </div>
 
-{{ drilldown_panel() }}
-
 {% endblock %}
+
+{% block portal %}{{ drilldown_panel() }}{% endblock %}
 
 {% block extra_scripts %}
 <script>
