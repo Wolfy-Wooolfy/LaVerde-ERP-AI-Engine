@@ -126,6 +126,7 @@
     _hide(_loadMoreBtn);
     _hide(_dataQualityNote);
     _loadingSentinel.classList.remove('hidden');
+    _renderFilterBar(target);
 
     // Show backdrop + animate panel in
     _backdrop.classList.remove('hidden');
@@ -409,6 +410,93 @@
     if (el) el.classList.add('hidden');
   }
 
+  // ── Filter bar (D4) ────────────────────────────────────────────────────────
+  function _renderFilterBar(target) {
+    if (!_filterBar) return;
+    // Portfolio endpoint has no sortable/filterable params
+    if (target === 'kpi1') {
+      _hide(_filterBar);
+      return;
+    }
+    var f = _state.filters;
+    var currentState = f.payment_state || 'all';
+    var currentSort  = (f.sort_by || 'date') + ':' + (f.sort_dir || 'desc');
+
+    var stateOptions = [
+      { val: 'all',      label: S.dd_state_all      || 'All' },
+      { val: 'not_paid', label: S.dd_state_not_paid || 'Not Paid' },
+      { val: 'partial',  label: S.dd_state_partial  || 'Partial' },
+      { val: 'paid',     label: S.dd_state_paid     || 'Paid' },
+    ];
+    var sortOptions = [
+      { val: 'date:desc',   label: S.dd_sort_date_desc   || 'Date ↓' },
+      { val: 'date:asc',    label: S.dd_sort_date_asc    || 'Date ↑' },
+      { val: 'amount:desc', label: S.dd_sort_amount_desc || 'Amount ↓' },
+      { val: 'amount:asc',  label: S.dd_sort_amount_asc  || 'Amount ↑' },
+    ];
+
+    var stateHtml = stateOptions.map(function (o) {
+      var active = o.val === currentState ? ' dd-filter-chip--active' : '';
+      return '<button type="button" class="dd-filter-chip' + active + '" data-dd-filter-state="' + o.val + '">'
+        + _esc(o.label) + '</button>';
+    }).join('');
+
+    var chequeActive = f.has_pending_cheque ? ' dd-filter-chip--active' : '';
+    var chequeHtml = '<button type="button" class="dd-filter-chip' + chequeActive + '" data-dd-filter-cheque="1">'
+      + _esc(S.dd_filter_cheque_label || 'Cheques only') + '</button>';
+
+    var sortHtml = sortOptions.map(function (o) {
+      var active = o.val === currentSort ? ' dd-sort-btn--active' : '';
+      return '<button type="button" class="dd-sort-btn' + active + '" data-dd-sort="' + o.val + '">'
+        + _esc(o.label) + '</button>';
+    }).join('');
+
+    _filterBar.innerHTML = ''
+      + '<div class="flex flex-wrap items-center gap-1.5">'
+        + '<span class="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">'
+          + _esc(S.dd_filter_state_label || 'Status') + '</span>'
+        + stateHtml
+        + '<span class="mx-1 w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
+        + chequeHtml
+        + '<span class="mx-1 w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
+        + sortHtml
+      + '</div>';
+
+    _filterBar.classList.remove('hidden');
+
+    _filterBar.querySelectorAll('[data-dd-filter-state]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _state.filters = Object.assign({}, _state.filters, {
+          payment_state: btn.getAttribute('data-dd-filter-state'),
+        });
+        _renderFilterBar(_state.target);
+        window.drilldownController._refetch();
+      });
+    });
+
+    var chequeBtn = _filterBar.querySelector('[data-dd-filter-cheque]');
+    if (chequeBtn) {
+      chequeBtn.addEventListener('click', function () {
+        _state.filters = Object.assign({}, _state.filters, {
+          has_pending_cheque: !_state.filters.has_pending_cheque,
+        });
+        _renderFilterBar(_state.target);
+        window.drilldownController._refetch();
+      });
+    }
+
+    _filterBar.querySelectorAll('[data-dd-sort]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var parts = btn.getAttribute('data-dd-sort').split(':');
+        _state.filters = Object.assign({}, _state.filters, {
+          sort_by: parts[0], sort_dir: parts[1],
+        });
+        _renderFilterBar(_state.target);
+        window.drilldownController._refetch();
+      });
+    });
+  }
+
   // ── Event wiring ───────────────────────────────────────────────────────────
   function _wire() {
     if (!_panel) return;
@@ -444,7 +532,6 @@
     open:  open,
     close: close,
     get state() { return Object.assign({}, _state); },
-    // Exposed for filter bar (D4) to call after filter change
     _refetch: function () {
       if (!_state.target) return;
       _state.cursor  = null;
@@ -453,6 +540,8 @@
       _hide(_emptyMsg);
       _hide(_errorMsg);
       _hide(_loadMoreBtn);
+      _hide(_dataQualityNote);
+      _loadingSentinel.classList.remove('hidden');
       _fetchPage();
     },
   };
