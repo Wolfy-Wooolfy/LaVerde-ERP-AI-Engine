@@ -140,7 +140,8 @@
         _panel.classList.add('translate-x-0');
       });
     });
-    _panel.focus();
+    _setMainInert(true);
+    _panel.focus();   // panel tabindex=-1 receives programmatic focus
 
     _fetchPage();
   }
@@ -160,6 +161,7 @@
     }
     _panel.addEventListener('transitionend', _onEnd);
 
+    _setMainInert(false);
     if (_state.triggerEl && _state.triggerEl.focus) {
       _state.triggerEl.focus();
     }
@@ -426,6 +428,50 @@
     if (el) el.classList.add('hidden');
   }
 
+  // ── Focus management (D7) ──────────────────────────────────────────────────
+
+  function _setMainInert(active) {
+    var main = document.querySelector('main.main-content');
+    if (!main) return;
+    if (active) main.setAttribute('inert', '');
+    else        main.removeAttribute('inert');
+  }
+
+  function _getFocusable() {
+    if (!_panel) return [];
+    var selector = 'button:not([disabled]), [tabindex]:not([tabindex="-1"]), a[href], input, select, textarea';
+    return Array.prototype.filter.call(
+      _panel.querySelectorAll(selector),
+      function (el) {
+        return !el.closest('[hidden]') && getComputedStyle(el).display !== 'none';
+      }
+    );
+  }
+
+  function _handlePanelKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    var focusable = _getFocusable();
+    if (focusable.length === 0) return;
+    var first = focusable[0];
+    var last  = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
   // ── URL hash state (D5) ────────────────────────────────────────────────────
   // Format: #dd=target[&st=payment_state][&sb=sort_by][&sd=sort_dir][&pc=1]
   // Defaults (omitted): st=all, sb=date, sd=desc, pc=0
@@ -582,6 +628,9 @@
         _fetchPage();
       }
     });
+
+    // D7: Escape closes panel; Tab is trapped within panel
+    _panel.addEventListener('keydown', _handlePanelKeydown);
 
     // Delegated click handler for all [data-drilldown-target] cards.
     // Also fires on keyboard Enter/Space for accessibility (D7 adds full focus trap).
