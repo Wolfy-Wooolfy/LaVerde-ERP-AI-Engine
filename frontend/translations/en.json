@@ -170,5 +170,42 @@
   "ago": "ago",
   "seconds_short": "s",
   "minute_short": "min",
-  "minutes_short": "mins"
+  "minutes_short": "mins",
+
+  "Close": "Close",
+
+  "dd_no_results": "No records found",
+  "dd_load_more": "Load more",
+  "dd_error_fetch": "Failed to load. Please try again.",
+
+  "dd_title_late": "Late Uncollected — Detail",
+  "dd_title_cheques": "Late — Received Cheques",
+  "dd_title_portfolio": "Portfolio — Customer Breakdown",
+  "dd_title_forecast": "Expected Collections",
+  "dd_title_project": "Late Detail",
+  "dd_title_trend": "Trend",
+
+  "dd_filter_state_label": "Status",
+  "dd_filter_cheque_label": "Cheques only",
+
+  "dd_state_all": "All",
+  "dd_state_not_paid": "Not Paid",
+  "dd_state_partial": "Partial",
+  "dd_state_paid": "Paid",
+
+  "dd_sort_date_asc": "Date ↑",
+  "dd_sort_date_desc": "Date ↓",
+  "dd_sort_amount_asc": "Amount ↑",
+  "dd_sort_amount_desc": "Amount ↓",
+
+  "dd_customer": "Customer",
+  "dd_due": "Due",
+  "dd_late": "Late Amt",
+  "dd_pending_cheque": "Cheque",
+  "dd_total": "Total",
+  "dd_no_project": "No Project",
+  "dd_portfolio_paid": "Paid",
+  "dd_portfolio_due": "Due",
+  "dd_pending_cheque_note": "incl. cheque",
+  "dd_dq_unassigned": "Some records have no project assigned."
 }

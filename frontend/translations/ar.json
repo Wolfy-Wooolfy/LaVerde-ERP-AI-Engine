@@ -170,5 +170,42 @@
   "ago": "منذ",
   "seconds_short": "ثانية",
   "minute_short": "دقيقة",
-  "minutes_short": "دقائق"
+  "minutes_short": "دقائق",
+
+  "Close": "إغلاق",
+
+  "dd_no_results": "لا توجد سجلات",
+  "dd_load_more": "تحميل المزيد",
+  "dd_error_fetch": "فشل التحميل. يرجى المحاولة مرة أخرى.",
+
+  "dd_title_late": "المتأخرات غير المحصلة — تفاصيل",
+  "dd_title_cheques": "المتأخرات — الشيكات المستلمة",
+  "dd_title_portfolio": "المحفظة — توزيع العملاء",
+  "dd_title_forecast": "التحصيل المتوقع",
+  "dd_title_project": "تفاصيل المتأخرات",
+  "dd_title_trend": "منحنى",
+
+  "dd_filter_state_label": "الحالة",
+  "dd_filter_cheque_label": "الشيكات فقط",
+
+  "dd_state_all": "الكل",
+  "dd_state_not_paid": "غير مدفوع",
+  "dd_state_partial": "جزئي",
+  "dd_state_paid": "مدفوع",
+
+  "dd_sort_date_asc": "التاريخ ↑",
+  "dd_sort_date_desc": "التاريخ ↓",
+  "dd_sort_amount_asc": "المبلغ ↑",
+  "dd_sort_amount_desc": "المبلغ ↓",
+
+  "dd_customer": "العميل",
+  "dd_due": "المستحق",
+  "dd_late": "المتأخر",
+  "dd_pending_cheque": "شيك",
+  "dd_total": "الإجمالي",
+  "dd_no_project": "بدون مشروع",
+  "dd_portfolio_paid": "محصل",
+  "dd_portfolio_due": "مستحق",
+  "dd_pending_cheque_note": "يشمل شيك",
+  "dd_dq_unassigned": "بعض السجلات ليس لها مشروع محدد."
 }
