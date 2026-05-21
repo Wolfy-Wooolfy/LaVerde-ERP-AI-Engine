@@ -590,14 +590,18 @@
     }).join('');
 
     _filterBar.innerHTML = ''
-      + '<div class="flex flex-wrap items-center gap-1.5">'
-        + '<span class="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">'
-          + _esc(S.dd_filter_state_label || 'Status') + '</span>'
-        + stateHtml
-        + '<span class="mx-1 w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
+      + '<div class="flex flex-wrap items-center gap-x-3 gap-y-2">'
+        + '<div class="flex items-center gap-1">'
+          + '<span class="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">'
+            + _esc(S.dd_filter_state_label || 'Status') + '</span>'
+          + stateHtml
+        + '</div>'
+        + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
         + chequeHtml
-        + '<span class="mx-1 w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
-        + sortHtml
+        + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
+        + '<div class="flex items-center gap-1">'
+          + sortHtml
+        + '</div>'
       + '</div>';
 
     _filterBar.classList.remove('hidden');
