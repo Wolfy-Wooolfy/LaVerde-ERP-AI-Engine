@@ -127,6 +127,7 @@
     _hide(_dataQualityNote);
     _loadingSentinel.classList.remove('hidden');
     _renderFilterBar(target);
+    _updateHash(target, _state.filters);
 
     // Show backdrop + animate panel in
     _backdrop.classList.remove('hidden');
@@ -164,6 +165,7 @@
     }
     _state.target    = null;
     _state.triggerEl = null;
+    _clearHash();
   }
 
   // ── URL builder ────────────────────────────────────────────────────────────
@@ -410,6 +412,58 @@
     if (el) el.classList.add('hidden');
   }
 
+  // ── URL hash state (D5) ────────────────────────────────────────────────────
+  // Format: #dd=target[&st=payment_state][&sb=sort_by][&sd=sort_dir][&pc=1]
+  // Defaults (omitted): st=all, sb=date, sd=desc, pc=0
+
+  function _buildHash(target, filters) {
+    if (!target) return '';
+    var f    = filters || {};
+    var parts = ['dd=' + encodeURIComponent(target)];
+    if (f.payment_state && f.payment_state !== 'all')  parts.push('st=' + f.payment_state);
+    if (f.sort_by        && f.sort_by  !== 'date')     parts.push('sb=' + f.sort_by);
+    if (f.sort_dir       && f.sort_dir !== 'desc')     parts.push('sd=' + f.sort_dir);
+    if (f.has_pending_cheque)                          parts.push('pc=1');
+    return '#' + parts.join('&');
+  }
+
+  function _parseHash(hash) {
+    if (!hash || hash.charAt(0) !== '#') return null;
+    var params = {};
+    hash.slice(1).split('&').forEach(function (part) {
+      var eq = part.indexOf('=');
+      if (eq < 0) return;
+      params[decodeURIComponent(part.slice(0, eq))] = decodeURIComponent(part.slice(eq + 1));
+    });
+    if (!params.dd) return null;
+    return {
+      target: params.dd,
+      filters: {
+        payment_state:     params.st  || 'all',
+        sort_by:           params.sb  || 'date',
+        sort_dir:          params.sd  || 'desc',
+        has_pending_cheque: params.pc === '1',
+      },
+    };
+  }
+
+  function _updateHash(target, filters) {
+    if (typeof history !== 'undefined' && history.replaceState) {
+      history.replaceState(null, '', _buildHash(target, filters));
+    }
+  }
+
+  function _clearHash() {
+    if (typeof history !== 'undefined' && history.replaceState) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }
+
+  function _restoreFromHash() {
+    var parsed = _parseHash(window.location.hash);
+    if (parsed) open(parsed.target, parsed.filters, null);
+  }
+
   // ── Filter bar (D4) ────────────────────────────────────────────────────────
   function _renderFilterBar(target) {
     if (!_filterBar) return;
@@ -534,6 +588,7 @@
     get state() { return Object.assign({}, _state); },
     _refetch: function () {
       if (!_state.target) return;
+      _updateHash(_state.target, _state.filters);
       _state.cursor  = null;
       _state.hasNext = false;
       _listBody.innerHTML = '';
@@ -546,9 +601,13 @@
     },
   };
 
-  // Export _resolveEndpoint for unit tests (Node.js require())
+  // Export pure functions for unit tests (Node.js require())
   if (typeof module !== 'undefined') {
-    module.exports = { _resolveEndpoint: _resolveEndpoint };
+    module.exports = {
+      _resolveEndpoint: _resolveEndpoint,
+      _buildHash:       _buildHash,
+      _parseHash:       _parseHash,
+    };
   }
 
   // Init
@@ -556,10 +615,12 @@
     document.addEventListener('DOMContentLoaded', function () {
       _initRefs();
       _wire();
+      _restoreFromHash();
     });
   } else {
     _initRefs();
     _wire();
+    _restoreFromHash();
   }
 
 }());

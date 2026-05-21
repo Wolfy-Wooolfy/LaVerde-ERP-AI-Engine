@@ -1,7 +1,7 @@
 /**
  * test_drilldown.js — Unit tests for drilldown.js pure functions.
  * Run with: node tests/frontend/test_drilldown.js
- * Stage 6 D2.
+ * Stage 6 D2+D5.
  */
 
 'use strict';
@@ -12,6 +12,7 @@ global.window = {
   CollectionsFormatters: {},
   crmApi: {},
   drilldownController: null,
+  location: { hash: '', pathname: '/', search: '' },
 };
 global.document = {
   readyState: 'complete',
@@ -19,8 +20,9 @@ global.document = {
   addEventListener: function () {},
 };
 global.requestAnimationFrame = function (cb) { cb(); };
+global.history = { replaceState: function () {} };
 
-var { _resolveEndpoint } = require('../../frontend/static/js/drilldown.js');
+var { _resolveEndpoint, _buildHash, _parseHash } = require('../../frontend/static/js/drilldown.js');
 
 // ── helpers ────────────────────────────────────────────────────────────────
 var passed = 0;
@@ -120,6 +122,102 @@ assert(
   _resolveEndpoint('trend-2026-01'),
   '/api/v1/collections/drilldown/trend/2026-01'
 );
+
+// ── _buildHash / _parseHash round-trips ────────────────────────────────────
+console.log('\n_buildHash — encoding\n');
+
+assert(
+  'defaults are omitted from hash',
+  _buildHash('kpi2', { payment_state: 'all', sort_by: 'date', sort_dir: 'desc', has_pending_cheque: false }),
+  '#dd=kpi2'
+);
+assert(
+  'payment_state not_paid included',
+  _buildHash('kpi2', { payment_state: 'not_paid', sort_by: 'date', sort_dir: 'desc' }),
+  '#dd=kpi2&st=not_paid'
+);
+assert(
+  'sort_by amount + sort_dir asc included',
+  _buildHash('kpi2', { sort_by: 'amount', sort_dir: 'asc' }),
+  '#dd=kpi2&sb=amount&sd=asc'
+);
+assert(
+  'has_pending_cheque=true → pc=1',
+  _buildHash('kpi2-cheques', { has_pending_cheque: true }),
+  '#dd=kpi2-cheques&pc=1'
+);
+assert(
+  'forecast bucket target preserved',
+  _buildHash('forecast-this_month', {}),
+  '#dd=forecast-this_month'
+);
+assert(
+  'null target → empty string',
+  _buildHash(null, {}),
+  ''
+);
+
+console.log('\n_parseHash — decoding\n');
+
+assert(
+  'minimal hash → defaults restored',
+  JSON.stringify(_parseHash('#dd=kpi2')),
+  JSON.stringify({ target: 'kpi2', filters: { payment_state: 'all', sort_by: 'date', sort_dir: 'desc', has_pending_cheque: false } })
+);
+assert(
+  'payment_state partial decoded',
+  _parseHash('#dd=kpi2&st=partial').filters.payment_state,
+  'partial'
+);
+assert(
+  'pc=1 decoded as has_pending_cheque true',
+  _parseHash('#dd=kpi2-cheques&pc=1').filters.has_pending_cheque,
+  true
+);
+assert(
+  'pc omitted decoded as false',
+  _parseHash('#dd=kpi2').filters.has_pending_cheque,
+  false
+);
+assert(
+  'no #dd param → null',
+  _parseHash('#foo=bar'),
+  null
+);
+assert(
+  'empty hash → null',
+  _parseHash(''),
+  null
+);
+assert(
+  'no hash → null',
+  _parseHash(null),
+  null
+);
+
+console.log('\n_buildHash + _parseHash round-trip\n');
+
+var targets = ['kpi1', 'kpi2', 'kpi2-cheques', 'forecast-this_quarter', 'kpi5-proj-2', 'trend-2025-11'];
+targets.forEach(function (t) {
+  var filters = { payment_state: 'not_paid', sort_by: 'amount', sort_dir: 'asc', has_pending_cheque: false };
+  var hash   = _buildHash(t, filters);
+  var parsed = _parseHash(hash);
+  assert(
+    'round-trip target: ' + t,
+    parsed && parsed.target,
+    t
+  );
+  assert(
+    'round-trip payment_state: ' + t,
+    parsed && parsed.filters.payment_state,
+    'not_paid'
+  );
+  assert(
+    'round-trip sort_by: ' + t,
+    parsed && parsed.filters.sort_by,
+    'amount'
+  );
+});
 
 // ── summary ────────────────────────────────────────────────────────────────
 console.log('\n─────────────────────────────────────────────');
