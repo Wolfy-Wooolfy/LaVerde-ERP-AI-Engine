@@ -622,6 +622,21 @@ async def get_trend_drilldown(
     except ValueError:
         raise ValueError(f"Invalid month format: {month!r}. Expected YYYY-MM.")
 
+    # Decision 14.11: only the trailing 6 calendar months are valid.
+    today_cairo = datetime.now(_LA_VERDE_TZ).date()
+    months_behind = (
+        (today_cairo.year - month_date.year) * 12
+        + (today_cairo.month - month_date.month)
+    )
+    if months_behind < 0:
+        raise ValueError(
+            f"Month {month!r} is in the future — only the trailing 6 months are valid."
+        )
+    if months_behind > 5:
+        raise ValueError(
+            f"Month {month!r} is out of range — only the trailing 6 months are valid."
+        )
+
     _own_client = client is None
     _client = client or OdooClient()
     assert _client.is_read_only  # Rule R10
