@@ -160,7 +160,10 @@ async def security_headers_middleware(request: Request, call_next: object) -> Re
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next: object) -> Response:
-    request_id = str(uuid.uuid4())
+    # Honour client-supplied X-Request-ID; fall back to a fresh 32-char hex UUID.
+    # Stored in request.state so _req_id() reads one canonical value per request.
+    rid = (request.headers.get("X-Request-ID") or "").strip()
+    request_id = rid if rid else uuid.uuid4().hex
     request.state.request_id = request_id
     start = time.monotonic()
     response: Response = await call_next(request)  # type: ignore[operator]

@@ -389,8 +389,10 @@ async def expected_collections_forecast(
 
 
 def _req_id(request: Request) -> str:
-    rid = (request.headers.get("X-Request-ID") or "").strip()
-    return rid if rid else uuid.uuid4().hex
+    # Middleware has already resolved the client X-Request-ID (or generated .hex UUID)
+    # and stored it in request.state.request_id — single source of truth per request.
+    # Fallback handles direct calls in tests that bypass the middleware.
+    return getattr(request.state, "request_id", None) or uuid.uuid4().hex
 
 
 @router.get(

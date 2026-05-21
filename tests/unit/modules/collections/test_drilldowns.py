@@ -607,17 +607,20 @@ async def test_late_drilldown_request_id_echoed_in_meta(mc: MagicMock) -> None:
     assert result["meta"]["request_id"] == "trace-abc123"
 
 
-def test_req_id_helper_returns_header_value_when_present() -> None:
+def test_req_id_helper_returns_state_value_when_present() -> None:
+    # _req_id() now reads from request.state.request_id (set by middleware before
+    # the endpoint runs). The middleware is the single source of truth per request.
     mock_request = MagicMock()
-    mock_request.headers.get.return_value = "  my-trace-id  "
+    mock_request.state.request_id = "my-trace-id"
     result = _req_id(mock_request)
     assert result == "my-trace-id"
-    mock_request.headers.get.assert_called_once_with("X-Request-ID")
 
 
-def test_req_id_helper_generates_uuid4_hex_when_absent() -> None:
-    mock_request = MagicMock()
-    mock_request.headers.get.return_value = None
+def test_req_id_helper_generates_uuid4_hex_when_state_absent() -> None:
+    # When request.state has no request_id (e.g. tests bypassing middleware),
+    # _req_id() falls back to a fresh 32-char hex UUID.
+    mock_request = MagicMock(spec=["state"])
+    mock_request.state = MagicMock(spec=[])  # no request_id attribute
     result = _req_id(mock_request)
     assert re.fullmatch(r"[0-9a-f]{32}", result), (
         f"Expected 32-char lowercase hex UUID4, got {result!r}"
