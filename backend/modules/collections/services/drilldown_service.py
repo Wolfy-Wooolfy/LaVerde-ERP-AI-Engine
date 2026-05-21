@@ -45,6 +45,10 @@ _PROJECT_NAMES_EN: dict[int, str] = {
     3: "La puerta",
 }
 
+# Decision 14.13: sentinel labels for installments with project_id=False in Odoo.
+_NO_PROJECT_NAME_AR = "بدون مشروع"
+_NO_PROJECT_NAME_EN = "No Project Assigned"
+
 # All fields required to populate InstallmentRow (includes late_amount source fields).
 _DRILL_FIELDS: list[str] = [
     "id", "date", "amount", "due_amount",
@@ -151,8 +155,9 @@ def _build_meta(
     has_next: bool,
     filters: dict,
     sort: dict,
+    data_quality: dict | None = None,  # Decision 14.13: portfolio unassigned-project info
 ) -> dict:
-    return {
+    meta: dict = {
         "request_id":      request_id,
         "as_of":           datetime.now(timezone.utc).isoformat(),
         "rpc_duration_ms": rpc_ms,
@@ -164,6 +169,9 @@ def _build_meta(
         "filters_applied": filters,
         "sort_applied":    sort,
     }
+    if data_quality is not None:
+        meta["data_quality"] = data_quality
+    return meta
 
 
 # ── Service functions ─────────────────────────────────────────────────────────
@@ -413,17 +421,38 @@ async def get_portfolio_drilldown(
     _log.info(f"Portfolio drill-down: {len(rg_rows)} read_group rows in {rpc_ms}ms")
 
     # Python-side aggregation: collapse (customer, project) rows into customer rows.
+    # Decision 14.13: project_id=False rows are surfaced, never silently dropped.
     customer_map: dict[int, dict] = {}
+    unassigned_inst_count  = 0    # __count  of rows where project_id=False
+    unassigned_inst_amount = 0.0  # SUM(amount) of those rows
+
     for row in rg_rows:
         partner_raw = row.get("partner_id")
         project_raw = row.get("project_id")
-        if not partner_raw or not project_raw:
+
+        # partner_id=False: no customer link — cannot attribute to any named customer.
+        # Q1 diagnostic (2026-05-21) confirmed this branch is dead in live data (0 rows).
+        # Count for data-quality transparency; do NOT silently drop.
+        if not partner_raw:
+            unassigned_inst_count  += int(row.get("__count") or 0)
+            unassigned_inst_amount += float(row.get("amount") or 0.0)
             continue
 
-        cust_id     = int(partner_raw[0]) if isinstance(partner_raw, (list, tuple)) else int(partner_raw)
-        cust_name   = partner_raw[1]       if isinstance(partner_raw, (list, tuple)) else ""
-        pid         = int(project_raw[0])  if isinstance(project_raw, (list, tuple)) else int(project_raw)
-        pid_name_en = _PROJECT_NAMES_EN.get(pid, f"Project {pid}")
+        cust_id   = int(partner_raw[0]) if isinstance(partner_raw, (list, tuple)) else int(partner_raw)
+        cust_name = partner_raw[1]       if isinstance(partner_raw, (list, tuple)) else ""
+
+        # project_id=False: real customer, installment with no project assignment in Odoo.
+        # Decision 14.13: include in customer totals under 'بدون مشروع' sentinel label.
+        if not project_raw:
+            pid         = None
+            pid_name_ar = _NO_PROJECT_NAME_AR
+            pid_name_en = _NO_PROJECT_NAME_EN
+            unassigned_inst_count  += int(row.get("__count") or 0)
+            unassigned_inst_amount += float(row.get("amount") or 0.0)
+        else:
+            pid         = int(project_raw[0]) if isinstance(project_raw, (list, tuple)) else int(project_raw)
+            pid_name_ar = _PROJECT_NAMES_AR.get(pid, "")
+            pid_name_en = _PROJECT_NAMES_EN.get(pid, f"Project {pid}")
 
         amount     = float(row.get("amount") or 0.0)
         due_amount = float(row.get("due_amount") or 0.0)
@@ -450,7 +479,8 @@ async def get_portfolio_drilldown(
         c["total_actual_paid"] += actual
         c["record_count"]      += count
         c["project_breakdown"].append({
-            "project_id":      pid,
+            "project_id":      pid,          # None for project_id=False rows (Decision 14.13)
+            "project_name_ar": pid_name_ar,
             "project_name_en": pid_name_en,
             "amount":          amount,
             "due_amount":      due_amount,
@@ -467,6 +497,23 @@ async def get_portfolio_drilldown(
     has_next       = (offset + page_size) < total_count
     next_cur       = _encode_cursor({"offset": offset + page_size}) if has_next else None
 
+    data_quality: dict | None = None
+    if unassigned_inst_count > 0:
+        data_quality = {
+            "unassigned_project_installments": unassigned_inst_count,
+            "unassigned_project_amount":       round(unassigned_inst_amount, 2),
+            "note_ar": (
+                f"يوجد {unassigned_inst_count} قسط بقيمة "
+                f"{unassigned_inst_amount:,.2f} ج.م غير مرتبطين بمشروع "
+                f"في Odoo — تظهر تحت 'بدون مشروع'"
+            ),
+            "note_en": (
+                f"{unassigned_inst_count} installments "
+                f"(EGP {unassigned_inst_amount:,.2f}) have no project "
+                f"assigned in Odoo — shown under 'No Project Assigned'"
+            ),
+        }
+
     return {
         "version": "1.0",
         "data": {"customers": list(page_customers)},
@@ -475,6 +522,7 @@ async def get_portfolio_drilldown(
             cursor, next_cur, has_next,
             {"project_id": project_id},
             {"sort_by": "total_amount", "sort_dir": "desc"},
+            data_quality=data_quality,
         ),
     }
 

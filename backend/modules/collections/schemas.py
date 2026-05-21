@@ -3,7 +3,7 @@ Pydantic response schemas for Collections KPIs.
 
 KPI 2 — Late Uncollected (Stage 2, PATH C applied).
 KPI 7 — Expected Collections Forecast (Stage 1, Phase 1).
-Stage 5 — Drill-down endpoints (Decision 14.1-14.12).
+Stage 5 — Drill-down endpoints (Decision 14.1-14.13).
 """
 
 from datetime import date
@@ -64,6 +64,7 @@ class DrilldownMeta(BaseModel):
     has_next: bool
     filters_applied: dict
     sort_applied: dict
+    data_quality: dict | None = None  # Decision 14.13: populated by portfolio when project_id=False rows exist
 
 
 _T = TypeVar("_T")
@@ -92,8 +93,9 @@ class InstallmentRow(BaseModel):
 
 
 class PortfolioProjectBreakdown(BaseModel):
-    project_id: int
-    project_name_en: str
+    project_id: int | None        # None when project_id=False in Odoo (Decision 14.13)
+    project_name_ar: str          # "بدون مشروع" when unassigned
+    project_name_en: str          # "No Project Assigned" when unassigned
     amount: float
     due_amount: float
     record_count: int

@@ -129,6 +129,8 @@ async def test_portfolio_drilldown_happy_path(mc: MagicMock) -> None:
     c = result["data"]["customers"][0]
     assert c["customer_id"] == 42
     assert c["total_amount"] == 100_000.0
+    # Decision 14.13: data_quality absent when all rows have valid project
+    assert result["meta"].get("data_quality") is None
 
 
 async def test_project_drilldown_happy_path(mc: MagicMock) -> None:
@@ -201,6 +203,92 @@ async def test_portfolio_drilldown_uses_read_group_not_search_read(mc: MagicMock
     )
     groupby = call.kwargs["args"][2]
     assert "partner_id" in groupby
+
+
+async def test_portfolio_drilldown_includes_unassigned_project(mc: MagicMock) -> None:
+    """Decision 14.13: project_id=False rows appear under 'بدون مشروع', included in totals.
+
+    Before the fix these rows were silently dropped (6.5M EGP gap in D6).
+    """
+    mc.execute_kw = AsyncMock(return_value=[
+        # Same customer, assigned project
+        {
+            "partner_id": [101, "Customer A"],
+            "project_id": [1, "New Capital"],
+            "amount": 100_000.0,
+            "due_amount": 80_000.0,
+            "paid_amount": 20_000.0,
+            "x_studio_actual_paid_amount": 20_000.0,
+            "__count": 2,
+        },
+        # Same customer, no project assigned → was silently dropped before Decision 14.13
+        {
+            "partner_id": [101, "Customer A"],
+            "project_id": False,
+            "amount": 50_000.0,
+            "due_amount": 50_000.0,
+            "paid_amount": 0.0,
+            "x_studio_actual_paid_amount": 0.0,
+            "__count": 1,
+        },
+    ])
+    result = await get_portfolio_drilldown(request_id="r1", client=mc)
+
+    customers = result["data"]["customers"]
+    assert len(customers) == 1, "Both rows belong to the same customer — must collapse to 1"
+
+    cust = customers[0]
+    assert cust["customer_id"] == 101
+    assert cust["total_amount"] == pytest.approx(150_000.0), (
+        "total_amount must include both assigned and unassigned project rows"
+    )
+    assert cust["record_count"] == 3
+
+    breakdown = cust["project_breakdown"]
+    assert len(breakdown) == 2
+
+    no_proj = next((b for b in breakdown if b["project_id"] is None), None)
+    assert no_proj is not None, "project_breakdown must contain a None-project entry"
+    assert no_proj["project_name_ar"] == "بدون مشروع"
+    assert no_proj["project_name_en"] == "No Project Assigned"
+    assert no_proj["amount"] == pytest.approx(50_000.0)
+    assert no_proj["record_count"] == 1
+
+    known_proj = next(b for b in breakdown if b["project_id"] == 1)
+    assert known_proj["project_name_en"] == "New Capital"
+    assert known_proj["amount"] == pytest.approx(100_000.0)
+
+
+async def test_portfolio_drilldown_meta_reports_unassigned(mc: MagicMock) -> None:
+    """Decision 14.13: data_quality block populated when project_id=False rows exist;
+    absent (None) when all rows have a valid project.
+    """
+    # Case A: rows with project_id=False → data_quality populated
+    mc.execute_kw = AsyncMock(return_value=[
+        {
+            "partner_id": [101, "Customer A"],
+            "project_id": False,
+            "amount": 6_500_203.0,
+            "due_amount": 6_500_203.0,
+            "paid_amount": 0.0,
+            "x_studio_actual_paid_amount": 0.0,
+            "__count": 208,
+        },
+    ])
+    result = await get_portfolio_drilldown(request_id="r2", client=mc)
+    dq = result["meta"].get("data_quality")
+    assert dq is not None, "data_quality must be present when project_id=False rows exist"
+    assert dq["unassigned_project_installments"] == 208
+    assert abs(dq["unassigned_project_amount"] - 6_500_203.0) < 0.01
+    assert "note_ar" in dq and "بدون مشروع" in dq["note_ar"]
+    assert "note_en" in dq and "No Project Assigned" in dq["note_en"]
+
+    # Case B: all rows have valid project_id → data_quality absent
+    mc.execute_kw = AsyncMock(return_value=[_SAMPLE_RG_ROW])
+    result_clean = await get_portfolio_drilldown(request_id="r3", client=mc)
+    assert result_clean["meta"].get("data_quality") is None, (
+        "data_quality must be None when all rows have a valid project"
+    )
 
 
 # ── Section 2 — Tri-state has_pending_cheque (9 + 1 trend) ───────────────────
