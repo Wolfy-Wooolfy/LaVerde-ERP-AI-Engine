@@ -132,9 +132,9 @@ assert(
   '#dd=kpi2'
 );
 assert(
-  'payment_state not_paid included',
-  _buildHash('kpi2', { payment_state: 'not_paid', sort_by: 'date', sort_dir: 'desc' }),
-  '#dd=kpi2&st=not_paid'
+  'payment_state unpaid included (API-accepted value, not not_paid)',
+  _buildHash('kpi2', { payment_state: 'unpaid', sort_by: 'date', sort_dir: 'desc' }),
+  '#dd=kpi2&st=unpaid'
 );
 assert(
   'sort_by amount + sort_dir asc included',
@@ -163,6 +163,11 @@ assert(
   'minimal hash → defaults restored',
   JSON.stringify(_parseHash('#dd=kpi2')),
   JSON.stringify({ target: 'kpi2', filters: { payment_state: 'all', sort_by: 'date', sort_dir: 'desc', has_pending_cheque: false } })
+);
+assert(
+  'payment_state unpaid decoded (API-accepted value)',
+  _parseHash('#dd=kpi2&st=unpaid').filters.payment_state,
+  'unpaid'
 );
 assert(
   'payment_state partial decoded',
@@ -199,7 +204,7 @@ console.log('\n_buildHash + _parseHash round-trip\n');
 
 var targets = ['kpi1', 'kpi2', 'kpi2-cheques', 'forecast-this_quarter', 'kpi5-proj-2', 'trend-2025-11'];
 targets.forEach(function (t) {
-  var filters = { payment_state: 'not_paid', sort_by: 'amount', sort_dir: 'asc', has_pending_cheque: false };
+  var filters = { payment_state: 'unpaid', sort_by: 'amount', sort_dir: 'asc', has_pending_cheque: false };
   var hash   = _buildHash(t, filters);
   var parsed = _parseHash(hash);
   assert(
@@ -208,9 +213,9 @@ targets.forEach(function (t) {
     t
   );
   assert(
-    'round-trip payment_state: ' + t,
+    'round-trip payment_state API value: ' + t,
     parsed && parsed.filters.payment_state,
-    'not_paid'
+    'unpaid'
   );
   assert(
     'round-trip sort_by: ' + t,

@@ -172,7 +172,7 @@
 
   // ── URL builder ────────────────────────────────────────────────────────────
   function _buildUrl() {
-    var params = new URLSearchParams({ page_size: 25 });
+    var params = new URLSearchParams({ page_size: 50 });
     if (_state.cursor) params.set('cursor', _state.cursor);
 
     var f = _state.filters;
@@ -397,14 +397,14 @@
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function _badgeClass(state) {
-    return 'dd-payment-badge dd-payment-badge--' + (state || 'not_paid');
+    return 'dd-payment-badge dd-payment-badge--' + (state || 'unpaid');
   }
 
   function _stateLabel(state) {
     var map = {
-      not_paid: S.dd_state_not_paid || 'Not Paid',
-      partial:  S.dd_state_partial  || 'Partial',
-      paid:     S.dd_state_paid     || 'Paid',
+      unpaid:  S.dd_state_not_paid || 'Not Paid',
+      partial: S.dd_state_partial  || 'Partial',
+      paid:    S.dd_state_paid     || 'Paid',
     };
     return map[state] || state || '';
   }
@@ -537,10 +537,10 @@
     var currentSort  = (f.sort_by || 'date') + ':' + (f.sort_dir || 'desc');
 
     var stateOptions = [
-      { val: 'all',      label: S.dd_state_all      || 'All' },
-      { val: 'not_paid', label: S.dd_state_not_paid || 'Not Paid' },
-      { val: 'partial',  label: S.dd_state_partial  || 'Partial' },
-      { val: 'paid',     label: S.dd_state_paid     || 'Paid' },
+      { val: 'all',     label: S.dd_state_all      || 'All' },
+      { val: 'unpaid',  label: S.dd_state_not_paid || 'Not Paid' },
+      { val: 'partial', label: S.dd_state_partial  || 'Partial' },
+      { val: 'paid',    label: S.dd_state_paid     || 'Paid' },
     ];
     var sortOptions = [
       { val: 'date:desc',   label: S.dd_sort_date_desc   || 'Date ↓' },

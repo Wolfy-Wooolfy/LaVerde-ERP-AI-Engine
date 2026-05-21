@@ -161,7 +161,7 @@
     @apply inline-flex items-center px-1.5 py-0.5 rounded
            text-[10px] font-semibold uppercase tracking-wide;
   }
-  .dd-payment-badge--not_paid {
+  .dd-payment-badge--unpaid {
     @apply bg-danger-100 text-danger-700
            dark:bg-danger-900/30 dark:text-danger-400;
   }
