@@ -295,6 +295,12 @@
     var amtStr = F.formatEGP
       ? F.formatEGP(row.amount, lang, { fullValue: true })
       : _fmtEgp(row.amount);
+    var dueAmtStr = F.formatEGP
+      ? F.formatEGP(row.due_amount, lang, { fullValue: true })
+      : _fmtEgp(row.due_amount);
+    var chequeAmtStr = hasCheque
+      ? (F.formatEGP ? F.formatEGP(row.pending_cheque, lang, { fullValue: true }) : _fmtEgp(row.pending_cheque))
+      : '—';
 
     var chequeNote = hasCheque
       ? '<p class="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">'
@@ -318,6 +324,14 @@
         + '<div class="shrink-0 text-end space-y-1">'
           + '<p class="text-sm font-semibold tabular text-neutral-900 dark:text-neutral-100">'
             + _esc(amtStr)
+          + '</p>'
+          + '<p class="text-xs text-neutral-500 dark:text-neutral-400 tabular">'
+            + _esc(S.dd_due || 'Due') + ': '
+            + '<span class="font-medium text-neutral-700 dark:text-neutral-300">' + _esc(dueAmtStr) + '</span>'
+          + '</p>'
+          + '<p class="text-xs text-neutral-500 dark:text-neutral-400 tabular">'
+            + _esc(S.dd_pending_cheque || 'Cheque') + ': '
+            + '<span class="font-medium text-neutral-700 dark:text-neutral-300">' + _esc(chequeAmtStr) + '</span>'
           + '</p>'
           + '<span class="' + _badgeClass(row.payment_state) + '">'
             + _esc(_stateLabel(row.payment_state))
