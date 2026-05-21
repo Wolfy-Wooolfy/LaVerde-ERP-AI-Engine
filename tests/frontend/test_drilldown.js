@@ -22,7 +22,7 @@ global.document = {
 global.requestAnimationFrame = function (cb) { cb(); };
 global.history = { replaceState: function () {} };
 
-var { _resolveEndpoint, _buildHash, _parseHash } = require('../../frontend/static/js/drilldown.js');
+var { _resolveEndpoint, _buildHash, _parseHash, _paymentStateChipVals } = require('../../frontend/static/js/drilldown.js');
 
 // ── helpers ────────────────────────────────────────────────────────────────
 var passed = 0;
@@ -223,6 +223,35 @@ targets.forEach(function (t) {
     'amount'
   );
 });
+
+// ── _paymentStateChipVals — no paid chip (Decision 15.15) ─────────────────
+console.log('\n_paymentStateChipVals — no paid chip (all 4 endpoints return 422 for paid)\n');
+
+assert(
+  'chip set has exactly 3 entries (all / unpaid / partial)',
+  _paymentStateChipVals().length,
+  3
+);
+assert(
+  '"paid" absent — sending paid to any drill-down endpoint returns 422',
+  _paymentStateChipVals().indexOf('paid'),
+  -1
+);
+assert(
+  '"all" present',
+  _paymentStateChipVals().indexOf('all') >= 0,
+  true
+);
+assert(
+  '"unpaid" present (API-accepted value)',
+  _paymentStateChipVals().indexOf('unpaid') >= 0,
+  true
+);
+assert(
+  '"partial" present',
+  _paymentStateChipVals().indexOf('partial') >= 0,
+  true
+);
 
 // ── summary ────────────────────────────────────────────────────────────────
 console.log('\n─────────────────────────────────────────────');

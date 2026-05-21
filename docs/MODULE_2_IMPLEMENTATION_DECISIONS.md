@@ -2696,3 +2696,44 @@ Do NOT add overrides to panel classes via a `.collections-canvas-dark .dd-*`
 selector — that would introduce the exact trap Decision 13.5 warns about.
 Dark-mode panel changes belong in the `dark:` utility on the class
 definition in `input.css`.
+
+### Decision 15.15 — Payment state filter chips exclude "paid" (bug fix, Session 15 follow-up)
+
+**Context:** The Stage 6 filter bar initially rendered four payment state
+chips: All / Not Paid / Partial / Paid. During browser verification, the
+"مدفوع" (paid) chip on the forecast and project drill-downs triggered
+HTTP 422 Unprocessable Entity errors.
+
+**Root cause:** All five non-portfolio drill-down endpoints declare:
+```
+payment_state: Optional[Literal["unpaid", "partial"]] = Query(default=None)
+```
+FastAPI enforces the `Literal` constraint and rejects `payment_state=paid`
+with 422. The base domain for late/forecast/project already filters to
+`payment_state IN [unpaid, partial]`, so a "paid" installment cannot
+appear in those drill-downs by definition.
+
+**Trend endpoint:** The trend drill-down has no default payment_state domain
+restriction and DOES return paid installments in its result set. However,
+its backend signature is also `Literal["unpaid", "partial"]` — it does not
+accept `"paid"` as a filter param either. This was confirmed by
+`scripts/diagnose_paid_filter_422.py` (D4: trend/2026-04?payment_state=paid
+→ 422, 7/7 PASS).
+
+**Additional diagnostic findings:**
+- D5: `payment_state=unpaid` → 200 (valid filter unaffected)
+- D6: no `payment_state` param (the "All" chip) → 200 (correct omit behavior)
+- D7: `has_pending_cheque=true` alone → 200 (cheque toggle NOT the 422 cause;
+  the co-occurrence of `pending_cheque=true` in error URLs was coincidental —
+  user had the cheque toggle active when they clicked the "paid" chip)
+
+**Fix:** Removed "paid" from the payment state chip set for all non-portfolio
+endpoints. Extracted valid values into `_paymentStateChipVals()` (pure,
+exported for unit tests): returns `['all', 'unpaid', 'partial']`.
+
+**Unit test:** `test_drilldown.js` asserts:
+- `_paymentStateChipVals().indexOf('paid') === -1`
+- Length is 3 (exactly All / Unpaid / Partial)
+
+**Diagnostic script:** `scripts/diagnose_paid_filter_422.py` reproduces and
+confirms the bug. Retained for future regression checks.

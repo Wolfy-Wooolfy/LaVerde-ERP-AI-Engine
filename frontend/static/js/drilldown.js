@@ -524,6 +524,14 @@
     if (parsed) open(parsed.target, parsed.filters, null);
   }
 
+  // ── Payment state chip values (pure — exportable for unit tests) ──────────
+  // All five non-portfolio drill-down endpoints declare
+  // payment_state: Optional[Literal["unpaid","partial"]] — "paid" is NOT in
+  // the Literal and returns 422.  The chip set must NOT include "paid".
+  function _paymentStateChipVals() {
+    return ['all', 'unpaid', 'partial'];
+  }
+
   // ── Filter bar (D4) ────────────────────────────────────────────────────────
   function _renderFilterBar(target) {
     if (!_filterBar) return;
@@ -536,12 +544,14 @@
     var currentState = f.payment_state || 'all';
     var currentSort  = (f.sort_by || 'date') + ':' + (f.sort_dir || 'desc');
 
-    var stateOptions = [
-      { val: 'all',     label: S.dd_state_all      || 'All' },
-      { val: 'unpaid',  label: S.dd_state_not_paid || 'Not Paid' },
-      { val: 'partial', label: S.dd_state_partial  || 'Partial' },
-      { val: 'paid',    label: S.dd_state_paid     || 'Paid' },
-    ];
+    var _stateLabels = {
+      all:     S.dd_state_all      || 'All',
+      unpaid:  S.dd_state_not_paid || 'Not Paid',
+      partial: S.dd_state_partial  || 'Partial',
+    };
+    var stateOptions = _paymentStateChipVals().map(function (v) {
+      return { val: v, label: _stateLabels[v] || v };
+    });
     var sortOptions = [
       { val: 'date:desc',   label: S.dd_sort_date_desc   || 'Date ↓' },
       { val: 'date:asc',    label: S.dd_sort_date_asc    || 'Date ↑' },
@@ -676,9 +686,10 @@
   // Export pure functions for unit tests (Node.js require())
   if (typeof module !== 'undefined') {
     module.exports = {
-      _resolveEndpoint: _resolveEndpoint,
-      _buildHash:       _buildHash,
-      _parseHash:       _parseHash,
+      _resolveEndpoint:      _resolveEndpoint,
+      _buildHash:            _buildHash,
+      _parseHash:            _parseHash,
+      _paymentStateChipVals: _paymentStateChipVals,
     };
   }
 
