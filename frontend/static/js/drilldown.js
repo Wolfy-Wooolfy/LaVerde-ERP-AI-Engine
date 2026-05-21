@@ -269,7 +269,7 @@
       var r0 = items[0];
       var pName = lang === 'ar' ? r0.project_name_ar : r0.project_name_en;
       if (pName) {
-        _title.textContent = _escHtml(pName) + ' — ' + (S.dd_title_project || 'Late Detail');
+        _title.textContent = pName + ' — ' + (S.dd_title_project || 'Late Detail');
       }
     }
     // Update title for trend (use returned month)
