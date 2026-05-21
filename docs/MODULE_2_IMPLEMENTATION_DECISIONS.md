@@ -2131,6 +2131,60 @@ sections covered. CSS delta +1,847 bytes (23% of +8,192 budget).
   is to chain through one guaranteed ancestor class (e.g., `.kpi-card`,
   `.chart-panel`) as the third class in the selector chain.
 
+---
+
+## Session 14 — 2026-05-20 — Stage 5: Backend Drill-Down Endpoints
+
+> Decisions 14.1–14.12 cover the full Stage 5 design choices.
+> 14.1–14.5, 14.7–14.12 are documented in the D7 commit at Stage 5 close.
+> Decision 14.6 / 14.6a is recorded here because it required an unplanned
+> baseline investigation before D4 could proceed.
+
+### Decision 14.6 — KPI 7 cheques_record_count delivery: Option I (search_count)
+
+- **Choice:** Add 4 `search_count` RPCs (one per bucket) using domain
+  `check_pending_amount > 0` to count installments with pending cheques.
+  Backend returns `int >= 0` (not `null`). Frontend (Stage 6) handles
+  empty-state suppression.
+- **RPC budget:** 8 → 12 per uncached KPI 7 call.
+- **Domain:** `[('state','=','post'), ('payment_state','in',['unpaid','partial']),
+  ('date','>=',today), ('date','<=',bucket_end), ('check_pending_amount','>',0)]`
+- **Rationale:** `check_pending_amount` is a stored native monetary field,
+  identity-equal to `paid_amount − x_studio_actual_paid_amount` (Decision 4.5).
+  Avoids broken field-to-field Float comparison (Decision 9.1).
+
+### Decision 14.6a — Baseline shift 2026-05-20: 643,000 → 790,500 EGP
+
+- **Observed shift:** `cheques_in_pipeline` for `this_year` bucket changed
+  from 643,000 EGP (Session 13 baseline, 2026-05-19) to 790,500 EGP
+  (Session 14 verification, 2026-05-20). Delta: +147,500 EGP (+22.9%).
+- **Root cause (confirmed):** A single new installment record was entered
+  by La Verde operations staff between Session 13 close and Session 14
+  verification:
+  - **Record 62770:** due 2026-09-17, amount=177,500, paid=147,500,
+    actual_paid=0.00 → check_pending=147,500 EGP (new cheque, not yet cashed)
+  - **Record 13464:** due 2026-10-06, amount=675,000, paid=643,000,
+    actual_paid=0.00 → check_pending=643,000 EGP (unchanged from Session 13)
+  - **Total:** 643,000 + 147,500 = 790,500 EGP ✓
+- **Verification methodology (triple-agreement pattern — reusable):**
+  1. `read_group` derived delta: `SUM(paid_amount) − SUM(actual_paid_amount)`
+     on full year domain → 790,500.00 EGP
+  2. `read_group` native: `SUM(check_pending_amount)` on cheques subset
+     (`check_pending_amount > 0`) → 790,500.00 EGP
+  3. `search_count` on cheques subset → 2 records
+  - All three agree → no aggregation artifact, genuine live data state.
+  - **Decision 4.5 identity (derived = native) re-confirmed** on live data
+    as of 2026-05-20, not only on the 2026-05-14 discovery snapshot.
+- **Classification:** Expected operational behavior per Decision 1.3
+  (daily data entry drift during La Verde historical data entry period).
+  No code regression. No investigation required.
+- **New accepted baseline (2026-05-20):**
+  `cheques_in_pipeline this_year = 790,500 EGP, count = 2`.
+- **Reusable pattern:** The triple-agreement methodology
+  (derived formula vs native field vs search_count) is the canonical
+  procedure for any future "did this number change for a real reason?"
+  investigation on any KPI involving `check_pending_amount`.
+
 ### Decision 13.6 — Visual nits accepted as "good enough" for Stage 4 close
 
 - **Status:** CLOSED — Khaled browser verification 2026-05-20

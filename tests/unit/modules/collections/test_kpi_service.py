@@ -2228,12 +2228,21 @@ _KPI7_RPC2 = [{"paid_amount": 26_408.0, "x_studio_actual_paid_amount": 26_408.0}
 @pytest.fixture
 def mock_client_kpi7() -> MagicMock:
     client = MagicMock()
-    client.execute_kw = AsyncMock(side_effect=[
+    # _rg_responses consumed by _fetch_bucket (2 RPCs per bucket × 4 buckets = 8 total).
+    # search_count calls (4 total, one per bucket) return a plain int for cheques_record_count.
+    _rg_responses = iter([
         _KPI7_RPC1, _KPI7_RPC2,   # this_month
         _KPI7_RPC1, _KPI7_RPC2,   # this_quarter
         _KPI7_RPC1, _KPI7_RPC2,   # this_half
         _KPI7_RPC1, _KPI7_RPC2,   # this_year
     ])
+
+    async def _execute_kw(model, method, *args, **kwargs):
+        if method == "search_count":
+            return 2  # cheques_record_count mock value (Stage 5 Decision 14.6)
+        return next(_rg_responses)
+
+    client.execute_kw = AsyncMock(side_effect=_execute_kw)
     return client
 
 
@@ -2383,14 +2392,14 @@ async def test_kpi7_cache_hit_returns_zero_rpc_duration(
             result1["buckets"]["this_year"]["amount"])
 
 
-# ── Test K7-7 — Cache miss triggers exactly 8 Odoo RPCs ──────────────────────
+# ── Test K7-7 — Cache miss triggers exactly 12 Odoo RPCs ─────────────────────
 
 
-async def test_kpi7_cache_miss_invokes_eight_rpcs(mock_client_kpi7: MagicMock) -> None:
+async def test_kpi7_cache_miss_invokes_twelve_rpcs(mock_client_kpi7: MagicMock) -> None:
     await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
 
-    assert mock_client_kpi7.execute_kw.call_count == 8, (
-        f"Expected 8 RPCs (2 per bucket × 4 buckets), "
+    assert mock_client_kpi7.execute_kw.call_count == 12, (
+        f"Expected 12 RPCs (2 per bucket × 4 buckets amount + 4 cheques_count), "
         f"got {mock_client_kpi7.execute_kw.call_count}"
     )
 

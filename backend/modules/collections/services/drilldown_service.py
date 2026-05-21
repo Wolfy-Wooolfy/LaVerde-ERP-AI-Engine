@@ -172,28 +172,37 @@ async def get_late_drilldown(
     request_id: str,
     cursor: Optional[str] = None,
     page_size: int = _DEFAULT_PAGE_SIZE,
-    sort_by: str = "date",
-    sort_dir: str = "asc",
+    sort_by: str = "due_amount",
+    sort_dir: str = "desc",
+    payment_state: Optional[str] = None,
+    has_pending_cheque: Optional[bool] = None,
     client: Optional[OdooClient] = None,
 ) -> dict:
     """Paginated drill-down for KPI 2 — Late Uncollected installments.
 
     Domain: Candidate C (state=post, payment_state IN [unpaid,partial], date < today_cairo).
+    Optional narrowing: payment_state='unpaid'|'partial', has_pending_cheque=True.
     2 concurrent RPCs: search_count (full domain) + search_read (page domain with cursor).
     """
     _own_client = client is None
     _client = client or OdooClient()
     assert _client.is_read_only  # Rule R10 (Decision 14.10)
+    _log = logger.bind(request_id=request_id)
 
     page_size = _clamp_page_size(page_size)
     sort_by, sort_dir = _normalize_sort(sort_by, sort_dir)
 
     today = _cache.today_str()
-    base_domain: list = [
-        ("state", "=", "post"),
-        ("payment_state", "in", ["unpaid", "partial"]),
-        ("date", "<", today),
-    ]
+    ps_clause = (
+        ("payment_state", "=", payment_state)
+        if payment_state in ("unpaid", "partial")
+        else ("payment_state", "in", ["unpaid", "partial"])
+    )
+    base_domain: list = [("state", "=", "post"), ps_clause, ("date", "<", today)]
+    if has_pending_cheque is True:
+        base_domain.append(("check_pending_amount", ">", 0))
+    elif has_pending_cheque is False:
+        base_domain.append(("check_pending_amount", "=", 0))
 
     page_domain = list(base_domain)
     if cursor:
@@ -220,7 +229,7 @@ async def get_late_drilldown(
             await _client.close()
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(f"Late drill-down: {int(total_count or 0)} total, page {page_size} in {rpc_ms}ms")
+    _log.info(f"Late drill-down: {int(total_count or 0)} total, page {page_size} in {rpc_ms}ms")
 
     has_next = len(rows) > page_size
     rows = rows[:page_size]
@@ -233,7 +242,11 @@ async def get_late_drilldown(
         "meta": _build_meta(
             request_id, rpc_ms, page_size, int(total_count or 0),
             cursor, next_cur, has_next,
-            {"today": today},
+            {
+                "today": today,
+                "payment_state": payment_state,
+                "has_pending_cheque": has_pending_cheque,
+            },
             {"sort_by": sort_by, "sort_dir": sort_dir},
         ),
     }
@@ -244,14 +257,17 @@ async def get_forecast_drilldown(
     bucket_url_key: str,
     cursor: Optional[str] = None,
     page_size: int = _DEFAULT_PAGE_SIZE,
-    sort_by: str = "date",
-    sort_dir: str = "asc",
+    sort_by: str = "due_amount",
+    sort_dir: str = "desc",
+    payment_state: Optional[str] = None,
+    has_pending_cheque: Optional[bool] = None,
     client: Optional[OdooClient] = None,
 ) -> dict:
     """Paginated drill-down for one KPI 7 forecast bucket.
 
     bucket_url_key ∈ {'month', 'quarter', 'half', 'year'} maps to internal bucket name.
     Domain: state=post, payment_state IN [unpaid,partial], date in [today_cairo, bucket_end].
+    Optional narrowing: payment_state='unpaid'|'partial', has_pending_cheque=True.
     2 concurrent RPCs: search_count + search_read.
     """
     internal_bucket = _BUCKET_URL_TO_INTERNAL.get(bucket_url_key)
@@ -261,6 +277,7 @@ async def get_forecast_drilldown(
     _own_client = client is None
     _client = client or OdooClient()
     assert _client.is_read_only  # Rule R10
+    _log = logger.bind(request_id=request_id)
 
     page_size = _clamp_page_size(page_size)
     sort_by, sort_dir = _normalize_sort(sort_by, sort_dir)
@@ -270,12 +287,21 @@ async def get_forecast_drilldown(
     bucket_ends = _compute_bucket_ends(today_cairo)
     bucket_end_str = bucket_ends[internal_bucket].isoformat()
 
+    ps_clause = (
+        ("payment_state", "=", payment_state)
+        if payment_state in ("unpaid", "partial")
+        else ("payment_state", "in", ["unpaid", "partial"])
+    )
     base_domain: list = [
         ("state", "=", "post"),
-        ("payment_state", "in", ["unpaid", "partial"]),
+        ps_clause,
         ("date", ">=", today_str),
         ("date", "<=", bucket_end_str),
     ]
+    if has_pending_cheque is True:
+        base_domain.append(("check_pending_amount", ">", 0))
+    elif has_pending_cheque is False:
+        base_domain.append(("check_pending_amount", "=", 0))
 
     page_domain = list(base_domain)
     if cursor:
@@ -302,7 +328,7 @@ async def get_forecast_drilldown(
             await _client.close()
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(
+    _log.info(
         f"Forecast drill-down ({internal_bucket}): {int(total_count or 0)} total in {rpc_ms}ms"
     )
 
@@ -321,7 +347,13 @@ async def get_forecast_drilldown(
         "meta": _build_meta(
             request_id, rpc_ms, page_size, int(total_count or 0),
             cursor, next_cur, has_next,
-            {"bucket": internal_bucket, "today": today_str, "period_end": bucket_end_str},
+            {
+                "bucket": internal_bucket,
+                "today": today_str,
+                "period_end": bucket_end_str,
+                "payment_state": payment_state,
+                "has_pending_cheque": has_pending_cheque,
+            },
             {"sort_by": sort_by, "sort_dir": sort_dir},
         ),
     }
@@ -331,6 +363,7 @@ async def get_portfolio_drilldown(
     request_id: str,
     cursor: Optional[str] = None,
     page_size: int = _DEFAULT_PAGE_SIZE,
+    project_id: Optional[int] = None,
     client: Optional[OdooClient] = None,
 ) -> dict:
     """Paginated drill-down for KPI 1 — Total Portfolio.
@@ -345,6 +378,7 @@ async def get_portfolio_drilldown(
     _own_client = client is None
     _client = client or OdooClient()
     assert _client.is_read_only  # Rule R10
+    _log = logger.bind(request_id=request_id)
 
     page_size = _clamp_page_size(page_size)
 
@@ -354,6 +388,8 @@ async def get_portfolio_drilldown(
         offset = int(cur.get("offset", 0))
 
     base_domain: list = [("state", "=", "post")]
+    if project_id is not None:
+        base_domain.append(("project_id", "=", project_id))
 
     t0 = time.monotonic()
     try:
@@ -374,7 +410,7 @@ async def get_portfolio_drilldown(
             await _client.close()
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(f"Portfolio drill-down: {len(rg_rows)} read_group rows in {rpc_ms}ms")
+    _log.info(f"Portfolio drill-down: {len(rg_rows)} read_group rows in {rpc_ms}ms")
 
     # Python-side aggregation: collapse (customer, project) rows into customer rows.
     customer_map: dict[int, dict] = {}
@@ -437,7 +473,7 @@ async def get_portfolio_drilldown(
         "meta": _build_meta(
             request_id, rpc_ms, page_size, total_count,
             cursor, next_cur, has_next,
-            {},
+            {"project_id": project_id},
             {"sort_by": "total_amount", "sort_dir": "desc"},
         ),
     }
@@ -448,13 +484,16 @@ async def get_project_drilldown(
     project_id: int,
     cursor: Optional[str] = None,
     page_size: int = _DEFAULT_PAGE_SIZE,
-    sort_by: str = "date",
-    sort_dir: str = "asc",
+    sort_by: str = "due_amount",
+    sort_dir: str = "desc",
+    payment_state: Optional[str] = None,
+    has_pending_cheque: Optional[bool] = None,
     client: Optional[OdooClient] = None,
 ) -> dict:
     """Paginated drill-down for one project — KPI 5 late installments by project.
 
     Domain: Candidate C + project_id = X.
+    Optional narrowing: payment_state='unpaid'|'partial', has_pending_cheque=True.
     total_late_uncollected = SUM(due_amount) — identity-equal with KPI 5 (Decision 14.2).
     3 concurrent RPCs: search_count, read_group (SUM due_amount), search_read (page).
     """
@@ -466,17 +505,27 @@ async def get_project_drilldown(
     _own_client = client is None
     _client = client or OdooClient()
     assert _client.is_read_only  # Rule R10
+    _log = logger.bind(request_id=request_id)
 
     page_size = _clamp_page_size(page_size)
     sort_by, sort_dir = _normalize_sort(sort_by, sort_dir)
 
     today = _cache.today_str()
+    ps_clause = (
+        ("payment_state", "=", payment_state)
+        if payment_state in ("unpaid", "partial")
+        else ("payment_state", "in", ["unpaid", "partial"])
+    )
     base_domain: list = [
         ("state", "=", "post"),
-        ("payment_state", "in", ["unpaid", "partial"]),
+        ps_clause,
         ("date", "<", today),
         ("project_id", "=", project_id),
     ]
+    if has_pending_cheque is True:
+        base_domain.append(("check_pending_amount", ">", 0))
+    elif has_pending_cheque is False:
+        base_domain.append(("check_pending_amount", "=", 0))
 
     page_domain = list(base_domain)
     if cursor:
@@ -510,7 +559,7 @@ async def get_project_drilldown(
             await _client.close()
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(
+    _log.info(
         f"Project drill-down (project_id={project_id}): "
         f"{int(total_count or 0)} total in {rpc_ms}ms"
     )
@@ -536,7 +585,12 @@ async def get_project_drilldown(
         "meta": _build_meta(
             request_id, rpc_ms, page_size, int(total_count or 0),
             cursor, next_cur, has_next,
-            {"project_id": project_id, "today": today},
+            {
+                "project_id": project_id,
+                "today": today,
+                "payment_state": payment_state,
+                "has_pending_cheque": has_pending_cheque,
+            },
             {"sort_by": sort_by, "sort_dir": sort_dir},
         ),
     }
@@ -547,8 +601,10 @@ async def get_trend_drilldown(
     month: str,
     cursor: Optional[str] = None,
     page_size: int = _DEFAULT_PAGE_SIZE,
-    sort_by: str = "date",
-    sort_dir: str = "asc",
+    sort_by: str = "due_amount",
+    sort_dir: str = "desc",
+    payment_state: Optional[str] = None,
+    has_pending_cheque: Optional[bool] = None,
     client: Optional[OdooClient] = None,
 ) -> dict:
     """Paginated drill-down for one trend month — KPI 6 axis.
@@ -569,6 +625,7 @@ async def get_trend_drilldown(
     _own_client = client is None
     _client = client or OdooClient()
     assert _client.is_read_only  # Rule R10
+    _log = logger.bind(request_id=request_id)
 
     page_size = _clamp_page_size(page_size)
     sort_by, sort_dir = _normalize_sort(sort_by, sort_dir)
@@ -582,6 +639,12 @@ async def get_trend_drilldown(
         ("date", ">=", period_start),
         ("date", "<=", period_end),
     ]
+    if payment_state in ("unpaid", "partial"):
+        base_domain.append(("payment_state", "=", payment_state))
+    if has_pending_cheque is True:
+        base_domain.append(("check_pending_amount", ">", 0))
+    elif has_pending_cheque is False:
+        base_domain.append(("check_pending_amount", "=", 0))
 
     page_domain = list(base_domain)
     if cursor:
@@ -608,7 +671,7 @@ async def get_trend_drilldown(
             await _client.close()
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(f"Trend drill-down ({month}): {int(total_count or 0)} total in {rpc_ms}ms")
+    _log.info(f"Trend drill-down ({month}): {int(total_count or 0)} total in {rpc_ms}ms")
 
     has_next = len(rows) > page_size
     rows = rows[:page_size]
@@ -621,7 +684,13 @@ async def get_trend_drilldown(
         "meta": _build_meta(
             request_id, rpc_ms, page_size, int(total_count or 0),
             cursor, next_cur, has_next,
-            {"month": month, "period_start": period_start, "period_end": period_end},
+            {
+                "month": month,
+                "period_start": period_start,
+                "period_end": period_end,
+                "payment_state": payment_state,
+                "has_pending_cheque": has_pending_cheque,
+            },
             {"sort_by": sort_by, "sort_dir": sort_dir},
         ),
     }
