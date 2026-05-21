@@ -130,7 +130,7 @@ class ProjectDrilldownData(BaseModel):
     project_id: int
     project_name_ar: str
     project_name_en: str
-    total_late_uncollected: float   # SUM(due_amount) — identity-equal with KPI 5 (Decision 14.2)
+    total_late_uncollected: float   # SUM(due_amount) — identity-equal with KPI 5 per project (D6 V4)
     total_record_count: int
     items: list[InstallmentRow]
 

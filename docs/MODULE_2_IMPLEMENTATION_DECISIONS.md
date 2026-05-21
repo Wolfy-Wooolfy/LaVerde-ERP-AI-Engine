@@ -2198,38 +2198,9 @@ sections covered. CSS delta +1,847 bytes (23% of +8,192 budget).
   without a new route prefix.
 - **Schema:** `DrilldownEnvelope[T]` in `backend/modules/collections/schemas.py`.
 
-### Decision 14.2 — Project drill-down identity rule
+### Decision 14.2 — Cursor-based keyset pagination (page_size+1 trick, 200 cap)
 
-- **Status:** CLOSED — verified V4 in D6, 2026-05-21
-- **Rule:** `SUM(item.due_amount)` across all pages of `/drilldown/project/{id}`
-  must equal `KPI 5 late_uncollected` for that project.
-- **`total_late_uncollected` in response:** Set to `SUM(due_amount)` from the
-  `read_group` aggregate call — identity-equal with KPI 5. Not derived from
-  paginated rows, which avoids double-read drift.
-- **Verified values (2026-05-21):** New Capital 171,695,538.40 EGP,
-  Cassette 154,822,426.00 EGP, La puerta 3,589,500.00 EGP — all Δ ≤ 1.00 EGP.
-
-### Decision 14.3 — Five drill-down endpoint structure
-
-- **Status:** CLOSED — all five endpoints live, D6 8/8 PASS
-- **Endpoints:**
-  1. `GET /api/v1/collections/drilldown/late` — late uncollected installments (V1)
-  2. `GET /api/v1/collections/drilldown/forecast/{bucket}` — installments per
-     forecast bucket: `month|quarter|half|year` (V2)
-  3. `GET /api/v1/collections/drilldown/portfolio` — installments aggregated by
-     customer → project breakdown (V3)
-  4. `GET /api/v1/collections/drilldown/project/{id}` — late installments for one
-     project, `id ∈ {1,2,3}` (V4)
-  5. `GET /api/v1/collections/drilldown/trend/{month}` — installments due in a
-     given YYYY-MM month, trailing 6 months only (V5)
-- **Auth:** HTTP Basic, same credentials as all other endpoints.
-- **Tri-state filter:** `has_pending_cheque=true|false|omitted` on late, forecast,
-  project, trend. Omitted = no filter (returns all). Verified by V7.
-- **Rate limiter:** `@limiter.limit("60/minute")` on all five endpoints.
-
-### Decision 14.4 — Keyset cursor pagination
-
-- **Status:** CLOSED — implemented and verified Stage 5
+- **Status:** CLOSED — implemented D3/D4; verified across all paginated endpoints
 - **Cursor encoding:** Base64-URL JSON with keys `sv` (sort value), `id`
   (record id), `sb` (sort_by), `sd` (sort_dir). Malformed cursor silently
   falls back to first page.
@@ -2240,20 +2211,54 @@ sections covered. CSS delta +1,847 bytes (23% of +8,192 budget).
 - **page_size+1 trick:** Fetches one extra record to detect `has_next` without
   a separate COUNT call. Extra record stripped from response.
 - **Max page_size:** 200 (clamped server-side). Default: 50.
-- **Exception:** Portfolio uses offset cursor — see Decision 14.11.
+- **Applies to:** late, forecast/{bucket}, project/{id}, trend/{month}.
+  Portfolio uses a different pagination strategy — see Decision 14.9.
 
-### Decision 14.5 — Request ID echoed in meta (E3 requirement)
+### Decision 14.3 — X-Request-ID passed as argument to service functions
 
-- **Status:** CLOSED — V6 verified 2026-05-21
-- **Rule:** Every drill-down response `meta.request_id` echoes the
-  client-supplied `X-Request-ID` header, or a server-generated 32-char
-  hex UUID4 if omitted.
-- **Single source of truth:** `request_id_middleware` in `backend/main.py`
-  resolves the ID once per request (reads client header first, falls back to
-  `uuid4().hex`) and stores it in `request.state.request_id`. `_req_id()`
-  in the endpoint layer reads only from state.
-- **Bug caught by D6:** V6 FAIL before fix — see "Bugs caught by D6" below.
-  Fixed in commit `97043e3`.
+- **Status:** CLOSED — implemented D3; verified V6 in D6
+- **Design:** The request ID is resolved once at the endpoint layer (via
+  `_req_id(request)`) and passed as a plain `request_id: str` argument into
+  every service function. Service functions do not import or read the HTTP
+  request object directly.
+- **Rationale:** Keeps service functions testable without an HTTP context.
+  Unit tests pass a literal string ("req-1", "trace-abc123") as `request_id`;
+  no mock of a FastAPI `Request` object is needed for service-level tests.
+- **Endpoint-layer resolution:** `_req_id()` reads from `request.state.request_id`
+  (set by `request_id_middleware` — client-supplied header or generated
+  `uuid4().hex`). See V6 fix in commit `97043e3` for the middleware
+  single-source-of-truth unification.
+- **Five-endpoint scope:** All five drill-down routes (`/drilldown/late`,
+  `/drilldown/forecast/{bucket}`, `/drilldown/portfolio`,
+  `/drilldown/project/{id}`, `/drilldown/trend/{month}`) follow this
+  request-ID-as-arg pattern consistently.
+
+### Decision 14.4 — Tri-state has_pending_cheque filter (None / True / False)
+
+- **Status:** CLOSED — implemented D4; tri-state partition verified V7 in D6
+- **Filter values:**
+  - Omitted / `None` → no clause added to domain (returns all records)
+  - `True` → appends `("check_pending_amount", ">", 0)` (records with a pending cheque)
+  - `False` → appends `("check_pending_amount", "=", 0)` (records with no pending cheque)
+- **Applies to:** late, forecast/{bucket}, project/{id}, trend/{month}.
+  Portfolio uses `read_group` and does not expose this filter.
+- **Field choice:** `check_pending_amount` (stored native field) — avoids
+  broken float-to-float comparison (Decision 9.1). Identity with
+  `paid_amount − actual_paid_amount` confirmed (Decision 4.5).
+- **V7 verification:** `count(true) + count(false) == count(all)` — partition
+  exhaustive on live data, 2026-05-21.
+
+### Decision 14.5 — Trend endpoint uses rs.installment due-date axis
+
+- **Status:** CLOSED — V5 sanity-only by design
+- **Rule:** `/drilldown/trend/{month}` filters on `rs.installment.date`
+  (the contractual due date), not on actual payment dates.
+- **KPI 6 contrast:** KPI 6 counts months by `x_studio_actual_paid_amount > 0`
+  in the given month (cash receipt axis). The trend drill-down uses the
+  due-date axis — appropriate for forward-looking collection planning.
+- **Consequence:** No identity-equal assertion between V5 and KPI 6. V5 is a
+  sanity check only (endpoint responds, paginates, returns plausible data).
+- **Model:** `rs.installment` — consistent with all other drill-down endpoints.
 
 ### Decision 14.7 — No caching for drill-down endpoints
 
@@ -2279,42 +2284,54 @@ sections covered. CSS delta +1,847 bytes (23% of +8,192 budget).
   Clamped to zero when actual > paid (Decision 9.1). Represents the cheque
   amount handed over but not yet cashed.
 
-### Decision 14.9 — Trend endpoint: due-date axis, no identity-equal assertion
+### Decision 14.9 — Portfolio drill-down supersedes MVP Design "Top 50" hard cap
 
-- **Status:** CLOSED — V5 sanity-only by design
-- **Rule:** `/drilldown/trend/{month}` returns installments whose `date` field
-  (Odoo contractual due date) falls within the given calendar month.
-- **KPI 6 uses actual payment dates** (`x_studio_actual_paid_amount > 0` in the
-  given month). The axes are different — no identity-equal assertion between
-  V5 and KPI 6. V5 is a sanity check only (endpoint responds, paginates,
-  returns plausible data).
-- **Month validation:** Trailing 6 calendar months accepted (inclusive of current
-  month). Out-of-range → HTTP 422. Year-wrap boundary tested in unit tests.
+- **Status:** CLOSED — cursor pagination implemented and offset confirmed safe
+- **Original MVP Design §3.4 spec:** Portfolio view capped at "Top 50 customers"
+  with no pagination — a Phase 1 simplification.
+- **Decision:** Replace the hard cap with real cursor pagination. `page_size=50`
+  (default) preserves the original first-page experience; `cursor_next` in the
+  response enables the client to paginate beyond 50 when present.
+- **Pagination mechanism:** Integer offset cursor `{"offset": N}` — not keyset.
+  `read_group` rows are customer-level aggregates with no stable per-record `id`
+  field. Keyset pagination on `partner_id` would require stable sort on a
+  non-unique field; offset cursor is the correct choice here.
+- **Offset confirmed safe (Q4 diagnostic, 2026-05-21):** Simulation over
+  1,272 customers × 26 pages recovered all 1,272 rows — zero customers dropped.
+- **Accepted trade-off:** Offset cursor is vulnerable to page-shift on concurrent
+  inserts. Accepted because operator sessions are short and La Verde's data
+  entry rate is low during active drill-down sessions.
 
-### Decision 14.10 — Rule R10: read-only assertion at every drilldown entry
+### Decision 14.10 — is_read_only property on OdooClient + Rule R10 assertion
 
-- **Status:** CLOSED — enforced in all five service functions
-- **Rule:** `assert _client.is_read_only` is the first executable statement in
-  every drilldown service function.
+- **Status:** CLOSED — property added to client.py; assertion in all five service functions
+- **Part A — OdooClient.is_read_only property:** Added to
+  `backend/shared/odoo/client.py`. Returns `True` unconditionally for the
+  production client (the engine is read-only by design). Exposes the
+  read-only contract as an inspectable property so service functions can
+  assert it without importing settings.
+- **Part B — Rule R10:** `assert _client.is_read_only` is the first executable
+  statement in every drill-down service function (`get_late_drilldown`,
+  `get_forecast_drilldown`, `get_portfolio_drilldown`, `get_project_drilldown`,
+  `get_trend_drilldown`).
 - **Rationale:** Drill-downs query live Odoo with no caching. An accidental
-  write-capable client would be invisible until an operational incident.
+  write-capable client passed in would be invisible until an operational
+  incident. The assertion fires immediately in tests and in production.
 - **Test coverage:** Five tests in Section 6 of `test_drilldowns.py` verify
   each function raises `AssertionError` when `client.is_read_only = False`.
 
-### Decision 14.11 — Portfolio offset cursor (not keyset)
+### Decision 14.11 — Trend range guard: trailing 6 months, months_behind > 5 → ValueError
 
-- **Status:** CLOSED — Q4 diagnostic confirmed offset is safe
-- **Rule:** `/drilldown/portfolio` paginates customer rows using an integer
-  offset cursor `{"offset": N}`, not a keyset cursor.
-- **Reason:** `read_group` rows are customer-level aggregates with no stable
-  per-record `id` usable for keyset pagination.
-- **Offset confirmed safe (Q4 diagnostic, 2026-05-21):** Simulation over
-  1,272 customers × 26 pages recovered all 1,272 rows with zero customers
-  dropped.
-- **Accepted trade-off:** Offset cursor is vulnerable to page-shift on
-  concurrent inserts. Accepted because: (a) operator sessions are short,
-  (b) La Verde data entry rate is low, (c) keyset on `partner_id` requires
-  stable sort on a non-unique field.
+- **Status:** CLOSED — implemented D5; boundary tested in unit tests
+- **Rule:** `/drilldown/trend/{month}` only accepts YYYY-MM values within
+  the trailing 6 calendar months (inclusive of the current month).
+  `months_behind > 5` → `ValueError("out of range")` → HTTP 422.
+- **Calculation:** `months_behind = (today.year − y) * 12 + (today.month − m)`.
+  Uses Cairo local date (`datetime.now(CAIRO_TZ).date()`), not UTC.
+- **Year-wrap boundary (tested):** With today = 2026-01-15, 2025-08 has
+  `months_behind = 5` (accepted); 2025-07 has `months_behind = 6` (rejected).
+- **Out-of-range response:** HTTP 422 (FastAPI validation error), not 404.
+  An empty in-range month returns HTTP 200 with `items=[]`.
 
 ### Decision 14.12 — Portfolio aggregation: read_group + Python-side collapse
 
