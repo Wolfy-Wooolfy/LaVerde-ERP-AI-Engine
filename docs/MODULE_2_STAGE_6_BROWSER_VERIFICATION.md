@@ -13,6 +13,29 @@ UI deliverables work correctly before tagging
 
 ---
 
+## V0 — Live identity re-run (verify_drilldowns_live.py)
+
+Run **after** the Decision 6.4 clean-restart ritual (kill → purge `__pycache__`
+→ restart uvicorn without `--reload`). This confirms that the frontend changes
+introduced no backend regressions and that every drill-down endpoint still
+sums to its current parent KPI.
+
+```
+python scripts/verify_drilldowns_live.py
+```
+
+Expected result: **8/8 GREEN**. Data drift since Stage 5 is normal — absolute
+numbers will have moved as La Verde staff enter data daily. A GREEN result
+means the identity holds (drill-down sum ≈ parent KPI), not that the number
+matches the Stage 5 baseline. Only a broken identity (e.g., drill-down sum
+differs materially from the live parent KPI) is a failure.
+
+| # | Check | Expected | PASS/FAIL |
+|---|-------|----------|-----------|
+| 0.1 | `python scripts/verify_drilldowns_live.py` | 8/8 GREEN | |
+
+---
+
 ## V1 — Panel opens for all 11 trigger targets
 
 | # | Trigger | Expected panel title | PASS/FAIL |
@@ -87,7 +110,7 @@ brief loading skeleton. No JS errors in console.
 | # | Action | Expected | PASS/FAIL |
 |---|--------|----------|-----------|
 | 6.1 | Open KPI 2 panel | Address bar shows `#dd=kpi2` | |
-| 6.2 | Apply "Not Paid" filter | Hash updates to `#dd=kpi2&st=not_paid` | |
+| 6.2 | Apply "Not Paid" filter | Hash updates to `#dd=kpi2&st=unpaid` | |
 | 6.3 | Copy URL, open in new tab | Panel opens with Not Paid filter active | |
 | 6.4 | Open cheques annotation | Hash shows `#dd=kpi2-cheques&pc=1` | |
 | 6.5 | Close panel | Hash is cleared from URL | |
