@@ -2624,10 +2624,21 @@ Based on backend endpoint signatures confirmed in Stage 6 Phase 1:
 | Project dropdown    | ❌   | ❌       | ✅        | ❌      | ❌    |
 
 Portfolio's project dropdown is supported by the backend (`project_id`
-query param) but is NOT implemented in Stage 6 filter bar — portfolio
-is the only endpoint without sort/state filters, and the Board's
-primary use of the portfolio view is the full breakdown, not filtering
-by project.
+query param) but is **deferred** from the Stage 6 filter bar.
+
+**Deferral rationale (Khaled, 2026-05-21):** The always-visible
+`project_breakdown` sub-rows under each customer (Decision 15.8)
+already expose all project detail inline — every customer row already
+shows every project amount. A filter dropdown adds little analytical
+value when the full per-project breakdown is already visible without
+interaction.
+
+**Reversal trigger:** Re-add the portfolio project dropdown if the
+Board asks to filter the portfolio to a single project (e.g., to
+focus a meeting on New Capital). Implementation: render a `<select>`
+or chip group above the list body with values [All, New Capital,
+Cassette, La puerta], wired to `_state.filters.project_id` and
+passed via `_buildUrl()` → `?project_id=1|2|3`.
 
 ### Decision 15.13 — project_id null vs. 0: different handling per endpoint type
 
