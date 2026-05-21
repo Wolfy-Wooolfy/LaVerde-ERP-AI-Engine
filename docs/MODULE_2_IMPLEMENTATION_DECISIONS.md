@@ -2737,3 +2737,9 @@ exported for unit tests): returns `['all', 'unpaid', 'partial']`.
 
 **Diagnostic script:** `scripts/diagnose_paid_filter_422.py` reproduces and
 confirms the bug. Retained for future regression checks.
+
+**Relation to Decision 15.6:** Decision 15.6 still holds — trend's default
+(unfiltered) result includes paid installments; 15.15 only removes the
+ability to FILTER by paid, because no drill-down endpoint's schema accepts
+it. These are two different things: what the endpoint RETURNS by default
+vs. what it can FILTER on.
