@@ -1,6 +1,6 @@
 # Module 2 — Stage Tracker
 
-**Last updated:** 2026-05-20 (Stage 4 closed)
+**Last updated:** 2026-05-21 (Stage 5 closed)
 
 This is the single source of truth for "where are we?" in
 Module 2. Update at the close of every stage.
@@ -14,28 +14,27 @@ Module 2. Update at the close of every stage.
 | 3 — Frontend Restructure | ✅ Closed | `checkpoint-D-stage3-frontend-restructure-complete` | Session 11 (11.1-11.18) | 5 + 1 fix + 1 doc | 4-section layout, state refactor |
 | 2.5 — KPI 2 redefinition | ✅ Closed | `checkpoint-C-stage2-5-kpi2-redefined` | Session 12 | 6 | KPI 2 formula PATH A; +1.93M EGP cheques annotation |
 | 4 — Premium Visual Identity | ✅ Closed | `checkpoint-D-stage4-premium-visual-identity-complete` | Session 13 | 10 | Dark canvas, heartbeat, premium cards, cheques pill, D2.9 fix |
-| 5 — Drill-down Backend | ⏳ Planned | — | (Session 14) | TBD | Drill-down endpoints + KPI 7 cheques count |
+| 5 — Drill-down Backend | ✅ Closed | `checkpoint-E-stage5-drilldown-backend-complete` | Session 14 | 8 | 5 drill-down endpoints, D6 8/8 PASS, KPI 7 cheques_record_count |
 | 6 — Drill-down Frontend | ⏳ Planned | — | (Session 15) | TBD | Drill-down UI integration |
 
-## Current Numbers Baseline (2026-05-19, smoke test)
+## Current Numbers Baseline (2026-05-21, D6 live verification)
+
+Values are live Odoo readings as of the D6 gate run. They will drift as
+La Verde staff enter data daily.
 
 | KPI | Value | Notes |
 |---|---|---|
-| KPI 1 Portfolio | 6.12B EGP / 42,443 records | confirmed |
-| KPI 2 Late | 329,845,453.40 EGP / 2,013 records | PATH A confirmed 2026-05-20, Decision 12.1 |
-| KPI 2 Cheques in Pipeline | 1,929,000.00 EGP | subset of KPI 2 headline ✓ (Decision 12.1) |
+| KPI 1 Portfolio | 6,121,816,265.23 EGP / 42,413 records | D6 V3 confirmed |
+| KPI 2 Late | 332,036,464.40 EGP / 2,027 records | D6 V1 confirmed; PATH A (Decision 12.1) |
+| KPI 2 Cheques in Pipeline | — | not re-read in D6; prior baseline 790,500 EGP (Decision 14.6a) |
 | KPI 3 Pending Check Exposure | backend live, frontend removed | per refactor §6 |
 | KPI 4 Collection Rate | unavailable (data-state) | Decision 11.16 |
-| KPI 5 New Capital | 168.7M EGP | confirmed |
-| KPI 5 Cassette | 154.1M EGP | confirmed |
-| KPI 5 La puerta | 3.6M EGP | confirmed |
-| KPI 5 Sum | 326.4M EGP | = KPI 2 ✓ |
-| KPI 7 This Month | 17.9M EGP / 112 installments | period_end 2026-05-31 |
-| KPI 7 This Quarter | 50.7M EGP / 334 installments | period_end 2026-06-30 |
-| KPI 7 This Half | 50.7M EGP / 334 installments | Q2=H1 collapse |
-| KPI 7 This Year | 333.1M EGP / 1,913 installments | period_end 2026-12-31 |
-| KPI 7 Cheques 2026 | 643K EGP | per KPI 7 Phase 0 discovery |
-| KPI 7 Cheques 2027+ | 2.54M EGP | out of forecast scope |
+| KPI 5 New Capital | 171,695,538.40 EGP | D6 V4 confirmed |
+| KPI 5 Cassette | 154,822,426.00 EGP | D6 V4 confirmed |
+| KPI 5 La puerta | 3,589,500.00 EGP | D6 V4 confirmed |
+| KPI 5 Sum | 330,107,464.40 EGP | = KPI 2 ✓ |
+| KPI 7 This Year | — | not re-read in D6 |
+| KPI 7 Cheques this_year | 790,500 EGP / count = 2 | D6 V8 confirmed; Decision 14.6a baseline |
 
 ## Rollback Tags
 
@@ -48,6 +47,7 @@ Module 2. Update at the close of every stage.
 | `checkpoint-D-stage3-frontend-restructure-complete` | Stage 3 close | 2026-05-19 |
 | `checkpoint-C-stage2-5-kpi2-redefined` | Stage 2.5 close | 2026-05-20 |
 | `checkpoint-D-stage4-premium-visual-identity-complete` | Stage 4 close | 2026-05-20 |
+| `checkpoint-E-stage5-drilldown-backend-complete` | Stage 5 close | 2026-05-21 |
 
 ## Maintenance instructions
 

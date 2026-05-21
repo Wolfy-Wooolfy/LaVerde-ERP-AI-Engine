@@ -2185,6 +2185,270 @@ sections covered. CSS delta +1,847 bytes (23% of +8,192 budget).
   procedure for any future "did this number change for a real reason?"
   investigation on any KPI involving `check_pending_amount`.
 
+### Decision 14.1 — Drill-down API envelope format
+
+- **Status:** CLOSED — implemented Stage 5, D7 close 2026-05-21
+- **Choice:** All five drill-down endpoints return a versioned `DrilldownEnvelope`
+  generic wrapper: `{"version": "1.0", "data": <T>, "meta": {...}}`.
+- **`meta` fields:** `request_id`, `as_of`, `rpc_duration_ms`, `page_size`,
+  `total_count`, `cursor_current`, `cursor_next`, `has_next`, `filters_applied`,
+  `sort_applied`, `data_quality` (optional — see Decision 14.13).
+- **Rationale:** Consistent envelope across all endpoints makes client-side
+  handling uniform. `version` field allows future non-breaking schema evolution
+  without a new route prefix.
+- **Schema:** `DrilldownEnvelope[T]` in `backend/modules/collections/schemas.py`.
+
+### Decision 14.2 — Project drill-down identity rule
+
+- **Status:** CLOSED — verified V4 in D6, 2026-05-21
+- **Rule:** `SUM(item.due_amount)` across all pages of `/drilldown/project/{id}`
+  must equal `KPI 5 late_uncollected` for that project.
+- **`total_late_uncollected` in response:** Set to `SUM(due_amount)` from the
+  `read_group` aggregate call — identity-equal with KPI 5. Not derived from
+  paginated rows, which avoids double-read drift.
+- **Verified values (2026-05-21):** New Capital 171,695,538.40 EGP,
+  Cassette 154,822,426.00 EGP, La puerta 3,589,500.00 EGP — all Δ ≤ 1.00 EGP.
+
+### Decision 14.3 — Five drill-down endpoint structure
+
+- **Status:** CLOSED — all five endpoints live, D6 8/8 PASS
+- **Endpoints:**
+  1. `GET /api/v1/collections/drilldown/late` — late uncollected installments (V1)
+  2. `GET /api/v1/collections/drilldown/forecast/{bucket}` — installments per
+     forecast bucket: `month|quarter|half|year` (V2)
+  3. `GET /api/v1/collections/drilldown/portfolio` — installments aggregated by
+     customer → project breakdown (V3)
+  4. `GET /api/v1/collections/drilldown/project/{id}` — late installments for one
+     project, `id ∈ {1,2,3}` (V4)
+  5. `GET /api/v1/collections/drilldown/trend/{month}` — installments due in a
+     given YYYY-MM month, trailing 6 months only (V5)
+- **Auth:** HTTP Basic, same credentials as all other endpoints.
+- **Tri-state filter:** `has_pending_cheque=true|false|omitted` on late, forecast,
+  project, trend. Omitted = no filter (returns all). Verified by V7.
+- **Rate limiter:** `@limiter.limit("60/minute")` on all five endpoints.
+
+### Decision 14.4 — Keyset cursor pagination
+
+- **Status:** CLOSED — implemented and verified Stage 5
+- **Cursor encoding:** Base64-URL JSON with keys `sv` (sort value), `id`
+  (record id), `sb` (sort_by), `sd` (sort_dir). Malformed cursor silently
+  falls back to first page.
+- **ASC keyset clause:**
+  `["|", ("field",">",sv), "&", ("field","=",sv), ("id",">",id)]`
+- **DESC keyset clause:**
+  `["|", ("field","<",sv), "&", ("field","=",sv), ("id","<",id)]`
+- **page_size+1 trick:** Fetches one extra record to detect `has_next` without
+  a separate COUNT call. Extra record stripped from response.
+- **Max page_size:** 200 (clamped server-side). Default: 50.
+- **Exception:** Portfolio uses offset cursor — see Decision 14.11.
+
+### Decision 14.5 — Request ID echoed in meta (E3 requirement)
+
+- **Status:** CLOSED — V6 verified 2026-05-21
+- **Rule:** Every drill-down response `meta.request_id` echoes the
+  client-supplied `X-Request-ID` header, or a server-generated 32-char
+  hex UUID4 if omitted.
+- **Single source of truth:** `request_id_middleware` in `backend/main.py`
+  resolves the ID once per request (reads client header first, falls back to
+  `uuid4().hex`) and stores it in `request.state.request_id`. `_req_id()`
+  in the endpoint layer reads only from state.
+- **Bug caught by D6:** V6 FAIL before fix — see "Bugs caught by D6" below.
+  Fixed in commit `97043e3`.
+
+### Decision 14.7 — No caching for drill-down endpoints
+
+- **Status:** CLOSED — architectural decision, no code bypass path exists
+- **Rule:** All five drill-down endpoints call Odoo live on every request.
+  No `@cache` decorator, no Redis TTL, no `cache_status` field in responses.
+- **Rationale:** Drill-downs are operator-interactive (triggered by clicking a
+  KPI card). Stale data during a live investigation is unacceptable. Cache
+  TTL savings do not outweigh row-level staleness risk.
+- **Contrast:** Parent KPI endpoints (KPI 1, 2, 5, 7) remain cached — aggregate
+  numbers tolerate 1-hour staleness for a summary view.
+
+### Decision 14.8 — late_amount formula: PATH A per-record
+
+- **Status:** CLOSED — verified V1 in D6
+- **Formula:** `late_amount = amount − x_studio_actual_paid_amount` per row.
+  `amount` = contractual face value. `x_studio_actual_paid_amount` = cash
+  actually received (Odoo studio field).
+- **PATH A consistency:** KPI 2 headline uses the same PATH A formula.
+  `SUM(late_amount)` across the late drilldown ≈ KPI 2 value (V1 identity,
+  Δ ≤ 1.00 EGP).
+- **`pending_cheque` companion field:** `max(paid_amount − actual_paid_amount, 0)`.
+  Clamped to zero when actual > paid (Decision 9.1). Represents the cheque
+  amount handed over but not yet cashed.
+
+### Decision 14.9 — Trend endpoint: due-date axis, no identity-equal assertion
+
+- **Status:** CLOSED — V5 sanity-only by design
+- **Rule:** `/drilldown/trend/{month}` returns installments whose `date` field
+  (Odoo contractual due date) falls within the given calendar month.
+- **KPI 6 uses actual payment dates** (`x_studio_actual_paid_amount > 0` in the
+  given month). The axes are different — no identity-equal assertion between
+  V5 and KPI 6. V5 is a sanity check only (endpoint responds, paginates,
+  returns plausible data).
+- **Month validation:** Trailing 6 calendar months accepted (inclusive of current
+  month). Out-of-range → HTTP 422. Year-wrap boundary tested in unit tests.
+
+### Decision 14.10 — Rule R10: read-only assertion at every drilldown entry
+
+- **Status:** CLOSED — enforced in all five service functions
+- **Rule:** `assert _client.is_read_only` is the first executable statement in
+  every drilldown service function.
+- **Rationale:** Drill-downs query live Odoo with no caching. An accidental
+  write-capable client would be invisible until an operational incident.
+- **Test coverage:** Five tests in Section 6 of `test_drilldowns.py` verify
+  each function raises `AssertionError` when `client.is_read_only = False`.
+
+### Decision 14.11 — Portfolio offset cursor (not keyset)
+
+- **Status:** CLOSED — Q4 diagnostic confirmed offset is safe
+- **Rule:** `/drilldown/portfolio` paginates customer rows using an integer
+  offset cursor `{"offset": N}`, not a keyset cursor.
+- **Reason:** `read_group` rows are customer-level aggregates with no stable
+  per-record `id` usable for keyset pagination.
+- **Offset confirmed safe (Q4 diagnostic, 2026-05-21):** Simulation over
+  1,272 customers × 26 pages recovered all 1,272 rows with zero customers
+  dropped.
+- **Accepted trade-off:** Offset cursor is vulnerable to page-shift on
+  concurrent inserts. Accepted because: (a) operator sessions are short,
+  (b) La Verde data entry rate is low, (c) keyset on `partner_id` requires
+  stable sort on a non-unique field.
+
+### Decision 14.12 — Portfolio aggregation: read_group + Python-side collapse
+
+- **Status:** CLOSED — regression-guarded by unit test
+- **Rule:** `get_portfolio_drilldown` calls `read_group` with
+  `groupby=["partner_id", "project_id"]`. It does NOT call `search_read`
+  (which would transfer all 42K raw installment rows per request).
+- **Python-side collapse:** `read_group` returns one row per
+  (partner_id, project_id) pair. The service collects these into a
+  `customer_map` keyed by `partner_id`, accumulating `project_breakdown`
+  entries and summing `total_amount`, `total_due`, `total_paid`,
+  `total_actual_paid`.
+- **Regression guard:** `test_portfolio_drilldown_uses_read_group_not_search_read`
+  asserts `execute_kw.call_count == 1` and `method == "read_group"`. A change
+  to `search_read` immediately fails this test.
+
+### Decision 14.13 — Portfolio project_id=False: surface under sentinel label
+
+- **Status:** CLOSED — Decision and fix confirmed 2026-05-21; V3 now PASS
+- **Problem discovered:** `read_group` returns rows where `project_id = False`
+  (Odoo's null equivalent for unset many2one fields). Before this decision,
+  the service had `if not project_raw: continue`, silently dropping all such rows.
+  Diagnostic (Q1–Q4, 2026-05-21): 185 installments / 6,500,203 EGP dropped.
+  This was the sole cause of the V3 D6 FAIL.
+- **Decision:** Surface `project_id=False` installments under a sentinel entry
+  in the customer's `project_breakdown`:
+  - `project_id: null` (explicit null in JSON — not `0`, not `False`)
+  - `project_name_ar: "بدون مشروع"` ("No Project Assigned" in Arabic)
+  - `project_name_en: "No Project Assigned"`
+  - Amount and count are included in the customer's totals.
+- **`meta.data_quality` block:** Present when any `project_id=False` rows
+  exist in the response:
+  ```json
+  {
+    "unassigned_project_installments": 185,
+    "unassigned_project_amount": 6500203.00,
+    "note_ar": "يوجد 185 قسط بقيمة 6,500,203.00 ج.م ...",
+    "note_en": "185 installments (EGP 6,500,203.00) ..."
+  }
+  ```
+  When no unassigned rows exist, `meta.data_quality` is `null`.
+- **`partner_id=False` rows:** Counted in `meta.data_quality` for transparency
+  but not emitted as customers (no customer ID = cannot display). Diagnostic Q1
+  confirmed this is a dead branch in live data (0 records).
+- **Read-only constraint:** Absolute — Rule R10 (Decision 14.10) unchanged.
+- **Test coverage:** Two dedicated tests:
+  - `test_portfolio_drilldown_includes_unassigned_project` — same `partner_id=101`
+    in two groups (project_id=1 AND project_id=False); asserts 1 customer,
+    `total_amount=150,000`, 2 breakdown entries, null-project sentinel fields.
+  - `test_portfolio_drilldown_meta_reports_unassigned` — data_quality populated
+    when unassigned rows exist; `null` when all rows have valid projects.
+
+---
+
+## Session 14 Verification Results — D6 Live Gate (2026-05-21)
+
+All 8 blocks passed on the final run after three fixes (V3 Decision 14.13,
+V6 request-ID unification, V7 page_size fix).
+
+Run command (Decision 6.4 ritual completed before each run):
+```
+DRILLDOWN_VERIFY_CONFIRMED=1 python scripts/verify_drilldowns_live.py
+```
+
+### V1–V8 Results Table
+
+| Block | Description | Result | Key Numbers |
+|---|---|---|---|
+| V1 | Late drill-down identity-equal | **PASS** | KPI 2 = 332,036,464.40 EGP / 2,027 records; `SUM(late_amount)` Δ ≤ 1.00 EGP |
+| V2 | Forecast drill-down identity-equal (4 buckets) | **PASS** | `SUM(amount)` ≈ `bucket.amount` and `SUM(due_amount)` ≈ `bucket.due_amount` for all 4 buckets |
+| V3 | Portfolio drill-down identity-equal | **PASS** | KPI 1 = 6,121,816,265.23 EGP / 42,413 records; `SUM(customer.total_amount)` Δ ≤ 1.00 EGP |
+| V4 | Project drill-down identity-equal (3 projects) | **PASS** | New Capital 171,695,538.40 / Cassette 154,822,426.00 / La puerta 3,589,500.00 EGP — all Δ ≤ 1.00 EGP vs KPI 5 |
+| V5 | Trend drill-down sanity + pagination | **PASS** | 6 trailing months checked; pagination terminates; `version` and `meta.request_id` asserted per page |
+| V6 | Request ID propagation | **PASS** | Custom `X-Request-ID` echoed in header and `meta.request_id`; omitted header → 32-char hex UUID4 |
+| V7 | Tri-state filter partition (late endpoint) | **PASS** | `count(true) + count(false) == count(all)` — partition exhaustive |
+| V8 | KPI 7 cheques_record_count is int ≥ 0 | **PASS** | `this_year = 790,500 EGP / count = 2`; all 4 buckets return `int ≥ 0` |
+
+**Final result: 8/8 PASS**
+
+### Test count (accurate as of 2026-05-21)
+
+| Scope | Count |
+|---|---|
+| `tests/unit/modules/collections/test_drilldowns.py` | **47 tests** |
+| All unit tests (`tests/unit/`) | **484 tests** |
+| Full suite (`tests/`) | **614 tests** |
+
+Note: An earlier commit message stated "45 tests". The accurate count is 47.
+Two additional tests were added for Decision 14.13 (`test_portfolio_drilldown_includes_unassigned_project`,
+`test_portfolio_drilldown_meta_reports_unassigned`) and two V6 tests were renamed
+and updated (`test_req_id_helper_returns_state_value_when_present`,
+`test_req_id_helper_generates_uuid4_hex_when_state_absent`).
+
+### Bugs caught by D6 that unit tests missed
+
+The two bugs below passed all 185 unit tests (at the time of the first D6 run)
+yet caused D6 FAILs. This validates the Stage 5 design principle:
+**unit tests verify logic correctness; live verification verifies identity
+correctness against real Odoo data. A green unit suite is necessary but not
+sufficient for Stage 5 sign-off.**
+
+**Bug 1 — V3: Portfolio silent drop (6,500,203 EGP)**
+
+- **Symptom:** D6 V3 FAIL. `SUM(customer.total_amount)` was 6,500,203 EGP
+  below KPI 1 value.
+- **Root cause:** `drilldown_service.py` contained
+  `if not partner_raw or not project_raw: continue`. The `not project_raw`
+  branch silently dropped all 185 installments where Odoo returned
+  `project_id = False`. Unit tests never mocked this case because
+  `_SAMPLE_RG_ROW` always had a valid `project_id`.
+- **Fix:** Decision 14.13 — surface under "بدون مشروع" sentinel. The 6.5M EGP
+  is now included in portfolio totals.
+- **Lesson for future sessions:** Any `if not field: continue` pattern on an
+  Odoo many2one field must be tested explicitly with `False` as the mock value.
+  Odoo returns `False` (not `None`, not `0`) for unset many2one fields.
+
+**Bug 2 — V6: Request ID desync (fresh UUID instead of echoing client value)**
+
+- **Symptom:** D6 V6 FAIL. `X-Request-ID` response header showed a different
+  UUID than the value sent by the client.
+- **Root cause:** Two separate code paths generated request IDs:
+  (1) `request_id_middleware` ran `str(uuid.uuid4())` (hyphenated, 36 chars)
+  *after* `call_next()` returned, overwriting the endpoint's response header;
+  (2) `_req_id()` inside the endpoint generated its own `uuid4().hex`
+  (32-char no-hyphen). Neither echoed the client's value.
+- **Fix:** Middleware is now the single source of truth — reads client header
+  first (or generates `.hex`), stores in `request.state.request_id`.
+  `_req_id()` reads only from state. Fixed in commit `97043e3`.
+- **Lesson for future sessions:** When multiple layers touch the same header,
+  only one layer should be authoritative. "Set once in middleware, read from
+  state in endpoint" prevents silent fan-out.
+
+---
+
 ### Decision 13.6 — Visual nits accepted as "good enough" for Stage 4 close
 
 - **Status:** CLOSED — Khaled browser verification 2026-05-20
