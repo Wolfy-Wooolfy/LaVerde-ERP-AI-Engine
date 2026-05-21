@@ -2491,3 +2491,140 @@ sufficient for Stage 5 sign-off.**
 - **CSS budget:** +1,847 bytes used of the +8,192 byte budget (23%). The
   remaining 77% headroom is available for Stages 5-6 UI additions without
   requiring a CSS audit.
+
+---
+
+## Session 15 — 2026-05-21 — Stage 6 Frontend Drill-Down UI
+
+### Decision 15.1 — Focus management: `inert` on `<main.main-content>`
+
+- **Choice:** When the drill-down panel opens, set `inert` attribute on
+  `<main class="main-content">` via `_setMainInert(true)`. Remove on close.
+- **Rationale:** `inert` blocks mouse events, keyboard focus, and
+  `aria-hidden` semantics in one attribute — stronger than `aria-hidden`
+  alone. This is the W3C-recommended approach for modal-like sidepanels.
+  `inert` is supported by all evergreen browsers as of 2023.
+- **Scope:** `drilldown.js` D7. The sidebar is NOT inerted (it is outside
+  the `<main>` element and does not need separate handling).
+
+### Decision 15.2 — Unit tests: `_resolveEndpoint` (15 tests)
+
+- **Choice:** `tests/frontend/test_drilldown.js` covers all 11 canonical
+  targets plus 4 edge/invalid cases. Run with `node tests/frontend/test_drilldown.js`.
+- **Rationale:** `_resolveEndpoint` is a pure mapping function — trivial
+  to unit-test in Node.js by stubbing browser globals. Provides a safety
+  net if endpoint paths change in Stage 7+.
+- **Result:** 15/15 pass at Stage 6 close.
+
+### Decision 15.3 — Unit tests: `_buildHash`/`_parseHash` round-trips
+
+- **Choice:** Same test file adds 31 tests for the URL hash encode/decode
+  cycle: encoding (defaults omitted), decoding (defaults restored),
+  and 6-target round-trips covering all target families.
+- **Result:** 46/46 pass at Stage 6 close.
+- **Hash format locked (Decision 15.7).**
+
+### Decision 15.4 — Commit strategy: D2/D4/D5/D6/D7 are separate commits
+
+- **Choice:** Each logical layer of `drilldown.js` is its own commit:
+  D2 core, D4 filter bar, D5 hash, D6 UI states, D7 keyboard/inert.
+- **Rationale:** Reviewability and clean `git bisect` targets. The full
+  feature is only testable after all commits are applied, but each commit
+  is a self-contained logical unit.
+
+### Decision 15.5 — KPI 4 card de-interactified
+
+- **Choice:** Remove `data-drilldown-target="kpi4"` and `tabindex="0"`
+  from the KPI 4 Collection Rate card in `dashboard.html`.
+- **Rationale:** KPI 4 rate is unavailable (data-entry state per
+  Decision 11.16). Offering a clickable card that opens an empty or
+  broken drilldown creates a confusing UX. De-interactified until
+  KPI 4 data is available.
+- **Reversal trigger:** Re-add the drilldown wiring when KPI 4 has
+  live data and a corresponding backend drilldown endpoint.
+
+### Decision 15.6 — Vanilla JS IIFE for `window.drilldownController`
+
+- **Choice:** `drilldown.js` uses the same IIFE pattern as `collections.js`
+  — no Alpine.js, no React, no framework. `window.drilldownController`
+  exposes `open(target, presetFilters, triggerEl)`, `close()`, `state`,
+  and `_refetch()`.
+- **Rationale:** Consistent with the existing JS architecture. Alpine.js
+  is available on the page but using it for the panel would introduce
+  reactive state that is harder to unit-test and creates cross-framework
+  coupling with the COLLECTIONS_STRINGS injection pattern.
+
+### Decision 15.7 — URL hash format for drill-down state
+
+- **Choice:** `#dd=target[&st=payment_state][&sb=sort_by][&sd=sort_dir][&pc=1]`
+  - `dd` = target (required)
+  - `st` = payment_state, omitted when "all" (default)
+  - `sb` = sort_by, omitted when "date" (default)
+  - `sd` = sort_dir, omitted when "desc" (default)
+  - `pc` = "1" when has_pending_cheque=true, omitted otherwise
+- **Rationale:** Minimal hash — default values are omitted to keep
+  the URL clean for the common case. URI-encoded values handle
+  special characters in target names (e.g., `forecast-this_month`).
+- **Deep-link:** `_restoreFromHash()` called on DOMContentLoaded opens
+  the panel automatically if a valid `#dd=` hash is present.
+
+### Decision 15.8 — Portfolio renders flat (no expand/collapse)
+
+- **Choice:** Customer rows display all `project_breakdown` sub-rows
+  inline, always visible. No expandable accordion.
+- **Rationale:** Portfolio drill-down is read-only data. The Board
+  needs all project detail immediately without extra interaction.
+  Expand/collapse adds complexity (state, animation, ARIA roles)
+  for no analytical benefit. Flat rendering is also simpler to
+  implement correctly.
+
+### Decision 15.9 — Payment badge variants in Tailwind safelist
+
+- **Choice:** `dd-payment-badge--{state}` classes are added to the
+  Tailwind safelist as `{ pattern: /^dd-payment-badge--/ }` in
+  `tailwind.config.js`. Base classes (`dd-row`, `dd-filter-chip`, etc.)
+  are also safelisted.
+- **Rationale:** `drilldown.js` constructs badge class names via template
+  literals (`dd-payment-badge--${row.payment_state}`), which cannot be
+  found by Tailwind's content scanner. Safelist ensures they survive
+  the JIT purge step.
+
+### Decision 15.10 — KPI 6 chart click triggers trend drilldown
+
+- **Choice:** The Chart.js `onClick` option in `collections.js` maps
+  bar/point clicks at dataset index 0 (trend data) to
+  `drilldownController.open('trend-YYYY-MM', {}, triggerEl)` using
+  `kpi6.months[index].month` from the live state.
+- **Rationale:** Month string comes directly from the API response
+  field `month: str` (YYYY-MM), not from client-side date arithmetic.
+  This avoids timezone discrepancies — the backend already computed
+  the correct Cairo-timezone month boundaries.
+- **Exclusion:** Clicks on dataset index 1 (average line) are ignored.
+
+### Decision 15.11 — `kpi2-cheques` annotation is now interactive
+
+- **Choice:** `id="col-kpi2-cheques-annotation"` in `_risk_card.html`
+  gains `data-drilldown-target="kpi2-cheques"`, `tabindex="0"`,
+  `role="button"`. The cheques drilldown opens the late endpoint with
+  `has_pending_cheque=true` preset.
+- **Rationale:** The cheques annotation was display-only until Stage 6.
+  Adding interactivity lets the Board drill into the specific cheques
+  subset of the late uncollected figure without an extra click on the
+  filter bar.
+
+### Decision 15.12 — Filter availability per endpoint (authoritative)
+
+Based on backend endpoint signatures confirmed in Stage 6 Phase 1:
+
+| Filter              | late | forecast | portfolio | project | trend |
+|---------------------|------|----------|-----------|---------|-------|
+| Payment State       | ✅   | ✅       | ❌        | ✅      | ✅    |
+| Has Pending Cheque  | ✅   | ✅       | ❌        | ✅      | ✅    |
+| Sort                | ✅   | ✅       | ❌        | ✅      | ✅    |
+| Project dropdown    | ❌   | ❌       | ✅        | ❌      | ❌    |
+
+Portfolio's project dropdown is supported by the backend (`project_id`
+query param) but is NOT implemented in Stage 6 filter bar — portfolio
+is the only endpoint without sort/state filters, and the Board's
+primary use of the portfolio view is the full breakdown, not filtering
+by project.

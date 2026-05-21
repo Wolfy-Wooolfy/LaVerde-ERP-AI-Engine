@@ -1,6 +1,6 @@
 # Module 2 — Stage Tracker
 
-**Last updated:** 2026-05-21 (Stage 5 closed)
+**Last updated:** 2026-05-21 (Stage 6 closed)
 
 This is the single source of truth for "where are we?" in
 Module 2. Update at the close of every stage.
@@ -15,7 +15,7 @@ Module 2. Update at the close of every stage.
 | 2.5 — KPI 2 redefinition | ✅ Closed | `checkpoint-C-stage2-5-kpi2-redefined` | Session 12 | 6 | KPI 2 formula PATH A; +1.93M EGP cheques annotation |
 | 4 — Premium Visual Identity | ✅ Closed | `checkpoint-D-stage4-premium-visual-identity-complete` | Session 13 | 10 | Dark canvas, heartbeat, premium cards, cheques pill, D2.9 fix |
 | 5 — Drill-down Backend | ✅ Closed | `checkpoint-E-stage5-drilldown-backend-complete` | Session 14 | 8 | 5 drill-down endpoints, D6 8/8 PASS, KPI 7 cheques_record_count |
-| 6 — Drill-down Frontend | ⏳ Planned | — | (Session 15) | TBD | Drill-down UI integration |
+| 6 — Drill-down Frontend | ✅ Closed | `checkpoint-E-stage6-drilldown-frontend-complete` | Session 15 | 11 | Side-panel controller, filter bar, hash, keyboard nav, 46 unit tests |
 
 ## Current Numbers Baseline (2026-05-21, D6 live verification)
 
@@ -48,6 +48,7 @@ La Verde staff enter data daily.
 | `checkpoint-C-stage2-5-kpi2-redefined` | Stage 2.5 close | 2026-05-20 |
 | `checkpoint-D-stage4-premium-visual-identity-complete` | Stage 4 close | 2026-05-20 |
 | `checkpoint-E-stage5-drilldown-backend-complete` | Stage 5 close | 2026-05-21 |
+| `checkpoint-E-stage6-drilldown-frontend-complete` | Stage 6 close | 2026-05-21 |
 
 ## Maintenance instructions
 
