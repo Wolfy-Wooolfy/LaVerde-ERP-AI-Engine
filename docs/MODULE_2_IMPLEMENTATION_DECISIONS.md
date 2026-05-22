@@ -2496,16 +2496,25 @@ sufficient for Stage 5 sign-off.**
 
 ## Session 15 — 2026-05-21 — Stage 6 Frontend Drill-Down UI
 
-### Decision 15.1 — Focus management: `inert` on `<main.main-content>`
+### Decision 15.1 — Focus management: `inert` on `#app` *(selector corrected — see Decision 15.17)*
 
 - **Choice:** When the drill-down panel opens, set `inert` attribute on
-  `<main class="main-content">` via `_setMainInert(true)`. Remove on close.
+  `#app` (the full application shell) via `_setMainInert(true)`. Remove on close.
+  *(Original choice targeted `<main class="main-content">` — corrected after
+  browser verification found the sidebar and topbar remained interactive.
+  See Decision 15.17 for full root-cause analysis.)*
 - **Rationale:** `inert` blocks mouse events, keyboard focus, and
   `aria-hidden` semantics in one attribute — stronger than `aria-hidden`
   alone. This is the W3C-recommended approach for modal-like sidepanels.
   `inert` is supported by all evergreen browsers as of 2023.
-- **Scope:** `drilldown.js` D7. The sidebar is NOT inerted (it is outside
-  the `<main>` element and does not need separate handling).
+- **Scope:** `drilldown.js` D7. `#app` wraps the entire shell (sidebar,
+  topbar, main content, mobile drawers, chat drawer). The drill-down panel
+  and backdrop live in the `{% block portal %}` outside `#app` and are
+  unaffected by the `inert` attribute.
+- ~~**Corrected assumption:** "The sidebar is NOT inerted (it is outside
+  the `<main>` element and does not need separate handling)" — this was
+  wrong. The sidebar is inside `#app` but outside `<main>`, so targeting
+  `<main>` left it fully interactive. See Decision 15.17.~~
 
 ### Decision 15.2 — Unit tests: `_resolveEndpoint` (15 tests)
 
@@ -2772,3 +2781,45 @@ was a frontend coding gap, not a backend limitation.
 **Unit tests:** 52/52 pass. The new fields are inside `_makeInstallmentRow`
 which is not a pure function (it creates DOM elements), so no new unit tests
 added — browser verification is the appropriate check for rendered output.
+
+### Decision 15.17 — `_setMainInert` bug: sidebar and topbar remained interactive while panel was open (browser verification catch)
+
+**Bug (V7 browser verification failure):** With a drill-down panel open on
+the Collections dashboard, clicking sidebar navigation links (`/dashboard`,
+`/data-quality/missing-contact`, `/collections/dashboard`) navigated the
+whole page away. The background was NOT inert. The panel failed to isolate
+the application shell.
+
+**Root cause — wrong `inert` target:** `_setMainInert` used
+`document.querySelector('main.main-content')` as its target. In the
+base.html DOM tree, `<main class="main-content">` is only the scrollable
+content area — a nested child inside `<div class="flex-1 flex flex-col">`,
+which is itself a child of `#app`. The sidebar `<aside class="sidebar">`
+is a **sibling** of that wrapper, also inside `#app` but entirely outside
+`<main>`. Setting `inert` on `<main>` has zero effect on siblings; the
+sidebar received focus and pointer events normally.
+
+**Also exposed (Finding 4):** `<header class="topbar">` sits between the
+wrapper div and `<main>` — also outside the inerted element, so the topbar
+buttons (refresh, language, theme, AI chat) were similarly unprotected.
+
+**Why tests did not catch this:** The unit test suite (52/52) tests pure
+mapping functions (`_resolveEndpoint`, `_buildHash`, `_parseHash`,
+`_paymentStateChipVals`). `_setMainInert` is not exported and depends on a
+live browser DOM. V0 (8/8) verified API response format, not DOM interaction
+isolation. This is the same class of undetectable-without-browser bug as the
+`_escHtml` ReferenceError (Decision 15.16 context). Browser verification is
+the only adequate check for runtime DOM behaviour.
+
+**Fix (this commit):** `_setMainInert` now targets `document.getElementById('app')`.
+`#app` is the single container for the entire application shell — sidebar,
+topbar, main content area, mobile drawers, and chat drawer are all inside it.
+The drill-down panel (`#dd-panel`) and backdrop (`#dd-backdrop`) live in the
+`{% block portal %}` block, rendered as direct children of `<body>` after
+`#app` closes, so they are never inerted. The `close()` function already
+calls `_setMainInert(false)` before `_state.triggerEl.focus()`, so focus
+return to the trigger element is unaffected.
+
+**Verification required:** Khaled must re-check V7 in-browser: sidebar nav
+links and topbar buttons must be completely unclickable while a drill-down
+panel is open. Unit tests cannot verify this; browser interaction is the proof.

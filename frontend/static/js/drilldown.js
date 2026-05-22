@@ -445,10 +445,10 @@
   // ── Focus management (D7) ──────────────────────────────────────────────────
 
   function _setMainInert(active) {
-    var main = document.querySelector('main.main-content');
-    if (!main) return;
-    if (active) main.setAttribute('inert', '');
-    else        main.removeAttribute('inert');
+    var app = document.getElementById('app');
+    if (!app) return;
+    if (active) app.setAttribute('inert', '');
+    else        app.removeAttribute('inert');
   }
 
   function _getFocusable() {
