@@ -50,6 +50,17 @@ La Verde staff enter data daily.
 | `checkpoint-E-stage5-drilldown-backend-complete` | Stage 5 close | 2026-05-21 |
 | `checkpoint-E-stage6-drilldown-frontend-complete` | Stage 6 close — browser verification complete | 2026-05-22 |
 
+## Pending / Deferred Items
+
+Items identified during development or browser verification that are not yet scheduled
+into a numbered stage. Each entry carries enough context to pick up cold.
+
+| # | Title | Priority | Raised by | Date | Description |
+|---|---|---|---|---|---|
+| D-1 | Stage 8 (proposed) — English installment type names | Cosmetic, non-urgent | Khaled (browser visual check) | 2026-05-22 | In EN mode, the type-breakdown section on KPI 7 cards and drill-down shows Arabic names (قسط دوري, الجراج, …) inside an otherwise English UI. Root cause: Stage 7 Choice 2ج used Arabic-only mapping (`installment_type_name_ar`; see `installment_type_names.py`) with no EN counterpart. Fix: (1) add `installment_type_name_en` to KPI 7 schema, (2) populate EN names in `installment_type_names.py` — names known from Stage 7 Gate 1 discovery: Reservation, Down Payment, Regular, Maintenance, Pool, Club, Garage, Penalty, Modification, Service, Other Service, Termination, Administrative Fees, (3) update frontend to select name by current locale. Scope: backend + frontend, Module 2. |
+
+---
+
 ## Maintenance instructions
 
 UPDATE THIS DOCUMENT at the close of every stage:
