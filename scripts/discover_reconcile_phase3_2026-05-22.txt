@@ -1,0 +1,1282 @@
+========================================================================
+  Phase 3 Discovery: Reconcile / Customer Wallet Model
+  Run date:   2026-05-22
+  Odoo URL:   https://laverde.odoo.com/jsonrpc
+  Constraint: READ-ONLY (ALLOWED_METHODS = ['fields_get', 'read', 'read_group', 'search', 'search_count', 'search_read'])
+  PII policy: partner/name/email/phone fields redacted in samples
+  Cost:       $0.00 (no OpenAI calls)
+========================================================================
+
+[AUTH] Authenticating...
+  OK uid=1947
+
+========================================================================
+  SECTION 1: Broad Model Scan — searching ir.model
+========================================================================
+
+  Pattern 'reconcile': 11 hit(s)
+    account.reconcile.model                                  Preset to create journal entries during a invoices and payments matching
+    rs.account.payment.check.reconcile                       Real Estate Accounting Payment Check Reconcile
+    rs.account.payment.reconcile                             Real Estate Accounting Payment Reconcile
+    rs.account.payment.reconcile.request                     Real Estate Accounting Payment Reconcile Request
+    account.auto.reconcile.wizard                            Account automatic reconciliation wizard
+    account.reconcile.wizard                                 Account reconciliation wizard
+    account.full.reconcile                                   Full Reconcile
+    account.partial.reconcile                                Partial Reconcile
+    account.reconcile.model.partner.mapping                  Partner mapping for reconciliation models
+    rs.account.payment.reconcile.line                        Real Estate Accounting Payment Reconcile
+    account.reconcile.model.line                             Rules for the reconciliation model
+
+  Pattern 'wallet': 0 hit(s)
+
+  Pattern 'balance': 3 hit(s)
+    account.aged.partner.balance.report.handler              Aged Partner Balance Custom Handler
+    account.balance.sheet.report.handler                     Balance Sheet Custom Handler
+    account.trial.balance.report.handler                     Trial Balance Custom Handler
+
+  Full rs.account.* namespace (20 model(s)):
+    rs.account.check                                         Real Estate Accounting Checks
+    rs.account.check.action                                  Real Estate Accounting Checks Action
+    rs.account.check.lot                                     Real Estate Accounting Checks Lot
+    rs.account.payment                                       Real Estate Accounting Payment
+    rs.account.payment.cash                                  Real Estate Accounting Payment Cash
+    rs.account.payment.cash.line                             Real Estate Accounting Payment Cash Line
+    rs.account.payment.check                                 Real Estate Accounting Payment Check
+    rs.account.payment.check.reconcile                       Real Estate Accounting Payment Check Reconcile  <-- already in hits
+    rs.account.payment.installment                           Real Estate Accounting Payment Installment
+    rs.account.payment.installment.line                      Real Estate Accounting Payment Installment Line
+    rs.account.payment.reconcile                             Real Estate Accounting Payment Reconcile  <-- already in hits
+    rs.account.payment.reconcile.request                     Real Estate Accounting Payment Reconcile Request  <-- already in hits
+    rs.account.check.search                                  Real Estate Account Check Search Wizard
+    rs.account.payment.installment.search                    Real Estate Account Payment Search Wizard
+    rs.account.check.action.line                             Real Estate Accounting Checks Action Line
+    rs.account.check.action.subaction                        Real Estate Accounting Checks Action Subaction
+    rs.account.check.location                                Real Estate Accounting Checks Location
+    rs.account.check.position                                Real Estate Accounting Checks Position
+    rs.account.payment.reconcile.line                        Real Estate Accounting Payment Reconcile  <-- already in hits
+    rs.account.installment.payment.wzd                       Real Estate installment Payment Wizard
+
+  Total unique candidate models: 30
+
+========================================================================
+  SECTION 2: Record Counts — all candidate models
+========================================================================
+
+  MODEL                                                       COUNT  LABEL
+  -------------------------------------------------------  --------  -----------------------------------
+  account.aged.partner.balance.report.handler                 ERROR  Odoo RPC error: {'code': 200, 'message': 'Odoo Server Error'
+  account.auto.reconcile.wizard                                   0  Account automatic reconciliation wizard
+  account.balance.sheet.report.handler                        ERROR  Odoo RPC error: {'code': 200, 'message': 'Odoo Server Error'
+  account.full.reconcile                                          0  Full Reconcile
+  account.partial.reconcile                                       0  Partial Reconcile
+  account.reconcile.model                                         4  <-- has records  Preset to create journal entries during a invoices and payments matching
+  account.reconcile.model.line                                    2  <-- has records  Rules for the reconciliation model
+  account.reconcile.model.partner.mapping                         0  Partner mapping for reconciliation models
+  account.reconcile.wizard                                        0  Account reconciliation wizard
+  account.trial.balance.report.handler                        ERROR  Odoo RPC error: {'code': 200, 'message': 'Odoo Server Error'
+  rs.account.check                                             5253  <-- has records  Real Estate Accounting Checks
+  rs.account.check.action                                      1690  <-- has records  Real Estate Accounting Checks Action
+  rs.account.check.action.line                                 2284  <-- has records  Real Estate Accounting Checks Action Line
+  rs.account.check.action.subaction                               0  Real Estate Accounting Checks Action Subaction
+  rs.account.check.location                                       0  Real Estate Accounting Checks Location
+  rs.account.check.lot                                           77  <-- has records  Real Estate Accounting Checks Lot
+  rs.account.check.position                                       0  Real Estate Accounting Checks Position
+  rs.account.check.search                                         0  Real Estate Account Check Search Wizard
+  rs.account.installment.payment.wzd                              0  Real Estate installment Payment Wizard
+  rs.account.payment                                          ERROR  Odoo RPC error: {'code': 200, 'message': 'Odoo Server Error'
+  rs.account.payment.cash                                         0  Real Estate Accounting Payment Cash
+  rs.account.payment.cash.line                                    0  Real Estate Accounting Payment Cash Line
+  rs.account.payment.check                                        0  Real Estate Accounting Payment Check
+  rs.account.payment.check.reconcile                             48  <-- has records  Real Estate Accounting Payment Check Reconcile
+  rs.account.payment.installment                               4212  <-- has records  Real Estate Accounting Payment Installment
+  rs.account.payment.installment.line                          4441  <-- has records  Real Estate Accounting Payment Installment Line
+  rs.account.payment.installment.search                           0  Real Estate Account Payment Search Wizard
+  rs.account.payment.reconcile                                  205  <-- has records  Real Estate Accounting Payment Reconcile
+  rs.account.payment.reconcile.line                               0  Real Estate Accounting Payment Reconcile
+  rs.account.payment.reconcile.request                            1  <-- has records  Real Estate Accounting Payment Reconcile Request
+
+  Models with records: 11
+    rs.account.check                                             5253
+    rs.account.payment.installment.line                          4441
+    rs.account.payment.installment                               4212
+    rs.account.check.action.line                                 2284
+    rs.account.check.action                                      1690
+    rs.account.payment.reconcile                                  205
+    rs.account.check.lot                                           77
+    rs.account.payment.check.reconcile                             48
+    account.reconcile.model                                         4
+    account.reconcile.model.line                                    2
+    rs.account.payment.reconcile.request                            1
+
+========================================================================
+  SECTION 3: Fields Inventory — models with records
+========================================================================
+
+------------------------------------------------------------------------
+  Model: rs.account.check  (records: 5253)
+------------------------------------------------------------------------
+
+  88 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Amount
+  bank_id                                   many2one      res.bank                             Check Bank
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  check_action_line                         one2many      rs.account.check.action.line         Check Action Lines
+  check_payment_id                          many2one      rs.account.payment.check             Check Payment
+  check_reconcile_id                        many2one      rs.account.payment.check.reconcile   Check Reconcile
+  collected_amount                          monetary                                           Collected Amount
+  company_currency_id                       many2one      res.currency                         Company Currency
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  currency_rate                             float                                              Currency Rate
+  date                                      date                                               Date
+  deposit_bank_id                           many2one      res.bank                             Deposit Bank
+  deposit_journal_id                        many2one      account.journal                      Deposit Journal
+  display_name                              char                                               Display Name
+  followup_ids                              one2many      rs.followup                          Follow Ups
+  handed_journal_id                         many2one      account.journal                      Handed Journal
+  has_message                               boolean                                            Has Message
+  hold_journal_id                           many2one      account.journal                      Hold Journal
+  id                                        integer                                            ID
+  installment_amount                        monetary                                           Amount
+  installment_currency_id                   many2one      res.currency                         Currency
+  installment_due_amount                    monetary                                           Due Amount
+  installment_ids                           many2many     rs.installment                       Installments
+  installment_name                          char                                               Installment Name
+  installment_paid_amount                   monetary                                           Paid Amount
+  installment_payment_type_id               many2one      rs.payment.type                      Payment Period
+  installment_type_id                       many2one      rs.installment.type                  Installment Type
+  is_manual                                 boolean                                            Manual Check
+  is_suspended                              boolean                                            Is Suspended
+  journal_id                                many2one      account.journal                      Journal
+  location_id                               many2one      rs.account.check.location            Location
+  lot_id                                    many2one      rs.account.check.lot                 Lot
+  maturity_date                             date                                               Maturity Date
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  move_count                                integer                                            Entries Count
+  move_ids                                  one2many      account.move                         Journal Entries
+  move_line_ids                             one2many      account.move.line                    Journal Items
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Check Number
+  note                                      text                                               Notes
+  partner_destination_account_id            many2one      account.account                      Partner Destination Account
+  partner_id                                many2one      res.partner                          Customer
+  penality_line                             one2many      rs.penalty                           Penalty Lines
+  penalty_count                             integer                                            Penalty Count
+  pending_penality_amount                   monetary                                           Pending Penality
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  position_id                               many2one      rs.account.check.position            Position
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  reservation_id                            many2one      rs.reservation                       Reservation
+  residual_amount                           monetary                                           Residual Amount
+  state                                     selection                                          Status
+  subaction_id                              many2one      rs.account.check.action.subaction    Subaction
+  tag_ids                                   many2many     check.tag                            Tags
+  termination_id                            many2one      rs.termination                       Termination
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Customer', 'type': 'many2one'})]
+    Monetary fields:                ['amount', 'collected_amount', 'residual_amount', 'installment_amount', 'installment_due_amount', 'installment_paid_amount', 'pending_penality_amount']
+    Float fields (balance?):        ['currency_rate']
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id', 'company_currency_id', 'currency_rate', 'installment_currency_id']
+    Payment-plan/term relation flds:['check_payment_id', 'check_reconcile_id', 'installment_payment_type_id']
+    rs.installment relation fields: ['installment_ids']
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+------------------------------------------------------------------------
+  Model: rs.account.payment.installment.line  (records: 4441)
+------------------------------------------------------------------------
+
+  67 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Amount
+  applied_discount_amount                   monetary                                           Applied Discount
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  date                                      datetime                                           Date
+  discount_amount                           monetary                                           Discount
+  discount_ids                              many2many     rs.discount                          Discounts
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  id                                        integer                                            ID
+  installment_amount                        monetary                                           Installment Amount
+  installment_date                          date                                               Installment Date
+  installment_due_amount                    monetary                                           Due Amount
+  installment_id                            many2one      rs.installment                       Installment
+  installment_paid_amount                   monetary                                           Paid Amount
+  journal_id                                many2one      account.journal                      Payment Method
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  move_id                                   many2one      account.move                         Journal Entry
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Label
+  net_amount                                monetary                                           Net Amount to Pay
+  note                                      text                                               Notes
+  outstanding_amount                        monetary                                           Outstanding Amount
+  paid_penalty_amount                       monetary                                           Paid Penalty
+  partner_id                                many2one      res.partner                          Customer
+  payment_id                                many2one      rs.account.payment.installment       Payment
+  penalty_amount                            monetary                                           Penalty
+  penalty_ids                               many2many     rs.penalty                           Penalties
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  reservation_id                            many2one      rs.reservation                       Reservation
+  state                                     selection                                          Status
+  termination_id                            many2one      rs.termination                       Termination
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Customer', 'type': 'many2one'})]
+    Monetary fields:                ['installment_amount', 'installment_paid_amount', 'installment_due_amount', 'amount', 'net_amount', 'outstanding_amount', 'discount_amount', 'applied_discount_amount', 'penalty_amount', 'paid_penalty_amount']
+    Float fields (balance?):        NONE
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id']
+    Payment-plan/term relation flds:['payment_id']
+    rs.installment relation fields: ['installment_id']
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+------------------------------------------------------------------------
+  Model: rs.account.payment.installment  (records: 4212)
+------------------------------------------------------------------------
+
+  73 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  account_id                                many2one      account.account                      Destination Account
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Amount to Pay
+  amount_company_currency                   monetary                                           Amount in Company Currency
+  amount_currency                           monetary                                           Amount in Currency
+  analytic_account_id                       many2one      account.analytic.account             Analytic Account
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  company_currency_id                       many2one      res.currency                         Company Currency
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  currency_rate                             float                                              Currency Rate
+  date                                      datetime                                           Date
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  has_penalty                               boolean                                            Has Penalty
+  id                                        integer                                            ID
+  journal_id                                many2one      account.journal                      Payment Method
+  label                                     char                                               Label
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  move_count                                integer                                            Entries Count
+  move_line_count                           integer                                            Entries Lines Count
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Name
+  note                                      text                                               Notes
+  outstanding_amount                        monetary                                           Outstanding
+  outstanding_amount_json                   json                                               Outstanding
+  outstanding_amount_preview                html                                               Outstanding Amount Preview
+  outstanding_type                          selection                                          Outstanding Type
+  partner_id                                many2one      res.partner                          Partner
+  payment_line                              one2many      rs.account.payment.installment.line  Payment Lines
+  payment_reconcile_request_id              many2one      rs.account.payment.reconcile.request  Reconcile Request
+  payment_type                              selection                                          Payment Type
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  receipt_number                            char                                               Receipt Number
+  reconcile_outstanding_amount              boolean                                            Reconcile Outstanding Amount
+  reconcile_payment_ids                     many2many     rs.account.payment.reconcile         Payments to Reconcile
+  reservation_id                            many2one      rs.reservation                       Reservation
+  state                                     selection                                          Status
+  termination_id                            many2one      rs.termination                       Termination
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_to_terminate                         boolean                                            Unit to be Terminated
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Partner', 'type': 'many2one'})]
+    Monetary fields:                ['amount', 'amount_currency', 'amount_company_currency', 'outstanding_amount']
+    Float fields (balance?):        ['currency_rate']
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id', 'company_currency_id', 'currency_rate', 'amount_currency', 'amount_company_currency']
+    Payment-plan/term relation flds:['payment_line', 'reconcile_payment_ids', 'payment_reconcile_request_id']
+    rs.installment relation fields: NONE
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+------------------------------------------------------------------------
+  Model: rs.account.check.action.line  (records: 2284)
+------------------------------------------------------------------------
+
+  46 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  action                                    selection                                          Action
+  bank_id                                   many2one      res.bank                             Check Bank
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  check_action_id                           many2one      rs.account.check.action              Check Action
+  check_amount                              monetary                                           Check Amount
+  check_date                                date                                               Check Date
+  check_id                                  many2one      rs.account.check                     Check
+  check_state                               selection                                          Status
+  collected_amount                          monetary                                           Collected Amount
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  current_check_state                       selection                                          Current Status
+  date                                      datetime                                           Date
+  deposit_bank_id                           many2one      res.bank                             Deposit Bank
+  destination_journal_id                    many2one      account.journal                      Destination Journal
+  display_name                              char                                               Display Name
+  id                                        integer                                            ID
+  installment_ids                           many2many     rs.installment                       Installments
+  journal_id                                many2one      account.journal                      Journal
+  location_id                               many2one      rs.account.check.location            Location
+  maturity_date                             date                                               Maturity Date
+  move_id                                   many2one      account.move                         Journal Entry
+  name                                      char                                               Name
+  partner_id                                many2one      res.partner                          Partner
+  penalty_amount                            monetary                                           Penalty
+  penalty_ids                               many2many     rs.penalty                           Penalties
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  position_id                               many2one      rs.account.check.position            Position
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  reservation_id                            many2one      rs.reservation                       Reservation
+  residual_amount                           monetary                                           Residual Amount
+  select                                    boolean                                            Select
+  state                                     selection                                          Status
+  subaction_id                              many2one      rs.account.check.action.subaction    Sub Action
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Partner', 'type': 'many2one'})]
+    Monetary fields:                ['check_amount', 'residual_amount', 'collected_amount', 'penalty_amount']
+    Float fields (balance?):        NONE
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id']
+    Payment-plan/term relation flds:NONE
+    rs.installment relation fields: ['installment_ids']
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+------------------------------------------------------------------------
+  Model: rs.account.check.action  (records: 1690)
+------------------------------------------------------------------------
+
+  57 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  action                                    selection                                          Action
+  action_line                               one2many      rs.account.check.action.line         Check Action Lines
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Amount
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  company_id                                many2one      res.company                          Company
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  date                                      datetime                                           Date
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  id                                        integer                                            ID
+  journal_id                                many2one      account.journal                      Journal
+  label                                     char                                               Label
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  move_count                                integer                                            Entries Count
+  move_line_count                           integer                                            Entries Lines Count
+  multi_select                              boolean                                            Multi Select
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Name
+  note                                      text                                               Notes
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  receipt_number                            char                                               Receipt Number
+  reject_reason                             text                                               Reject Reason
+  state                                     selection                                          Status
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_to_terminate                         boolean                                            Unit to be Terminated
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      NONE
+    Monetary fields:                ['amount']
+    Float fields (balance?):        NONE
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id']
+    Payment-plan/term relation flds:NONE
+    rs.installment relation fields: NONE
+    Reservation/contract flds:      NONE
+
+------------------------------------------------------------------------
+  Model: rs.account.payment.reconcile  (records: 205)
+------------------------------------------------------------------------
+
+  67 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  account_id                                many2one      account.account                      Destination Account
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Amount
+  analytic_account_id                       many2one      account.analytic.account             Analytic Account
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  company_currency_id                       many2one      res.currency                         Company Currency
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  currency_rate                             float                                              Currency Rate
+  date                                      datetime                                           Date
+  destination_journal_id                    many2one      account.journal                      Destination Journal
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  id                                        integer                                            ID
+  journal_id                                many2one      account.journal                      Payment Method
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  move_count                                integer                                            Entries Count
+  move_line_count                           integer                                            Entries Lines Count
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Name
+  note                                      text                                               Notes
+  partner_id                                many2one      res.partner                          Partner
+  payment_type                              selection                                          Payment Type
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  receipt_number                            char                                               Receipt Number
+  reconcile_line                            one2many      rs.account.payment.reconcile.line    Reconcile Lines
+  reconcile_request_id                      many2one      rs.account.payment.reconcile.request  Reconcile Request
+  reconciled_amount                         monetary                                           Reconciled Amount
+  reservation_id                            many2one      rs.reservation                       Reservation
+  residual_amount                           monetary                                           Residual Amount
+  state                                     selection                                          Status
+  termination_id                            many2one      rs.termination                       Termination
+  type                                      selection                                          Payment Type
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_to_terminate                         boolean                                            Unit to be Terminated
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Partner', 'type': 'many2one'})]
+    Monetary fields:                ['amount', 'reconciled_amount', 'residual_amount']
+    Float fields (balance?):        ['currency_rate']
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id', 'company_currency_id', 'currency_rate']
+    Payment-plan/term relation flds:['reconcile_line', 'reconcile_request_id']
+    rs.installment relation fields: NONE
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+------------------------------------------------------------------------
+  Model: rs.account.check.lot  (records: 77)
+------------------------------------------------------------------------
+
+  69 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Amount
+  bank_id                                   many2one      res.bank                             Check Bank
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  check_ids                                 one2many      rs.account.check                     Checks
+  check_number_start                        char                                               Start Checks Sequence
+  company_currency_id                       many2one      res.currency                         Company Currency
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  currency_rate                             float                                              Currency Rate
+  date                                      datetime                                           Date
+  deposit_bank_id                           many2one      res.bank                             Deposit Bank
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  id                                        integer                                            ID
+  installment_ids                           many2many     rs.installment                       Installments
+  installment_type_ids                      many2many     rs.installment.type                  Installment Type
+  journal_id                                many2one      account.journal                      Journal
+  label                                     char                                               Label
+  location_id                               many2one      rs.account.check.location            Location
+  manual_check_ids                          one2many      rs.account.check                     Manual Checks
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  move_count                                integer                                            Entries Count
+  move_line_count                           integer                                            Entries Lines Count
+  multi_owner                               boolean                                            Multi Owner
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Name
+  note                                      text                                               Notes
+  partner_id                                many2one      res.partner                          Customer
+  partner_ids                               many2many     res.partner                          Multi Owners
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  position_id                               many2one      rs.account.check.position            Position
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  reservation_id                            many2one      rs.reservation                       Reservation
+  state                                     selection                                          Status
+  termination_id                            many2one      rs.termination                       Termination
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_to_terminate                         boolean                                            Unit to be Terminated
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Customer', 'type': 'many2one'})]
+    Monetary fields:                ['amount']
+    Float fields (balance?):        ['currency_rate']
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id', 'company_currency_id', 'currency_rate']
+    Payment-plan/term relation flds:NONE
+    rs.installment relation fields: ['installment_ids']
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+------------------------------------------------------------------------
+  Model: rs.account.payment.check.reconcile  (records: 48)
+------------------------------------------------------------------------
+
+  74 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  account_id                                many2one      account.account                      Destination Account
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Check Amount
+  analytic_account_id                       many2one      account.analytic.account             Analytic Account
+  bank_id                                   many2one      res.bank                             Check Bank
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  check_date                                date                                               Check Date
+  check_ids                                 one2many      rs.account.check                     Checks
+  check_journal_id                          many2one      account.journal                      Constraint Journal
+  check_number_start                        char                                               Start Checks Sequence
+  check_owner_id                            many2one      res.partner                          Check Owner
+  commission_request_id                     many2one      commission.request                   Commission Request
+  company_currency_id                       many2one      res.currency                         Company Currency
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  currency_rate                             float                                              Currency Rate
+  date                                      datetime                                           Date
+  deposit_bank_id                           many2one      res.bank                             Deposit Bank
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  id                                        integer                                            ID
+  journal_id                                many2one      account.journal                      Payment Method
+  location_id                               many2one      rs.account.check.location            Location
+  maturity_date                             date                                               Maturity Date
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  move_count                                integer                                            Entries Count
+  move_line_count                           integer                                            Entries Lines Count
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Name
+  note                                      text                                               Notes
+  number_of_checks                          integer                                            No. Of Checks
+  partner_id                                many2one      res.partner                          Partner
+  payment_type                              selection                                          Payment Type
+  payment_type_id                           many2one      rs.payment.type                      Payment Type
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  position_id                               many2one      rs.account.check.position            Position
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  receipt_number                            char                                               Receipt Number
+  reservation_id                            many2one      rs.reservation                       Reservation
+  state                                     selection                                          Status
+  termination_id                            many2one      rs.termination                       Termination
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_to_terminate                         boolean                                            Unit to be Terminated
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Partner', 'type': 'many2one'}), ('check_owner_id', {'relation': 'res.partner', 'string': 'Check Owner', 'type': 'many2one'})]
+    Monetary fields:                ['amount']
+    Float fields (balance?):        ['currency_rate']
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id', 'company_currency_id', 'currency_rate']
+    Payment-plan/term relation flds:['payment_type_id']
+    rs.installment relation fields: NONE
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+------------------------------------------------------------------------
+  Model: account.reconcile.model  (records: 4)
+------------------------------------------------------------------------
+
+  55 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  active                                    boolean                                            Active
+  allow_payment_tolerance                   boolean                                            Payment Tolerance
+  auto_reconcile                            boolean                                            Auto-validate
+  company_id                                many2one      res.company                          Company
+  counterpart_type                          selection                                          Counterpart Type
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  decimal_separator                         char                                               Decimal Separator
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  id                                        integer                                            ID
+  line_ids                                  one2many      account.reconcile.model.line         Line
+  match_amount                              selection                                          Amount Condition
+  match_amount_max                          float                                              Amount Max Parameter
+  match_amount_min                          float                                              Amount Min Parameter
+  match_journal_ids                         many2many     account.journal                      Journals Availability
+  match_label                               selection                                          Label
+  match_label_param                         char                                               Label Parameter
+  match_nature                              selection                                          Amount Type
+  match_note                                selection                                          Note
+  match_note_param                          char                                               Note Parameter
+  match_partner                             boolean                                            Partner is Set
+  match_partner_category_ids                many2many     res.partner.category                 Matching categories
+  match_partner_ids                         many2many     res.partner                          Matching partners
+  match_same_currency                       boolean                                            Same Currency
+  match_text_location_label                 boolean                                            Match Text Location Label
+  match_text_location_note                  boolean                                            Match Text Location Note
+  match_text_location_reference             boolean                                            Match Text Location Reference
+  match_transaction_type                    selection                                          Transaction Type
+  match_transaction_type_param              char                                               Transaction Type Parameter
+  matching_order                            selection                                          Matching Order
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  name                                      char                                               Name
+  number_entries                            integer                                            Number of entries related to this model
+  partner_mapping_line_ids                  one2many      account.reconcile.model.partner.mapping  Partner Mapping Lines
+  past_months_limit                         integer                                            Search Months Limit
+  payment_tolerance_param                   float                                              Gap
+  payment_tolerance_type                    selection                                          Payment Tolerance Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  rule_type                                 selection                                          Type
+  sequence                                  integer                                            Sequence
+  show_decimal_separator                    boolean                                            Show Decimal Separator
+  to_check                                  boolean                                            To Check
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      NONE
+    Monetary fields:                NONE
+    Float fields (balance?):        ['match_amount_min', 'match_amount_max', 'payment_tolerance_param']
+    State/status fields:            NONE
+    Currency fields:                ['match_same_currency']
+    Payment-plan/term relation flds:NONE
+    rs.installment relation fields: NONE
+    Reservation/contract flds:      NONE
+
+------------------------------------------------------------------------
+  Model: account.reconcile.model.line  (records: 2)
+------------------------------------------------------------------------
+
+  24 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  account_id                                many2one      account.account                      Account
+  allow_payment_tolerance                   boolean                                            Payment Tolerance
+  amount                                    float                                              Float Amount
+  amount_string                             char                                               Amount
+  amount_type                               selection                                          Amount Type
+  analytic_distribution                     json                                               Analytic Distribution
+  analytic_precision                        integer                                            Analytic Precision
+  company_id                                many2one      res.company                          Company
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  display_name                              char                                               Display Name
+  distribution_analytic_account_ids         many2many     account.analytic.account             Distribution Analytic Account
+  force_tax_included                        boolean                                            Tax Included in Price
+  id                                        integer                                            ID
+  journal_id                                many2one      account.journal                      Journal
+  label                                     char                                               Journal Item Label
+  model_id                                  many2one      account.reconcile.model              Model
+  payment_tolerance_param                   float                                              Gap
+  rule_type                                 selection                                          Type
+  sequence                                  integer                                            Sequence
+  show_force_tax_included                   boolean                                            Show Force Tax Included
+  tax_ids                                   many2many     account.tax                          Taxes
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      NONE
+    Monetary fields:                NONE
+    Float fields (balance?):        ['payment_tolerance_param', 'amount']
+    State/status fields:            NONE
+    Currency fields:                NONE
+    Payment-plan/term relation flds:NONE
+    rs.installment relation fields: NONE
+    Reservation/contract flds:      NONE
+
+------------------------------------------------------------------------
+  Model: rs.account.payment.reconcile.request  (records: 1)
+------------------------------------------------------------------------
+
+  62 fields total.
+
+  FIELD                                     TYPE          RELATION                             LABEL
+  ----------------------------------------  ------------  -----------------------------------  ------------------------------
+  account_id                                many2one      account.account                      Destination Account
+  activity_calendar_event_id                many2one      calendar.event                       Next Activity Calendar Event
+  activity_date_deadline                    date                                               Next Activity Deadline
+  activity_exception_decoration             selection                                          Activity Exception Decoration
+  activity_exception_icon                   char                                               Icon
+  activity_ids                              one2many      mail.activity                        Activities
+  activity_state                            selection                                          Activity State
+  activity_summary                          char                                               Next Activity Summary
+  activity_type_icon                        char                                               Activity Type Icon
+  activity_type_id                          many2one      mail.activity.type                   Next Activity Type
+  activity_user_id                          many2one      res.users                            Responsible User
+  amount                                    monetary                                           Amount
+  amount_total                              monetary                                           Total Amount
+  analytic_account_id                       many2one      account.analytic.account             Analytic Account
+  building_id                               many2one      rs.structure.building                Building
+  category_ids                              many2many     rs.structure.type                    Category
+  company_currency_id                       many2one      res.currency                         Company Currency
+  company_id                                many2one      res.company                          Company
+  contract_id                               many2one      rs.contract                          Contract
+  create_date                               datetime                                           Created on
+  create_uid                                many2one      res.users                            Created by
+  currency_id                               many2one      res.currency                         Currency
+  currency_rate                             float                                              Currency Rate
+  date                                      datetime                                           Date
+  display_name                              char                                               Display Name
+  has_message                               boolean                                            Has Message
+  id                                        integer                                            ID
+  journal_id                                many2one      account.journal                      Payment Method
+  message_attachment_count                  integer                                            Attachment Count
+  message_follower_ids                      one2many      mail.followers                       Followers
+  message_has_error                         boolean                                            Message Delivery error
+  message_has_error_counter                 integer                                            Number of errors
+  message_has_sms_error                     boolean                                            SMS Delivery error
+  message_ids                               one2many      mail.message                         Messages
+  message_is_follower                       boolean                                            Is Follower
+  message_needaction                        boolean                                            Action Needed
+  message_needaction_counter                integer                                            Number of Actions
+  message_partner_ids                       many2many     res.partner                          Followers (Partners)
+  my_activity_date_deadline                 date                                               My Activity Deadline
+  name                                      char                                               Name
+  note                                      text                                               Notes
+  partner_id                                many2one      res.partner                          Partner
+  payment_installment_count                 integer                                            Installments Count
+  payment_type                              selection                                          Payment Type
+  phase_id                                  many2one      rs.structure.phase                   Phase
+  project_id                                many2one      rs.structure.project                 Project
+  project_type_ids                          many2many     rs.structure.project.type            Project Type
+  rating_ids                                one2many      rating.rating                        Ratings
+  receipt_number                            char                                               Receipt Number
+  reconcile_payment_ids                     one2many      rs.account.payment.reconcile         Reconcile Payments
+  reservation_id                            many2one      rs.reservation                       Reservation
+  state                                     selection                                          Status
+  termination_id                            many2one      rs.termination                       Termination
+  unit_finishing_type_id                    many2one      rs.structure.unit.finishing.type     Finishing
+  unit_id                                   many2one      rs.structure.unit                    Unit
+  unit_to_terminate                         boolean                                            Unit to be Terminated
+  unit_type_id                              many2one      rs.structure.unit.type               Unit Type
+  unit_view_id                              many2one      rs.structure.unit.view               View
+  website_message_ids                       one2many      mail.message                         Website Messages
+  write_date                                datetime                                           Last Updated on
+  write_uid                                 many2one      res.users                            Last Updated by
+  zone_id                                   many2one      rs.structure.zone                    Zone
+
+  -- Fields of discovery interest --
+    Partner (customer) fields:      [('partner_id', {'relation': 'res.partner', 'string': 'Partner', 'type': 'many2one'})]
+    Monetary fields:                ['amount', 'amount_total']
+    Float fields (balance?):        ['currency_rate']
+    State/status fields:            ['state']
+    Currency fields:                ['currency_id', 'company_currency_id', 'currency_rate']
+    Payment-plan/term relation flds:['reconcile_payment_ids']
+    rs.installment relation fields: NONE
+    Reservation/contract flds:      ['contract_id', 'reservation_id']
+
+========================================================================
+  SECTION 4: State Machine — read_group by state/status
+========================================================================
+
+  Model: rs.account.check  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  deposited                           2800
+  holding                              840
+  approved                             780
+  customer_return                      551
+  draft                                231
+  returned                              47
+  cancel                                 4
+
+  Model: rs.account.payment.installment.line  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  post                                4437
+  cancel                                 4
+
+  Model: rs.account.payment.installment  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  post                                4201
+  draft                                  7
+  cancel                                 4
+
+  Model: rs.account.check.action.line  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  post                                2263
+  cancel                                16
+  draft                                  5
+
+  Model: rs.account.check.action  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  post                                1658
+  cancel                                16
+  draft                                 13
+  scheduled                              3
+
+  Model: rs.account.payment.reconcile  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  post                                 205
+
+  Model: rs.account.check.lot  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  validate                              63
+  draft                                 14
+
+  Model: rs.account.payment.check.reconcile  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  post                                  41
+  draft                                  7
+
+  Model: rs.account.payment.reconcile.request  field: 'state'
+
+  STATE VALUE                        COUNT
+  ------------------------------  --------
+  new                                    1
+
+========================================================================
+  SECTION 5: Linkage Summary (derived from fields_get, no extra RPCs)
+========================================================================
+
+  Model: rs.account.check
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    installment_ids                           many2many    -> rs.installment                                 [Installment]  'Installments'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Customer'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+  Model: rs.account.payment.installment.line
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    installment_id                            many2one     -> rs.installment                                 [Installment]  'Installment'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Customer'
+    payment_id                                many2one     -> rs.account.payment.installment                 [RS Payment Installment]  'Payment'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+  Model: rs.account.payment.installment
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Partner'
+    payment_line                              one2many     -> rs.account.payment.installment.line            [RS Payment Installment Line]  'Payment Lines'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+  Model: rs.account.check.action.line
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    installment_ids                           many2many    -> rs.installment                                 [Installment]  'Installments'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Partner'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+  Model: rs.account.check.action
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+
+  Model: rs.account.payment.reconcile
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Partner'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+  Model: rs.account.check.lot
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    installment_ids                           many2many    -> rs.installment                                 [Installment]  'Installments'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Customer'
+    partner_ids                               many2many    -> res.partner                                    [Customer]  'Multi Owners'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+  Model: rs.account.payment.check.reconcile
+    check_owner_id                            many2one     -> res.partner                                    [Customer]  'Check Owner'
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Partner'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+  Model: account.reconcile.model
+    match_partner_ids                         many2many    -> res.partner                                    [Customer]  'Matching partners'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+
+  Model: account.reconcile.model.line
+    (no links to key models found)
+
+  Model: rs.account.payment.reconcile.request
+    contract_id                               many2one     -> rs.contract                                    [Contract]  'Contract'
+    message_partner_ids                       many2many    -> res.partner                                    [Customer]  'Followers (Partners)'
+    partner_id                                many2one     -> res.partner                                    [Customer]  'Partner'
+    reservation_id                            many2one     -> rs.reservation                                 [Reservation]  'Reservation'
+
+========================================================================
+  SECTION 6: Sample Records + Balance Field / Currency / Sign Analysis
+========================================================================
+
+  Context: rs.installment uses EGP (inferred from rs.installment monetary fields).
+  We verify whether the reconcile balance field is monetary, has a
+  currency_id, and whether that currency is EGP — required for a
+  correct sum of (installments_paid + reconcile_balance) per §15.
+
+  Primary candidate (highest record count): rs.account.check  (5253 records)
+
+  Monetary fields on rs.account.check: ['amount', 'collected_amount', 'residual_amount', 'installment_amount', 'installment_due_amount', 'installment_paid_amount', 'pending_penality_amount']
+  Float fields on rs.account.check:    ['currency_rate']
+  Currency many2one fields:     ['currency_id', 'company_currency_id', 'installment_currency_id']
+
+  Fetching 3 sample records (fields: ['id', 'amount', 'collected_amount', 'residual_amount', 'installment_amount', 'installment_due_amount', 'installment_paid_amount', 'pending_penality_amount', 'currency_rate', 'currency_id', 'company_currency_id', 'installment_currency_id', 'state', 'partner_id']) ...
+
+  Sample records (sanitized — PII fields redacted):
+
+  Record 1:
+    id                                        20601
+    amount                                    19200.0
+    collected_amount                          19200.0
+    residual_amount                           0.0
+    installment_amount                        19200.0
+    installment_due_amount                    0.0
+    installment_paid_amount                   19200.0
+    pending_penality_amount                   0.0
+    currency_rate                             1.0
+    currency_id                               [74, 'EGP']
+    company_currency_id                       [74, 'EGP']
+    installment_currency_id                   [74, 'EGP']
+    state                                     approved
+    partner_id                                [REDACTED]
+
+  Record 2:
+    id                                        20602
+    amount                                    19200.0
+    collected_amount                          19200.0
+    residual_amount                           0.0
+    installment_amount                        19200.0
+    installment_due_amount                    0.0
+    installment_paid_amount                   19200.0
+    pending_penality_amount                   0.0
+    currency_rate                             1.0
+    currency_id                               [74, 'EGP']
+    company_currency_id                       [74, 'EGP']
+    installment_currency_id                   [74, 'EGP']
+    state                                     approved
+    partner_id                                [REDACTED]
+
+  Record 3:
+    id                                        20603
+    amount                                    19200.0
+    collected_amount                          19200.0
+    residual_amount                           0.0
+    installment_amount                        19200.0
+    installment_due_amount                    0.0
+    installment_paid_amount                   19200.0
+    pending_penality_amount                   0.0
+    currency_rate                             1.0
+    currency_id                               [74, 'EGP']
+    company_currency_id                       [74, 'EGP']
+    installment_currency_id                   [74, 'EGP']
+    state                                     approved
+    partner_id                                [REDACTED]
+
+------------------------------------------------------------------------
+  Balance field analysis:
+------------------------------------------------------------------------
+
+  Balance field type: MONETARY (field(s): ['amount', 'collected_amount', 'residual_amount', 'installment_amount', 'installment_due_amount', 'installment_paid_amount', 'pending_penality_amount'])
+  Monetary fields in Odoo are paired with a currency_id.
+
+  Currency values in samples: {'EGP'}
+  MATCH: currency is EGP — consistent with rs.installment. [HOMOGENEOUS]
+
+  Sign analysis (positive = 'funds held for customer'; negative = ambiguous):
+    record id=20601  amount=19200.0  [positive]
+    record id=20601  collected_amount=19200.0  [positive]
+    record id=20601  residual_amount=0.0  [zero]
+    record id=20601  installment_amount=19200.0  [positive]
+    record id=20601  installment_due_amount=0.0  [zero]
+    record id=20601  installment_paid_amount=19200.0  [positive]
+    record id=20601  pending_penality_amount=0.0  [zero]
+    record id=20601  currency_rate=1.0  [positive]
+    record id=20602  amount=19200.0  [positive]
+    record id=20602  collected_amount=19200.0  [positive]
+    record id=20602  residual_amount=0.0  [zero]
+    record id=20602  installment_amount=19200.0  [positive]
+    record id=20602  installment_due_amount=0.0  [zero]
+    record id=20602  installment_paid_amount=19200.0  [positive]
+    record id=20602  pending_penality_amount=0.0  [zero]
+    record id=20602  currency_rate=1.0  [positive]
+    record id=20603  amount=19200.0  [positive]
+    record id=20603  collected_amount=19200.0  [positive]
+    record id=20603  residual_amount=0.0  [zero]
+    record id=20603  installment_amount=19200.0  [positive]
+    record id=20603  installment_due_amount=0.0  [zero]
+    record id=20603  installment_paid_amount=19200.0  [positive]
+    record id=20603  pending_penality_amount=0.0  [zero]
+    record id=20603  currency_rate=1.0  [positive]
+
+  Aggregate check on 'amount':
+    positive (amount > 0):  5251
+    zero     (amount = 0):  2
+    negative (amount < 0):  0
+    OK: no negative values found — balance is always credit (funds held).
+
+========================================================================
+  SECTION 7: Open Questions — items requiring Khaled review
+========================================================================
+
+  OQ2: Multiple models have records (account.reconcile.model, account.reconcile.model.line, rs.account.check, rs.account.check.action, rs.account.check.action.line, rs.account.check.lot, rs.account.payment.check.reconcile, rs.account.payment.installment, rs.account.payment.installment.line, rs.account.payment.reconcile, rs.account.payment.reconcile.request). It is unclear which is the primary wallet model and which are line/request tables. Khaled should confirm the primary model by navigating to it in the Odoo UI (RS Accounting → Reconcile menu, if one exists).
+
+------------------------------------------------------------------------
+  GATE — STOP
+------------------------------------------------------------------------
+
+  Discovery output is printed above and saved to the .txt file.
+  No feature code has been written. No Module 3 design has been assumed.
+
+  ACTION REQUIRED from Khaled before any Module 3 work begins:
+    1. Review the candidate models and record counts (Section 2).
+    2. Confirm which model is the primary wallet model (OQ2 if raised).
+    3. Confirm the balance field name and that it is EGP-denominated (OQ3/OQ4).
+    4. Confirm whether the Down Payment linkage is on this model or elsewhere (OQ6).
+    5. Review any additional open questions listed above.
+
+  Only after Khaled confirms the model, balance field, and currency alignment
+  will Module 3 design and implementation begin.
+
+
+  All read-only. No data modified in Odoo.

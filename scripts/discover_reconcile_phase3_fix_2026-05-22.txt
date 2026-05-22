@@ -1,0 +1,313 @@
+========================================================================
+  Phase 3 Fix: rs.account.payment.reconcile — targeted analysis
+  Run date:   2026-05-22
+  Odoo URL:   https://laverde.odoo.com/jsonrpc
+  Target:     rs.account.payment.reconcile  (by name, not by record count)
+  Fixes:      Section 6 error in discover_reconcile_phase3.py
+  Closes:     OQ1 (negative residual), OQ3 (type field semantics)
+  Cost:       $0.00  (no OpenAI calls)
+========================================================================
+
+[AUTH] Authenticating...
+  OK uid=1947
+
+========================================================================
+  FIX-1: Sample Records — rs.account.payment.reconcile  (limit=3, order=id asc)
+========================================================================
+
+  3 records returned.
+
+  Record 1:
+    account_id                                     [1337, '13410000 امانات عملاء شئون قانونية']
+    activity_calendar_event_id                     False
+    activity_date_deadline                         False
+    activity_exception_decoration                  False
+    activity_exception_icon                        False
+    activity_ids                                   []
+    activity_state                                 False
+    activity_summary                               False
+    activity_type_icon                             False
+    activity_type_id                               False
+    activity_user_id                               False
+    amount                                         6000.0
+    analytic_account_id                            False
+    building_id                                    False
+    category_ids                                   []
+    company_currency_id                            [74, 'EGP']
+    company_id                                     [1, 'La Verde']
+    contract_id                                    False
+    create_date                                    2026-05-17 08:53:47
+    create_uid                                     [1876, 'Ahmed Ibrahim']
+    currency_id                                    [74, 'EGP']
+    currency_rate                                  1.0
+    date                                           2018-12-05 22:00:00
+    destination_journal_id                         False
+    display_name                                   [REDACTED]
+    has_message                                    True
+    id                                             27
+    journal_id                                     [348, 'خزينة الإدارة الرئيسية- جنيه مصري']
+    message_attachment_count                       0
+    message_follower_ids                           [318904]
+    message_has_error                              False
+    message_has_error_counter                      0
+    message_has_sms_error                          False
+    message_ids                                    [2618249, 2618247, 2618246]
+    message_is_follower                            False
+    message_needaction                             False
+    message_needaction_counter                     0
+    message_partner_ids                            [REDACTED]
+    move_count                                     1
+    move_line_count                                2
+    my_activity_date_deadline                      False
+    name                                           [REDACTED]
+    note                                           False
+    partner_id                                     [REDACTED]
+    payment_type                                   inbound
+    phase_id                                       False
+    project_id                                     False
+    project_type_ids                               []
+    rating_ids                                     []
+    receipt_number                                 False
+    reconcile_line                                 []
+    reconcile_request_id                           [2, 'RR/2026/05/00002']
+    reconciled_amount                              0.0
+    reservation_id                                 [REDACTED]
+    residual_amount                                6000.0
+    state                                          post
+    termination_id                                 False
+    type                                           advance_payment
+    unit_finishing_type_id                         False
+    unit_id                                        False
+    unit_to_terminate                              False
+    unit_type_id                                   False
+    unit_view_id                                   False
+    website_message_ids                            []
+    write_date                                     2026-05-17 14:48:27
+    write_uid                                      [1876, 'Ahmed Ibrahim']
+    zone_id                                        False
+
+  Record 2:
+    account_id                                     [1337, '13410000 امانات عملاء شئون قانونية']
+    activity_calendar_event_id                     False
+    activity_date_deadline                         False
+    activity_exception_decoration                  False
+    activity_exception_icon                        False
+    activity_ids                                   []
+    activity_state                                 False
+    activity_summary                               False
+    activity_type_icon                             False
+    activity_type_id                               False
+    activity_user_id                               False
+    amount                                         150480.0
+    analytic_account_id                            False
+    building_id                                    False
+    category_ids                                   []
+    company_currency_id                            [74, 'EGP']
+    company_id                                     [1, 'La Verde']
+    contract_id                                    False
+    create_date                                    2026-05-17 08:57:28
+    create_uid                                     [1876, 'Ahmed Ibrahim']
+    currency_id                                    [74, 'EGP']
+    currency_rate                                  1.0
+    date                                           2018-12-09 22:00:00
+    destination_journal_id                         False
+    display_name                                   [REDACTED]
+    has_message                                    True
+    id                                             28
+    journal_id                                     [348, 'خزينة الإدارة الرئيسية- جنيه مصري']
+    message_attachment_count                       0
+    message_follower_ids                           [318906]
+    message_has_error                              False
+    message_has_error_counter                      0
+    message_has_sms_error                          False
+    message_ids                                    [2618299, 2618297, 2618296]
+    message_is_follower                            False
+    message_needaction                             False
+    message_needaction_counter                     0
+    message_partner_ids                            [REDACTED]
+    move_count                                     1
+    move_line_count                                2
+    my_activity_date_deadline                      False
+    name                                           [REDACTED]
+    note                                           False
+    partner_id                                     [REDACTED]
+    payment_type                                   inbound
+    phase_id                                       False
+    project_id                                     False
+    project_type_ids                               []
+    rating_ids                                     []
+    receipt_number                                 False
+    reconcile_line                                 []
+    reconcile_request_id                           [2, 'RR/2026/05/00002']
+    reconciled_amount                              0.0
+    reservation_id                                 [REDACTED]
+    residual_amount                                150480.0
+    state                                          post
+    termination_id                                 False
+    type                                           advance_payment
+    unit_finishing_type_id                         False
+    unit_id                                        False
+    unit_to_terminate                              False
+    unit_type_id                                   False
+    unit_view_id                                   False
+    website_message_ids                            []
+    write_date                                     2026-05-17 14:48:27
+    write_uid                                      [1876, 'Ahmed Ibrahim']
+    zone_id                                        False
+
+  Record 3:
+    account_id                                     [1337, '13410000 امانات عملاء شئون قانونية']
+    activity_calendar_event_id                     False
+    activity_date_deadline                         False
+    activity_exception_decoration                  False
+    activity_exception_icon                        False
+    activity_ids                                   []
+    activity_state                                 False
+    activity_summary                               False
+    activity_type_icon                             False
+    activity_type_id                               False
+    activity_user_id                               False
+    amount                                         100000.0
+    analytic_account_id                            False
+    building_id                                    False
+    category_ids                                   []
+    company_currency_id                            [74, 'EGP']
+    company_id                                     [1, 'La Verde']
+    contract_id                                    False
+    create_date                                    2026-05-17 09:09:04
+    create_uid                                     [1876, 'Ahmed Ibrahim']
+    currency_id                                    [74, 'EGP']
+    currency_rate                                  1.0
+    date                                           2020-12-16 22:00:00
+    destination_journal_id                         False
+    display_name                                   [REDACTED]
+    has_message                                    True
+    id                                             29
+    journal_id                                     [395, 'NBE-EGP-0753071042631401016']
+    message_attachment_count                       0
+    message_follower_ids                           [318909]
+    message_has_error                              False
+    message_has_error_counter                      0
+    message_has_sms_error                          False
+    message_ids                                    [2618477, 2618475, 2618474]
+    message_is_follower                            False
+    message_needaction                             False
+    message_needaction_counter                     0
+    message_partner_ids                            [REDACTED]
+    move_count                                     1
+    move_line_count                                2
+    my_activity_date_deadline                      False
+    name                                           [REDACTED]
+    note                                           False
+    partner_id                                     [REDACTED]
+    payment_type                                   inbound
+    phase_id                                       False
+    project_id                                     False
+    project_type_ids                               []
+    rating_ids                                     []
+    receipt_number                                 False
+    reconcile_line                                 []
+    reconcile_request_id                           [2, 'RR/2026/05/00002']
+    reconciled_amount                              0.0
+    reservation_id                                 [REDACTED]
+    residual_amount                                100000.0
+    state                                          post
+    termination_id                                 False
+    type                                           advance_payment
+    unit_finishing_type_id                         False
+    unit_id                                        False
+    unit_to_terminate                              False
+    unit_type_id                                   False
+    unit_view_id                                   False
+    website_message_ids                            []
+    write_date                                     2026-05-17 14:48:27
+    write_uid                                      [1876, 'Ahmed Ibrahim']
+    zone_id                                        False
+
+
+========================================================================
+  FIX-2: Balance Field Type Confirmation — fields_get result
+========================================================================
+
+  FIELD                           TYPE          LABEL                           CURRENCY RELATION
+  ------------------------------  ------------  ------------------------------  --------------------
+  amount                          monetary      Amount                          
+  reconciled_amount               monetary      Reconciled Amount               
+  residual_amount                 monetary      Residual Amount                 
+
+  Currency-related fields on rs.account.payment.reconcile:
+  FIELD                           TYPE          RELATION
+  ------------------------------  ------------  ------------------------------
+  company_currency_id             many2one      res.currency
+  currency_id                     many2one      res.currency
+  currency_rate                   float         
+
+========================================================================
+  FIX-3: OQ1 — Negative residual_amount check
+========================================================================
+
+  Domain: state = 'post'  (total: 205 records)
+
+  residual_amount > 0  (funds still held):       198
+  residual_amount = 0  (fully applied / zero balance):  0
+  residual_amount < 0  (over-applied / debit):   7
+
+  !! OQ1 OPEN: 7 records have residual_amount < 0.
+  Negative wallet balance exists. Investigate before using in any KPI sum.
+
+========================================================================
+  FIX-4: OQ3 — 'type' and 'payment_type' field semantics
+========================================================================
+
+------------------------------------------------------------------------
+  Field: 'type'
+------------------------------------------------------------------------
+  Label: 'Payment Type'  Type: selection
+
+  Selection values from fields_get:
+  VALUE                           DISPLAY LABEL
+  ------------------------------  ------------------------------
+  advance_payment                 Advance Payment
+  outstanding_payment             Outstanding Payment
+  termination_payment             Termination Payment
+
+  Live distribution (read_group groupby='type'):
+  VALUE                              COUNT
+  ------------------------------  --------
+  advance_payment                      205
+
+------------------------------------------------------------------------
+  Field: 'payment_type'
+------------------------------------------------------------------------
+  Label: 'Payment Type'  Type: selection
+
+  Selection values from fields_get:
+  VALUE                           DISPLAY LABEL
+  ------------------------------  ------------------------------
+  outbound                        Send Money
+  inbound                         Receive Money
+
+  Live distribution (read_group groupby='payment_type'):
+  VALUE                              COUNT
+  ------------------------------  --------
+  inbound                              205
+
+------------------------------------------------------------------------
+  Interpretation note:
+------------------------------------------------------------------------
+
+  §15 defines two reconcile scenarios:
+    Scenario A — Initial reservation (حجز مبدئي): customer pays before
+                 choosing a unit. Funds held until plan is created.
+    Scenario B — Ownership transfer (نقل ملكية): funds from old owner
+                 moved to new owner's wallet via reconcile.
+
+  If 'type' or 'payment_type' has exactly 2 values that map to these
+  two scenarios, the field can be used to distinguish them in future
+  KPI segmentation. If the values don't map cleanly, both scenarios
+  may share the same type value — and distinction would require looking
+  at whether the record has a reservation_id vs. a termination_id.
+
+
+  All read-only. No data modified in Odoo.
+  RPCs used: ~10 (fields_get ×2, search_read ×1, search_count ×4, read_group ×2)
