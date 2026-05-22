@@ -27,6 +27,13 @@ class LateUncollectedResponse(BaseModel):
     data_quality_warning: str | None
 
 
+class TypeBreakdownEntry(BaseModel):
+    installment_type_id: int
+    installment_type_name_ar: str
+    amount: float
+    record_count: int
+
+
 class ForecastBucket(BaseModel):
     bucket: Literal["this_month", "this_quarter", "this_half", "this_year"]
     period_start: date
@@ -38,6 +45,7 @@ class ForecastBucket(BaseModel):
     cheques_record_count: int | None  # int >= 0 from Stage 5 (Decision 14.6); was None under Alt B
     drill_down_domain: list  # well-formed Odoo domain
     cheques_drill_down_domain: list | None  # null under Alternative B (Decision 9.1)
+    type_breakdown: list[TypeBreakdownEntry] = []  # by-type split, sorted amount desc (Stage 7, Choice 4أ)
 
 
 class ExpectedCollectionsForecastResponse(BaseModel):
@@ -82,6 +90,8 @@ class InstallmentRow(BaseModel):
     project_id: int
     project_name_ar: str
     project_name_en: str
+    installment_type_id: int
+    installment_type_name_ar: str
     date: str
     amount: float
     due_amount: float

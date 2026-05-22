@@ -23,6 +23,7 @@ from backend.core.exceptions import OdooQueryError
 from backend.shared.odoo.client import OdooClient
 from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.services.kpi_service import _compute_bucket_ends
+from backend.modules.collections.installment_type_names import get_type_name_ar
 
 _MODEL = "rs.installment"
 _LA_VERDE_TZ = ZoneInfo("Africa/Cairo")
@@ -50,10 +51,12 @@ _NO_PROJECT_NAME_AR = "بدون مشروع"
 _NO_PROJECT_NAME_EN = "No Project Assigned"
 
 # All fields required to populate InstallmentRow (includes late_amount source fields).
+# installment_type_id added Stage 7 — rides the existing search_read, zero extra RPCs.
 _DRILL_FIELDS: list[str] = [
     "id", "date", "amount", "due_amount",
     "paid_amount", "x_studio_actual_paid_amount",
     "payment_state", "partner_id", "project_id",
+    "installment_type_id",
 ]
 
 _DEFAULT_PAGE_SIZE = 50
@@ -108,26 +111,32 @@ def _normalize_sort(sort_by: str, sort_dir: str) -> tuple[str, str]:
 # ── Row serialization ─────────────────────────────────────────────────────────
 
 def _serialize_row(rec: dict) -> dict:
-    partner = rec.get("partner_id")
-    project = rec.get("project_id")
-    pid     = int(project[0]) if isinstance(project, (list, tuple)) and project else 0
-    amount  = float(rec.get("amount") or 0.0)
-    actual  = float(rec.get("x_studio_actual_paid_amount") or 0.0)
-    paid    = float(rec.get("paid_amount") or 0.0)
+    partner  = rec.get("partner_id")
+    project  = rec.get("project_id")
+    inst_typ = rec.get("installment_type_id")
+    pid      = int(project[0]) if isinstance(project, (list, tuple)) and project else 0
+    type_id  = int(inst_typ[0]) if isinstance(inst_typ, (list, tuple)) and inst_typ else (
+                   int(inst_typ) if inst_typ else 0
+               )
+    amount   = float(rec.get("amount") or 0.0)
+    actual   = float(rec.get("x_studio_actual_paid_amount") or 0.0)
+    paid     = float(rec.get("paid_amount") or 0.0)
     return {
-        "record_id":          int(rec["id"]),
-        "customer_name":      (partner[1] if isinstance(partner, (list, tuple)) and partner else ""),
-        "project_id":         pid,
-        "project_name_ar":    _PROJECT_NAMES_AR.get(pid, ""),
-        "project_name_en":    _PROJECT_NAMES_EN.get(pid, ""),
-        "date":               str(rec.get("date") or ""),
-        "amount":             amount,
-        "due_amount":         float(rec.get("due_amount") or 0.0),
-        "paid_amount":        paid,
-        "actual_paid_amount": actual,
-        "pending_cheque":     max(paid - actual, 0.0),
-        "payment_state":      str(rec.get("payment_state") or ""),
-        "late_amount":        amount - actual,  # Decision 14.8: PATH A per-record
+        "record_id":                int(rec["id"]),
+        "customer_name":            (partner[1] if isinstance(partner, (list, tuple)) and partner else ""),
+        "project_id":               pid,
+        "project_name_ar":          _PROJECT_NAMES_AR.get(pid, ""),
+        "project_name_en":          _PROJECT_NAMES_EN.get(pid, ""),
+        "installment_type_id":      type_id,
+        "installment_type_name_ar": get_type_name_ar(type_id),
+        "date":                     str(rec.get("date") or ""),
+        "amount":                   amount,
+        "due_amount":               float(rec.get("due_amount") or 0.0),
+        "paid_amount":              paid,
+        "actual_paid_amount":       actual,
+        "pending_cheque":           max(paid - actual, 0.0),
+        "payment_state":            str(rec.get("payment_state") or ""),
+        "late_amount":              amount - actual,  # Decision 14.8: PATH A per-record
     }
 
 

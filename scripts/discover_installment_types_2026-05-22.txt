@@ -1,0 +1,98 @@
+========================================================================
+  Stage 7 — Gate 1 Discovery: rs.installment.type
+  Run date: 2026-05-22
+  Odoo URL: https://laverde.odoo.com/jsonrpc
+========================================================================
+
+[AUTH] Authenticating...
+  OK uid=1947
+
+========================================================================
+  SECTION 1: Field Inventory — rs.installment.type
+========================================================================
+
+  10 fields found on rs.installment.type:
+
+  FIELD                               TYPE          LABEL
+  ----------------------------------- ------------  -----------------------------------
+  category_code                       char          Category Code
+  category_id                         many2one      Category
+  create_date                         datetime      Created on
+  create_uid                          many2one      Created by
+  display_name                        char          Display Name
+  facility_id                         many2one      Facility
+  id                                  integer       ID
+  name                                char          Name
+  write_date                          datetime      Last Updated on
+  write_uid                           many2one      Last Updated by
+
+  has 'code' field:     False
+  has 'sequence' field: False
+
+========================================================================
+  SECTION 2: Record Count — rs.installment.type
+========================================================================
+
+  Total records in rs.installment.type: 13
+  [OK] Matches Phase 2 finding of 13 types.
+
+========================================================================
+  SECTION 3: Full Type List — rs.installment.type
+========================================================================
+
+  Fetched 13 records (fields: ['id', 'name', 'category_code', 'category_id'], order: id asc)
+
+  ID    NAME                   CATEGORY_CODE  CATEGORY_ID           
+  ----  ---------------------  -------------  ----------------------
+  1     Reservation            RES            [1, 'Reservation']    
+  2     Down Payment           DNP            [2, 'Down Payment']   
+  3     Regular                REG            [3, 'Regular']        
+  4     Maintenance            MIN            [4, 'Maintenance']    
+  5     Pool                   FAC            [5, 'Facilities']     
+  6     Club                   FAC            [5, 'Facilities']     
+  7     Garage                 FAC            [5, 'Facilities']     
+  8     Penalty                PNT            [6, 'Penalty']        
+  9     Modification           MOD            [7, 'Modification']   
+  10    Service                SRV            [8, 'Service']        
+  11    Other Service          OSR            [9, 'Other Service']  
+  12    Termination            TER            [11, 'Termination']   
+  13    Administrative Fees    SRV            [8, 'Service']        
+
+  Total rows: 13
+
+========================================================================
+  SECTION 4: Reconciliation vs. Business Context §7 (8 documented types)
+========================================================================
+
+  Documented Arabic names (§7) and match status:
+    المقدمة                    NOT FOUND in live data
+    قسط دوري                   NOT FOUND in live data
+    وديعة الصيانة              NOT FOUND in live data
+    مصاريف إدارية              NOT FOUND in live data
+    الجراج                     NOT FOUND in live data
+    النادي                     NOT FOUND in live data
+    مرافق                      NOT FOUND in live data
+    الغرامات                   NOT FOUND in live data
+
+  Total live types: 13
+  Documented:       8
+  Undocumented:     5  ← require Khaled's review before coding begins
+
+------------------------------------------------------------------------
+  GATE 1 — STOP
+------------------------------------------------------------------------
+
+  The full type list is printed above. No feature code has been written.
+
+  ACTION REQUIRED from Khaled:
+    1. Review the list above against the live Odoo UI.
+    2. For each of the undocumented type IDs (those NOT matching the 8 in §7),
+       supply the official Arabic name to use in Board-facing output.
+    3. Confirm the Odoo ID for each of the 8 documented types.
+
+  Only after Khaled provides the completed ID → Arabic name mapping
+  will the implementation (Deliverables 2–10) begin.
+
+
+  RPCs used: 3 (fields_get + search_count + search_read)
+  All read-only. No data modified.

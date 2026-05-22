@@ -2823,3 +2823,147 @@ return to the trigger element is unaffected.
 **Verification required:** Khaled must re-check V7 in-browser: sidebar nav
 links and topbar buttons must be completely unclickable while a drill-down
 panel is open. Unit tests cannot verify this; browser interaction is the proof.
+
+---
+
+## Session 16 — 2026-05-22 — Stage 7: Installment Type Column + KPI 7 Breakdown
+
+### Context
+
+Stage 7 adds installment-type visibility to Module 2 Collections: (a) an
+`installment_type` column on every installment-row drill-down (Late, Forecast,
+Project, Trend), and (b) a by-type breakdown of each KPI 7 forecast bucket,
+surfaced both inside the drill-down panel and as a mini-breakdown on the KPI 7
+dashboard cards.
+
+### Decision 16.1 — Gate 1: 13-Type Resolution
+
+**Finding:** Live Odoo `rs.installment.type` has 13 records. Business Context §7
+documented 8 types. The 5 additional types were unknown prior to Gate 1 discovery.
+
+**Complete ID → Arabic display name mapping (reviewed by Khaled, 2026-05-22):**
+
+| ID | Odoo English Name    | category_code | Arabic Display Name |
+|----|----------------------|---------------|---------------------|
+|  1 | Reservation          | RES           | حجز                 |
+|  2 | Down Payment         | DNP           | المقدمة             |
+|  3 | Regular              | REG           | قسط دوري            |
+|  4 | Maintenance          | MIN           | وديعة الصيانة       |
+|  5 | Pool                 | FAC           | حمام سباحة          |
+|  6 | Club                 | FAC           | النادي              |
+|  7 | Garage               | FAC           | الجراج              |
+|  8 | Penalty              | PNT           | الغرامات            |
+|  9 | Modification         | MOD           | تعديلات             |
+| 10 | Service              | SRV           | خدمة                |
+| 11 | Other Service        | OSR           | خدمات أخرى          |
+| 12 | Termination          | TER           | فسخ                 |
+| 13 | Administrative Fees  | SRV           | مصاريف إدارية       |
+
+Implemented in `backend/modules/collections/installment_type_names.py`.
+No raw Odoo names reach any API response (Choice 2ج).
+
+**Live finding (Khaled human review):** Only 8 type IDs have actual installment
+records (1, 2, 3, 4, 6, 7, 8, 13). IDs 5, 9, 10, 11, 12 are defined in
+`rs.installment.type` but have zero `rs.installment` rows. The `read_group`
+naturally excludes them from any breakdown. An explicit assertion in
+`_fetch_bucket_type_breakdown` guards against zero-count entries appearing.
+
+### Decision 16.2 — Choice 1ب: Dashboard Card Mini-Breakdown
+
+KPI 7 cards on the main dashboard display a mini-breakdown (top types with
+proportional bars) before any click. Implementation: frontend Jinja2 template
+renders `type_breakdown` from the API response directly on each KPI 7 card.
+Respects the existing responsive grid (cards stack vertically on mobile per
+MVP_DESIGN §3.3). Gate 3 browser verification required.
+
+### Decision 16.3 — Choice 2ج: Reviewed Arabic Names Only in API
+
+Every `installment_type_id` returned by the API resolves to a reviewed Arabic
+name from `INSTALLMENT_TYPE_NAMES_AR`. If an unknown type ID appears in live
+Odoo data, `_fetch_bucket_type_breakdown` raises `ValueError` immediately — it
+does not fall back to a raw Odoo name, an "other" bucket, or a sentinel label.
+This is enforced at the RPC layer, not just the presentation layer.
+
+### Decision 16.4 — Choice 3ب: Breakdown Computed for All Four Buckets
+
+`type_breakdown` is populated for all four KPI 7 buckets (this_month,
+this_quarter, this_half, this_year). Each bucket requires one additional
+`read_group` RPC grouped by `installment_type_id`.
+
+### Decision 16.5 — Choice 4أ: Sort by Amount Descending, No Extra RPC
+
+Breakdown entries are sorted by `amount` descending in Python after the
+`read_group` call. No secondary sort field. No extra RPC for sort order.
+The Board sees the largest-amount type first.
+
+### Decision 16.6 — Identity-Equal Assertion on Breakdown
+
+`_fetch_bucket_type_breakdown` asserts:
+    `abs(sum(e["amount"] for e in entries) - bucket_total_amount) < 0.01`
+
+If this assertion fails, the function raises `AssertionError` with a clear
+message that includes the delta. The message explicitly states "do not adjust
+numbers to make it pass" — a failed assertion is a real data integrity finding
+that must be investigated, not silenced.
+
+### Decision 16.7 — RPC Count Change: 12 → 16
+
+Prior to Stage 7, `get_expected_collections_forecast` issued 12 RPCs per
+uncached call:
+  - `_fetch_bucket` × 4 = 8 RPCs (2 per bucket: amount + cheques)
+  - `search_count` × 4 = 4 RPCs (cheques_record_count, Decision 14.6)
+
+Stage 7 adds:
+  - `_fetch_bucket_type_breakdown` × 4 = 4 RPCs (one read_group per bucket)
+
+**New total: 16 RPCs per uncached call.**
+
+Note: the Stage 7 prompt stated "8 → 12". This was relative to the original
+Stage 1 design (8 RPCs). Stage 5 had already added 4 search_count RPCs,
+making the actual Stage 6 baseline 12. Stage 7 brings that to 16.
+
+### Decision 16.8 — `InstallmentRow` Schema Extension
+
+Two new fields added to `InstallmentRow`:
+  - `installment_type_id: int` — the Odoo ID of the installment type
+  - `installment_type_name_ar: str` — the reviewed Arabic display name
+
+`installment_type_id` is added to `_DRILL_FIELDS` so it rides the existing
+`search_read` — zero additional RPCs for drill-down type column.
+Applies to all 5 drill-down endpoints that use `InstallmentRow`
+(Late, Forecast, Project, Trend). Portfolio uses `PortfolioCustomerRow`
+(built from `read_group` aggregation) — type column does not apply.
+
+### Decision 16.9 — `ForecastBucket` Schema Extension
+
+New field: `type_breakdown: list[TypeBreakdownEntry] = []`.
+
+Default of `[]` (not a required field) allows the schema to remain forward-
+compatible if the breakdown is ever disabled or skipped. In normal operation
+the breakdown is always populated.
+
+New model `TypeBreakdownEntry`:
+  - `installment_type_id: int`
+  - `installment_type_name_ar: str`
+  - `amount: float`
+  - `record_count: int`
+
+### Verification Results — Session 16
+
+**Gate 2 (KPI 7 baseline, pre-breakdown):**
+
+| Bucket       | Records | Amount (EGP)    |
+|--------------|---------|-----------------|
+| this_month   |      87 |   13,498,876.00 |
+| this_quarter |     309 |   46,306,214.00 |
+| this_half    |     309 |   46,306,214.00 |
+| this_year    |   1,889 |  328,902,916.00 |
+
+All 4 buckets confirmed healthy. 100% PASS on verify_kpi7_live.py.
+
+**Breakdown verification (verify_kpi7_breakdown_live.py):**
+
+All 4 buckets pass: identity-equal (delta=0.0000), sorted amount desc,
+zero zero-count entries, all type IDs resolve to reviewed Arabic names.
+
+**Unit tests:** 38/38 pass (16 pre-existing + 22 new Stage 7 tests).

@@ -21,6 +21,11 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError, ReadOnlyViolationError, UnknownProjectError
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 from backend.modules.collections.services import cache as _cache
+from backend.modules.collections.installment_type_names import (
+    INSTALLMENT_TYPE_NAMES_AR,
+    get_type_name_ar,
+    _UNKNOWN_TYPE_AR,
+)
 
 # Methods that must never appear in ALLOWED_METHODS.
 _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
@@ -1266,6 +1271,81 @@ async def _fetch_bucket(
     return amount, count, due_amount, max(cheques_raw, 0.0), cheques_raw
 
 
+async def _fetch_bucket_type_breakdown(
+    client: OdooClient,
+    today_str: str,
+    bucket_end_str: str,
+    bucket_total_amount: float,
+) -> list[dict]:
+    """Fetch by-type amount breakdown for one KPI 7 bucket.  1 read_group RPC.
+
+    Groups the same domain as _fetch_bucket by installment_type_id.
+    Returns a list of {installment_type_id, installment_type_name_ar, amount,
+    record_count}, sorted by amount descending (Choice 4أ).
+
+    Identity-equal assertion: sum of entry amounts == bucket_total_amount.
+    Zero-count entries are excluded (read_group natural behaviour; assertion
+    added per Khaled's Gate 1 note).
+
+    Raises OdooQueryError on RPC failure.
+    Raises AssertionError if breakdown sum != bucket_total_amount.
+    Raises ValueError if any type_id is not in INSTALLMENT_TYPE_NAMES_AR
+        (would expose a raw Odoo name to Board output — hard stop per Choice 2ج).
+    """
+    domain = [
+        ("state", "=", "post"),
+        ("payment_state", "in", ["unpaid", "partial"]),
+        ("date", ">=", today_str),
+        ("date", "<=", bucket_end_str),
+    ]
+    rows = await client.execute_kw(
+        _MODEL,
+        "read_group",
+        args=[domain, ["amount"], ["installment_type_id"]],
+        kwargs={"lazy": False},
+    )
+
+    entries = []
+    for row in rows:
+        count = int(row.get("__count") or 0)
+        if count == 0:
+            continue  # guard: skip zero-count entries (should not occur via read_group)
+
+        type_raw = row.get("installment_type_id")
+        type_id  = (
+            int(type_raw[0]) if isinstance(type_raw, (list, tuple)) and type_raw
+            else (int(type_raw) if type_raw else 0)
+        )
+
+        # Choice 2ج: every type shown to the Board must have a reviewed Arabic name.
+        if type_id not in INSTALLMENT_TYPE_NAMES_AR:
+            raise ValueError(
+                f"installment_type_id={type_id} is not in INSTALLMENT_TYPE_NAMES_AR. "
+                "A new type has appeared in Odoo that has not been reviewed. "
+                "Add it to installment_type_names.py before re-deploying."
+            )
+
+        entries.append({
+            "installment_type_id":      type_id,
+            "installment_type_name_ar": get_type_name_ar(type_id),
+            "amount":                   float(row.get("amount") or 0.0),
+            "record_count":             count,
+        })
+
+    # Sort by amount descending (Choice 4أ — no extra RPC; done in Python).
+    entries.sort(key=lambda e: e["amount"], reverse=True)
+
+    # Identity-equal assertion: breakdown must sum exactly to bucket total.
+    breakdown_sum = sum(e["amount"] for e in entries)
+    assert abs(breakdown_sum - bucket_total_amount) < 0.01, (
+        f"type_breakdown sum {breakdown_sum:.2f} != bucket total "
+        f"{bucket_total_amount:.2f} (delta={breakdown_sum - bucket_total_amount:.2f}). "
+        "This is a real data integrity finding — do not adjust to make it pass."
+    )
+
+    return entries
+
+
 async def get_expected_collections_forecast(
     odoo_client: Optional[OdooClient] = None,
 ) -> dict:
@@ -1342,7 +1422,7 @@ async def get_expected_collections_forecast(
         logger.debug(f"Cache hit: {cache_key}")
         return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
 
-    logger.info(f"Cache miss: {cache_key} — querying Odoo (12 RPCs)")
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (16 RPCs)")
 
     _client = odoo_client if odoo_client is not None else OdooClient()
 
@@ -1368,6 +1448,14 @@ async def get_expected_collections_forecast(
                     ("check_pending_amount", ">", 0),
                 ]],
             ))
+        # 4 read_group RPCs — by-type breakdown per bucket (Stage 7, Choice 3ب).
+        # _fetch_bucket_type_breakdown asserts identity-equal and rejects unknown type IDs.
+        type_breakdowns: dict[str, list[dict]] = {}
+        for bname in _BUCKET_NAMES:
+            bucket_amount = raw[bname][0]  # index 0 = amount
+            type_breakdowns[bname] = await _fetch_bucket_type_breakdown(
+                _client, today_str, bucket_ends[bname].isoformat(), bucket_amount
+            )
     except Exception as exc:
         raise OdooQueryError(f"KPI 7 read_group failed: {exc}") from exc
     finally:
@@ -1376,7 +1464,7 @@ async def get_expected_collections_forecast(
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
-        f"KPI 7: 12 read_group/search_count RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
+        f"KPI 7: 16 RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
     )
 
     # Check for data quality anomaly — negative raw cheques (Decision 4.4 analog).
@@ -1411,6 +1499,7 @@ async def get_expected_collections_forecast(
                 ["date", "<=", bucket_end_str],
             ],
             "cheques_drill_down_domain": None,
+            "type_breakdown":            type_breakdowns[bname],
         }
 
     result: dict = {
