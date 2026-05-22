@@ -207,5 +207,7 @@
   "dd_portfolio_paid": "محصل",
   "dd_portfolio_due": "مستحق",
   "dd_pending_cheque_note": "يشمل شيك",
-  "dd_dq_unassigned": "بعض السجلات ليس لها مشروع محدد."
+  "dd_dq_unassigned": "بعض السجلات ليس لها مشروع محدد.",
+  "dd_by_type": "التوزيع بالنوع",
+  "dd_installment_type": "النوع"
 }

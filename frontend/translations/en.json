@@ -207,5 +207,7 @@
   "dd_portfolio_paid": "Paid",
   "dd_portfolio_due": "Due",
   "dd_pending_cheque_note": "incl. cheque",
-  "dd_dq_unassigned": "Some records have no project assigned."
+  "dd_dq_unassigned": "Some records have no project assigned.",
+  "dd_by_type": "By Type",
+  "dd_installment_type": "Type"
 }

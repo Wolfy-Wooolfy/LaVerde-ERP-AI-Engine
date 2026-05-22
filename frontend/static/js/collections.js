@@ -150,7 +150,61 @@
       if (amtEl) { amtEl.textContent = amount; amtEl.title = fmt.formatEGP(bucket.amount, lang, { fullValue: true }); fadeIn(amtEl); }
       if (subEl) { subEl.textContent = subtitle; fadeIn(subEl); }
       if (card)  card.setAttribute('aria-label', (s[key] || key) + ': ' + amount);
+
+      // Stage 7 — mini type-breakdown bars on the card (Choice 1ب)
+      var bdEl = document.getElementById('col-forecast-' + key + '-breakdown');
+      if (bdEl && bucket.type_breakdown && bucket.type_breakdown.length && bucket.amount > 0) {
+        bdEl.innerHTML = _buildBreakdownBars(bucket.type_breakdown, bucket.amount, lang, s);
+        bdEl.classList.remove('hidden');
+        bdEl.removeAttribute('aria-hidden');
+      }
     }
+
+    // Expose forecast data for drilldown.js breakdown injection (Deliverable 6)
+    window._collectionsLastForecast = forecast;
+  }
+
+  // ── Type-breakdown mini-bars (Stage 7) ────────────────────────────────────
+  // Renders top types as labelled proportional bars inside a KPI 7 card.
+  function _buildBreakdownBars(typeBreakdown, totalAmount, lang, s) {
+    var MAX_ROWS = 4; // show at most 4 rows to keep card compact
+    var _fmt = window.CollectionsFormatters;
+    var shown = typeBreakdown.slice(0, MAX_ROWS);
+    var html = '<div class="space-y-1">';
+    for (var i = 0; i < shown.length; i++) {
+      var e = shown[i];
+      var pct = totalAmount > 0 ? Math.round(e.amount / totalAmount * 100) : 0;
+      var pctStr = pct + '%';
+      var amtStr = (_fmt && _fmt.formatEGP)
+        ? _fmt.formatEGP(e.amount, lang)
+        : (e.amount.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { maximumFractionDigits: 0 }));
+      html += '<div>'
+        + '<div class="flex items-center justify-between gap-1 mb-0.5">'
+          + '<span class="text-[10px] text-neutral-500 dark:text-neutral-400 truncate" dir="rtl">'
+            + _escHtml(e.installment_type_name_ar)
+          + '</span>'
+          + '<span class="text-[10px] tabular text-neutral-600 dark:text-neutral-300 shrink-0">'
+            + _escHtml(pctStr)
+          + '</span>'
+        + '</div>'
+        + '<div class="h-1 rounded-full bg-neutral-200 dark:bg-neutral-700 overflow-hidden">'
+          + '<div class="h-full rounded-full bg-primary-400 dark:bg-primary-500 transition-all duration-500"'
+               + ' style="width:' + pctStr + '">'
+          + '</div>'
+        + '</div>'
+      + '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function _escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // ── Section 4 — Performance & Trend (KPI 4, KPI 5a/5b, KPI 6) ────────────

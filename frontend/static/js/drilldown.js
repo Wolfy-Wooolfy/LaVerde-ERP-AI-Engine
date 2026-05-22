@@ -120,6 +120,10 @@
 
     _title.textContent = _resolveTitle(target);
 
+    // dd-type-breakdown is a sibling of _listBody (inserted via insertBefore), not a child,
+    // so innerHTML='' does not remove it. Must stay in sync with the identical block in _refetch().
+    var _oldBd = document.getElementById('dd-type-breakdown');
+    if (_oldBd) _oldBd.parentNode.removeChild(_oldBd);
     _listBody.innerHTML = '';
     _hide(_emptyMsg);
     _hide(_errorMsg);
@@ -277,11 +281,66 @@
       _title.textContent = (S.dd_title_trend || 'Trend') + ' — ' + data.month;
     }
 
+    // Stage 7 — Deliverable 6: inject type_breakdown section above the list
+    // on the first page of a forecast drill-down (Choice 1ب, drill-down variant).
+    // Source: window._collectionsLastForecast populated by collections.js.
+    if (isFirstPage && _state.target && _state.target.indexOf('forecast-') === 0) {
+      var bucketKey = _state.target.slice('forecast-'.length);  // e.g. "this_month"
+      var forecastData = window._collectionsLastForecast;
+      var tb = forecastData && forecastData.buckets
+        ? (forecastData.buckets[bucketKey] || {}).type_breakdown
+        : null;
+      if (tb && tb.length) {
+        var bucketAmt = (forecastData.buckets[bucketKey] || {}).amount || 0;
+        var bdSection = document.createElement('div');
+        bdSection.id = 'dd-type-breakdown';
+        bdSection.className = 'px-5 py-3 border-b border-neutral-100 dark:border-neutral-800';
+        bdSection.innerHTML = _buildDrilldownBreakdownHtml(tb, bucketAmt, lang);
+        _listBody.parentNode.insertBefore(bdSection, _listBody);
+      }
+    }
+
     var frag = document.createDocumentFragment();
     for (var i = 0; i < items.length; i++) {
       frag.appendChild(_makeInstallmentRow(items[i], lang));
     }
     _listBody.appendChild(frag);
+  }
+
+  // Builds the type_breakdown HTML block for inside the drill-down panel.
+  function _buildDrilldownBreakdownHtml(typeBreakdown, totalAmount, lang) {
+    var MAX_ROWS = 5;
+    var shown = typeBreakdown.slice(0, MAX_ROWS);
+    var heading = S.dd_by_type || 'By Type';
+    var html = '<p class="text-[10px] font-semibold uppercase tracking-wide'
+      + ' text-neutral-400 dark:text-neutral-500 mb-2">'
+      + _esc(heading) + '</p>'
+      + '<div class="space-y-1.5">';
+    for (var i = 0; i < shown.length; i++) {
+      var e = shown[i];
+      var pct = totalAmount > 0 ? Math.round(e.amount / totalAmount * 100) : 0;
+      var pctStr = pct + '%';
+      var amtStr = F.formatEGP
+        ? F.formatEGP(e.amount, lang)
+        : e.amount.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { maximumFractionDigits: 0 });
+      html += '<div>'
+        + '<div class="flex items-center justify-between gap-2 mb-0.5">'
+          + '<span class="text-xs text-neutral-600 dark:text-neutral-300 truncate" dir="rtl">'
+            + _esc(e.installment_type_name_ar)
+          + '</span>'
+          + '<span class="text-xs tabular text-neutral-500 dark:text-neutral-400 shrink-0">'
+            + _esc(amtStr)
+          + '</span>'
+        + '</div>'
+        + '<div class="h-1.5 rounded-full bg-neutral-100 dark:bg-neutral-700 overflow-hidden">'
+          + '<div class="h-full rounded-full bg-primary-400 dark:bg-primary-500"'
+               + ' style="width:' + pctStr + '">'
+          + '</div>'
+        + '</div>'
+      + '</div>';
+    }
+    html += '</div>';
+    return html;
   }
 
   function _makeInstallmentRow(row, lang) {
@@ -308,6 +367,15 @@
           + '</p>'
       : '';
 
+    // Stage 7 — installment_type_name_ar label on each row
+    var typeNote = row.installment_type_name_ar
+      ? '<span class="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px]'
+          + ' bg-neutral-100 dark:bg-neutral-800'
+          + ' text-neutral-500 dark:text-neutral-400" dir="rtl">'
+          + _esc(row.installment_type_name_ar)
+        + '</span>'
+      : '';
+
     li.innerHTML = ''
       + '<div class="flex items-start justify-between gap-3">'
         + '<div class="min-w-0 flex-1">'
@@ -320,6 +388,7 @@
           + '<p class="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5 font-mono">'
             + _esc(row.date)
           + '</p>'
+          + typeNote
         + '</div>'
         + '<div class="shrink-0 text-end space-y-1">'
           + '<p class="text-sm font-semibold tabular text-neutral-900 dark:text-neutral-100">'
@@ -691,6 +760,10 @@
       _updateHash(_state.target, _state.filters);
       _state.cursor  = null;
       _state.hasNext = false;
+      // dd-type-breakdown is a sibling of _listBody (inserted via insertBefore), not a child,
+      // so innerHTML='' does not remove it. Must stay in sync with the identical block in open().
+      var _oldBd = document.getElementById('dd-type-breakdown');
+      if (_oldBd) _oldBd.parentNode.removeChild(_oldBd);
       _listBody.innerHTML = '';
       _hide(_emptyMsg);
       _hide(_errorMsg);

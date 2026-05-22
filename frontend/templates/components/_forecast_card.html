@@ -29,5 +29,10 @@
      title="">—</p>
   <p id="col-forecast-{{ bucket_key }}-subtitle"
      class="text-sm text-neutral-500 dark:text-neutral-400 opacity-0 transition-opacity duration-200">—</p>
+  {# Stage 7 — type_breakdown mini-bars, populated by collections.js renderSection3 #}
+  <div id="col-forecast-{{ bucket_key }}-breakdown"
+       class="mt-3 hidden"
+       aria-hidden="true">
+  </div>
 </div>
 {% endmacro %}

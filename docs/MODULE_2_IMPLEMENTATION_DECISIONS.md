@@ -2967,3 +2967,34 @@ All 4 buckets pass: identity-equal (delta=0.0000), sorted amount desc,
 zero zero-count entries, all type IDs resolve to reviewed Arabic names.
 
 **Unit tests:** 38/38 pass (16 pre-existing + 22 new Stage 7 tests).
+
+---
+
+### Decision 16.10 — Frontend cleanup bug found and fixed in Gate 3 (2026-05-22)
+
+**Bug:** The `dd-type-breakdown` div injected by `drilldown.js` into the drill-down
+panel was not being removed when a new drill-down opened or when filters were re-applied.
+
+**Root cause:** The element was inserted via `insertBefore(_listBody)`, making it a
+**sibling** of `_listBody` in the DOM — not a child. The two existing reset call-sites
+(`open()` line 123 and `_refetch()` line 759) both do `_listBody.innerHTML = ''`, which
+empties only the children of `_listBody`. A sibling is unaffected, so the old
+`dd-type-breakdown` persisted across drill-down transitions.
+
+**Symptoms observed in Gate 3 browser test:**
+1. `forecast-this_month` after `forecast-this_quarter` → two "التوزيع بالنوع" sections
+   stacked (old quarter numbers + new month numbers).
+2. `kpi5-proj-3` (Late drill-down) after any forecast → stale breakdown section visible,
+   violating the rule that only forecast targets show a breakdown.
+
+**Fix:** Added a defensive `getElementById('dd-type-breakdown')` + `removeChild` immediately
+before `_listBody.innerHTML = ''` at **both** call-sites. Each site carries a comment
+requiring the two blocks to stay in sync. The forecast injection guard
+(`_state.target.indexOf('forecast-') === 0`) was not changed.
+
+**Gate 3 result:** Khaled confirmed in browser — all three scenarios passed:
+- (a) `forecast-this_quarter` then `forecast-this_month` → one section, correct month figures.
+- (b) Forecast then Late → Late is clean, no breakdown.
+- (c) Mobile widths — bars render correctly, text truncates cleanly.
+
+Gate 3 closed 2026-05-22.
