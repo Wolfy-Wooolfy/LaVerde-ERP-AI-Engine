@@ -11,3 +11,4 @@ loguru==0.7.2
 python-multipart==0.0.12
 slowapi==0.1.9
 tiktoken==0.8.0
+tzdata>=2024.1
