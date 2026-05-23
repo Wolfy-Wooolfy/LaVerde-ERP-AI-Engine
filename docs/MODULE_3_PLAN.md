@@ -125,7 +125,7 @@
 | Stage | المحتوى | النوع | الحالة |
 |-------|---------|-------|--------|
 | **M3-S1** | Discovery — تأكيد domains الـ 3 KPIs ضد الـ live، تأكيد الـ baselines، إغلاق OQ2/OQ4 من Phase 3 | discovery بحت | ✅ COMPLETE — commit 00f3abf، 2026-05-23. KPI A = 2.63B/1272، KPI B = 333.3M/797/top10=21.8%، KPI C = 17.2M/27 (متحرّك). R1a/R1b pass. |
-| **M3-S2** | Backend KPI A — module scaffold + خدمة + endpoint + tests + verification | backend | ⏳ pending |
+| **M3-S2** | Backend KPI A — module scaffold + خدمة + endpoint + tests + verification | backend | ✅ COMPLETE — commit 19b5283، 2026-05-23. value=2,634,209,716.28 EGP / 1,272 عميل / 42,413 قسط. delta=0.00 vs baseline. 11 unit tests pass. verified on fresh server (uptime=26.6s، cache_status=fresh). |
 | **M3-S3** | Backend KPI B | backend | ⏳ pending |
 | **M3-S4** | Backend KPI C + قسم الاستردادات | backend | ⏳ pending |
 | **M3-S5** | Frontend — صفحة حسابات العملاء، الـ 3 كروت + قسم الاستردادات + مدخل sidebar | frontend | ⏳ pending |
