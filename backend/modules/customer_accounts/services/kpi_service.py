@@ -7,7 +7,8 @@ All methods are async. No method ever calls create, write, or unlink.
 
 M3-S2 scope: get_total_customer_receivables() (KPI A).
 M3-S3 scope: get_top_overdue_customers()       (KPI B).
-KPI C is implemented in M3-S4.
+M3-S4 scope: get_unallocated_wallet_balance()  (KPI C).
+             get_refunds_summary()             (Refunds alert section).
 """
 
 import time
@@ -22,9 +23,13 @@ from backend.modules.customer_accounts.services import cache as _cache
 
 _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
 
-_MODEL = "rs.installment"
-_CACHE_KEY_PREFIX_KPIA = "kpi:total_customer_receivables"
-_CACHE_KEY_PREFIX_KPIB = "kpi:top_overdue_customers"
+_MODEL          = "rs.installment"
+_RECONCILE_MODEL = "rs.account.payment.reconcile"
+
+_CACHE_KEY_PREFIX_KPIA    = "kpi:total_customer_receivables"
+_CACHE_KEY_PREFIX_KPIB    = "kpi:top_overdue_customers"
+_CACHE_KEY_PREFIX_KPIC    = "kpi:unallocated_wallet_balance"
+_CACHE_KEY_PREFIX_REFUNDS = "kpi:refunds_summary"
 
 # Top-N used for concentration ratio (KPI B). Named constant so schema and
 # service stay in sync if the Board ever requests a different N.
@@ -283,6 +288,193 @@ async def get_top_overdue_customers(client: Optional[OdooClient] = None) -> dict
         "cache_status":           "fresh",
         "rpc_duration_ms":        rpc_ms,
         "domain":                 domain,
+    }
+
+    _cache.set(cache_key, result)
+    return result
+
+
+async def get_unallocated_wallet_balance(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI C — Unallocated Wallet Balance.
+
+    Queries rs.account.payment.reconcile filtered to state='post' AND
+    residual_amount>0, grouped by partner_id.  Returns the portfolio-wide
+    unallocated total and the count of distinct customers holding a balance.
+
+    Domain: [('state','=','post'), ('residual_amount','>',0)]
+      — confirmed in M3-S1 discovery (MODULE_3_DISCOVERY_M3S1.md §5).
+      — residual_amount>0 is intentional: excludes the 7 refund records
+        (amount<0 → residual_amount<0).  Including them would understate the
+        wallet balance (MODULE_3_PLAN.md §3 KPI C, §4).
+
+    Baseline (M3-S1, 2026-05-23, moving): 17,214,301.92 EGP / 27 customers.
+    The value changes as wallet balances are applied to installments.
+
+    Return shape::
+
+        {
+            "value":           float,  # EGP SUM(residual_amount) — positive
+            "customer_count":  int,    # distinct partner_id groups
+            "record_count":    int,    # total reconcile records with residual > 0
+            "currency":        "EGP",
+            "as_of":           str,    # ISO 8601 UTC datetime of the query
+            "cache_status":    str,    # "fresh" or "cached"
+            "rpc_duration_ms": int,    # 0 if served from cache
+            "domain":          list,
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if the Odoo RPC fails.
+    """
+    _assert_read_only()
+
+    domain: list = [
+        ("state",           "=", "post"),
+        ("residual_amount", ">", 0),
+    ]
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_KPIC)
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        rows = await _client.execute_kw(
+            _RECONCILE_MODEL,
+            "read_group",
+            args=[domain, ["residual_amount"], ["partner_id"]],
+            kwargs={"lazy": False},
+        )
+    except Exception as exc:
+        raise OdooQueryError(
+            f"read_group on {_RECONCILE_MODEL} (KPI C, groupby partner_id) failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"Odoo read_group on {_RECONCILE_MODEL} (KPI C, groupby partner_id)"
+        f" returned {len(rows)} groups in {rpc_ms}ms | cache_key={cache_key}"
+    )
+
+    value          = sum(float(r.get("residual_amount") or 0.0) for r in rows)
+    customer_count = len(rows)
+    record_count   = sum(int(r.get("__count") or 0) for r in rows)
+
+    result: dict = {
+        "value":           value,
+        "customer_count":  customer_count,
+        "record_count":    record_count,
+        "currency":        "EGP",
+        "as_of":           datetime.now(timezone.utc).isoformat(),
+        "cache_status":    "fresh",
+        "rpc_duration_ms": rpc_ms,
+        "domain":          domain,
+    }
+
+    _cache.set(cache_key, result)
+    return result
+
+
+async def get_refunds_summary(client: Optional[OdooClient] = None) -> dict:
+    """Return Refunds alert-section summary.
+
+    Queries rs.account.payment.reconcile filtered to state='post' AND
+    amount<0, grouped by partner_id.  Returns the total refund amount
+    (a negative number), the record count, and the count of records with
+    no associated partner (partner_id = False).
+
+    Flow direction: sign of `amount` is the reliable indicator
+    (MODULE_3_DISCOVERY_PHASE_3.md §4.1). payment_type is NOT used — all
+    205 live records show payment_type='inbound', including the 7 refunds.
+
+    Domain: [('state','=','post'), ('amount','<',0)]
+      — confirmed in M3-S1 discovery (MODULE_3_DISCOVERY_M3S1.md §6).
+
+    Baseline (M3-S1, 2026-05-23): −719,812.00 EGP / 7 records / 0 null-partner.
+
+    Return shape::
+
+        {
+            "total_refunds":      float,  # EGP SUM(amount) — negative
+            "refund_count":       int,    # total records (sum of __count per group)
+            "null_partner_count": int,    # records where partner_id = False
+            "currency":           "EGP",
+            "as_of":              str,
+            "cache_status":       str,    # "fresh" or "cached"
+            "rpc_duration_ms":    int,    # 0 if served from cache
+            "domain":             list,
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if the Odoo RPC fails.
+    """
+    _assert_read_only()
+
+    domain: list = [
+        ("state",  "=", "post"),
+        ("amount", "<", 0),
+    ]
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_REFUNDS)
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        rows = await _client.execute_kw(
+            _RECONCILE_MODEL,
+            "read_group",
+            args=[domain, ["amount"], ["partner_id"]],
+            kwargs={"lazy": False},
+        )
+    except Exception as exc:
+        raise OdooQueryError(
+            f"read_group on {_RECONCILE_MODEL} (Refunds, groupby partner_id) failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"Odoo read_group on {_RECONCILE_MODEL} (Refunds, groupby partner_id)"
+        f" returned {len(rows)} groups in {rpc_ms}ms | cache_key={cache_key}"
+    )
+
+    total_refunds      = sum(float(r.get("amount") or 0.0) for r in rows)
+    refund_count       = sum(int(r.get("__count") or 0) for r in rows)
+    null_partner_count = sum(
+        int(r.get("__count") or 0)
+        for r in rows
+        if not r.get("partner_id")
+    )
+
+    result: dict = {
+        "total_refunds":      total_refunds,
+        "refund_count":       refund_count,
+        "null_partner_count": null_partner_count,
+        "currency":           "EGP",
+        "as_of":              datetime.now(timezone.utc).isoformat(),
+        "cache_status":       "fresh",
+        "rpc_duration_ms":    rpc_ms,
+        "domain":             domain,
     }
 
     _cache.set(cache_key, result)

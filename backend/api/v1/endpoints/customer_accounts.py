@@ -1,8 +1,10 @@
 """
 Customer Accounts KPI endpoints.
 
-GET /api/v1/customer-accounts/kpi/total-receivables      — KPI A: Total Customer Receivables
-GET /api/v1/customer-accounts/kpi/top-overdue-customers  — KPI B: Top Overdue Customers
+GET /api/v1/customer-accounts/kpi/total-receivables         — KPI A: Total Customer Receivables
+GET /api/v1/customer-accounts/kpi/top-overdue-customers     — KPI B: Top Overdue Customers
+GET /api/v1/customer-accounts/kpi/unallocated-wallet-balance — KPI C: Unallocated Wallet Balance
+GET /api/v1/customer-accounts/refunds/summary               — Refunds alert section
 """
 
 from fastapi import APIRouter, Request, Response
@@ -12,12 +14,16 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.customer_accounts.schemas import (
+    RefundsSummaryResponse,
     TopOverdueCustomersResponse,
     TotalReceivablesResponse,
+    UnallocatedWalletBalanceResponse,
 )
 from backend.modules.customer_accounts.services.kpi_service import (
+    get_refunds_summary,
     get_top_overdue_customers,
     get_total_customer_receivables,
+    get_unallocated_wallet_balance,
 )
 
 router = APIRouter(prefix="/customer-accounts", tags=["customer_accounts"])
@@ -67,6 +73,54 @@ async def top_overdue_customers(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("KPI B — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/kpi/unallocated-wallet-balance",
+    summary="KPI C — Unallocated Wallet Balance",
+    response_model=UnallocatedWalletBalanceResponse,
+)
+@limiter.limit("60/minute")
+async def unallocated_wallet_balance(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
+    try:
+        data = await get_unallocated_wallet_balance()
+    except OdooQueryError:
+        logger.warning("KPI C — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("KPI C — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/refunds/summary",
+    summary="Refunds alert section summary",
+    response_model=RefundsSummaryResponse,
+)
+@limiter.limit("60/minute")
+async def refunds_summary(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
+    try:
+        data = await get_refunds_summary()
+    except OdooQueryError:
+        logger.warning("Refunds — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("Refunds — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"
