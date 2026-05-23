@@ -1,0 +1,245 @@
+{# _ca_drilldown_panel.html — Customer Accounts drill-down panel (M3-S7).
+   Usage: {% from "components/_ca_drilldown_panel.html" import ca_drilldown_panel with context %}
+          {{ ca_drilldown_panel() }}
+   Controller: window.caCustomerPanel.open(partnerId, triggerEl) / .close()
+   IDs: ca-dd-backdrop, ca-dd-panel, ca-dd-title, ca-dd-subtitle,
+        ca-dd-close-btn, ca-dd-loading-sentinel, ca-dd-summary,
+        ca-dd-list-body, ca-dd-empty-msg, ca-dd-error-msg, ca-dd-load-more-btn
+   Animation and visibility fully managed by ca_drilldown.js.
+   READ-ONLY: no POST or Odoo mutation.
+#}
+
+{% macro ca_drilldown_panel() %}
+
+{# ── Backdrop ─────────────────────────────────────────────────────────────── #}
+<div id="ca-dd-backdrop"
+     class="fixed inset-0 z-40 bg-black/50 hidden"
+     aria-hidden="true">
+</div>
+
+{# ── Panel shell ──────────────────────────────────────────────────────────── #}
+<aside id="ca-dd-panel"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="ca-dd-title"
+       class="fixed inset-y-0 end-0 z-50
+              w-full lg:w-[480px]
+              bg-white dark:bg-neutral-900
+              border-s border-neutral-200 dark:border-neutral-800
+              shadow-2xl
+              transition-transform duration-300 ease-in-out"
+       hidden
+       tabindex="-1">
+
+  <div class="flex flex-col h-full">
+
+    {# ── Header ───────────────────────────────────────────────────────────── #}
+    <header class="px-5 py-4 shrink-0
+                   border-b border-neutral-200 dark:border-neutral-700">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <h2 id="ca-dd-title"
+              class="text-base font-semibold
+                     text-neutral-900 dark:text-neutral-100
+                     truncate">
+            —
+          </h2>
+          <p id="ca-dd-subtitle"
+             class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 hidden">
+          </p>
+        </div>
+        <button id="ca-dd-close-btn"
+                type="button"
+                class="shrink-0 p-1.5 rounded-lg
+                       text-neutral-500 dark:text-neutral-400
+                       hover:bg-neutral-100 dark:hover:bg-neutral-800
+                       focus-visible:ring-2 focus-visible:ring-primary-500
+                       transition-colors"
+                aria-label="{{ _t('ca_dd_close') }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    {# ── Scrollable body ──────────────────────────────────────────────────── #}
+    <div class="flex-1 overflow-y-auto min-h-0">
+
+      {# Loading skeleton — shown by JS on open, hidden after data arrives #}
+      <div id="ca-dd-loading-sentinel" class="px-5 py-6 space-y-4 hidden">
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="mt-6 grid grid-cols-2 gap-3">
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+        </div>
+        <div class="mt-4 h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-2/3"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="mt-4 h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-5/6"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+      </div>
+
+      {# Summary section — hidden until JS populates it on first response #}
+      <div id="ca-dd-summary" class="hidden">
+
+        {# Exposure — 4 numbers #}
+        <section class="px-5 py-4
+                        border-b border-neutral-100 dark:border-neutral-800">
+          <p class="text-[10px] font-semibold uppercase tracking-wide
+                    text-neutral-400 dark:text-neutral-500 mb-3">
+            {{ _t("ca_dd_exposure") }}
+          </p>
+          <div class="grid grid-cols-2 gap-2.5">
+
+            {# إجمالي عليه — neutral #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-neutral-50 dark:bg-neutral-800/60
+                        border border-neutral-200 dark:border-neutral-700">
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">
+                {{ _t("ca_dd_total_due") }}
+              </p>
+              <p id="ca-dd-total-due"
+                 class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100 break-all">
+                —
+              </p>
+            </div>
+
+            {# منها متأخر — danger #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-danger-50 dark:bg-danger-950/30
+                        border border-danger-200 dark:border-danger-800">
+              <p class="text-[10px] text-danger-600 dark:text-danger-400 mb-1">
+                {{ _t("ca_dd_late_due") }}
+              </p>
+              <p id="ca-dd-late-due"
+                 class="text-sm font-bold tabular text-danger-700 dark:text-danger-300 break-all">
+                —
+              </p>
+            </div>
+
+            {# منها مستقبلي — info/sky #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-sky-50 dark:bg-sky-950/30
+                        border border-sky-200 dark:border-sky-800">
+              <p class="text-[10px] text-sky-600 dark:text-sky-400 mb-1">
+                {{ _t("ca_dd_future_due") }}
+              </p>
+              <p id="ca-dd-future-due"
+                 class="text-sm font-bold tabular text-sky-700 dark:text-sky-300 break-all">
+                —
+              </p>
+            </div>
+
+            {# مدفوع نقداً — emerald #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-emerald-50 dark:bg-emerald-950/30
+                        border border-emerald-200 dark:border-emerald-800">
+              <p class="text-[10px] text-emerald-600 dark:text-emerald-400 mb-1">
+                {{ _t("ca_dd_paid_cash") }}
+              </p>
+              <p id="ca-dd-paid-cash"
+                 class="text-sm font-bold tabular text-emerald-700 dark:text-emerald-300 break-all">
+                —
+              </p>
+            </div>
+
+          </div>
+
+          {# Contract total — secondary line below the 4 cards #}
+          <p id="ca-dd-contract-line"
+             class="mt-2 text-xs text-neutral-400 dark:text-neutral-500">
+          </p>
+        </section>
+
+        {# Behavior — payment ratio + wallet #}
+        <section class="px-5 py-3
+                        border-b border-neutral-100 dark:border-neutral-800">
+          <p class="text-[10px] font-semibold uppercase tracking-wide
+                    text-neutral-400 dark:text-neutral-500 mb-2">
+            {{ _t("ca_dd_behavior") }}
+          </p>
+          <div class="flex flex-wrap gap-6">
+            <div>
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-0.5">
+                {{ _t("ca_dd_payment_ratio") }}
+              </p>
+              <p id="ca-dd-payment-ratio"
+                 class="text-lg font-bold tabular text-neutral-900 dark:text-neutral-100">
+                —
+              </p>
+            </div>
+            <div>
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-0.5">
+                {{ _t("ca_dd_wallet") }}
+              </p>
+              <p id="ca-dd-wallet-balance"
+                 class="text-lg font-bold tabular text-neutral-900 dark:text-neutral-100">
+                —
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {# Installments section header #}
+        <div class="px-5 py-2
+                    border-b border-neutral-100 dark:border-neutral-800
+                    flex items-center justify-between">
+          <p class="text-[10px] font-semibold uppercase tracking-wide
+                    text-neutral-400 dark:text-neutral-500">
+            {{ _t("ca_dd_installments_title") }}
+          </p>
+          <p id="ca-dd-inst-count"
+             class="text-[10px] text-neutral-400 dark:text-neutral-500 tabular">
+          </p>
+        </div>
+
+      </div>{# /#ca-dd-summary #}
+
+      {# Installment rows — appended by JS #}
+      <ul id="ca-dd-list-body"
+          class="divide-y divide-neutral-100 dark:divide-neutral-800"
+          aria-live="polite">
+      </ul>
+
+      {# Empty state #}
+      <p id="ca-dd-empty-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-neutral-400 dark:text-neutral-500">
+        {{ _t("ca_dd_no_results") }}
+      </p>
+
+      {# Error state — message set by JS #}
+      <p id="ca-dd-error-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-danger-600 dark:text-danger-400">
+      </p>
+
+    </div>{# /.scrollable body #}
+
+    {# ── Load-more footer ─────────────────────────────────────────────────── #}
+    <footer class="px-5 py-3 shrink-0
+                   border-t border-neutral-200 dark:border-neutral-700">
+      <button id="ca-dd-load-more-btn"
+              type="button"
+              class="w-full py-2 text-sm font-medium rounded-lg
+                     text-primary-600 dark:text-primary-400
+                     hover:bg-primary-50 dark:hover:bg-primary-950/30
+                     focus-visible:ring-2 focus-visible:ring-primary-500
+                     transition-colors hidden">
+        {{ _t("ca_dd_load_more") }}
+      </button>
+    </footer>
+
+  </div>
+
+</aside>
+
+{% endmacro %}
