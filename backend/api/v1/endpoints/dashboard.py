@@ -69,6 +69,16 @@ async def collections_dashboard(
     return templates.TemplateResponse(request, "collections/dashboard.html", ctx)
 
 
+@router.get("/customer-accounts/dashboard", response_class=HTMLResponse, summary="Customer Accounts dashboard (HTML)")
+async def customer_accounts_dashboard(
+    request: Request,
+    user: str = Depends(get_current_user),
+) -> HTMLResponse:
+    ctx = _base_ctx(request, user)
+    ctx["page"] = "customer_accounts_dashboard"
+    return templates.TemplateResponse(request, "customer_accounts/dashboard.html", ctx)
+
+
 @router.get(
     "/data-quality/missing-contact",
     response_class=HTMLResponse,

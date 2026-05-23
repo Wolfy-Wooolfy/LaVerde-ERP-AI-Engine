@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t("Customer Accounts Dashboard") }} — LaVerde ERP AI Engine{% endblock %}
+
+{% block page_title %}{{ _t("Customer Accounts Dashboard") }}{% endblock %}
+
+{% block content %}
+
+{# ── Page header ──────────────────────────────────────────────────────────── #}
+<header class="flex items-center justify-between mb-6">
+  <div>
+    <h1 id="ca-page-title"
+        class="text-2xl font-medium text-neutral-900 dark:text-neutral-100">
+      {{ _t("Customer Accounts Dashboard") }}
+    </h1>
+    <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
+      {{ _t("as of") }}
+      <span id="ca-as-of" class="font-mono">{{ _t("Loading...") }}</span>
+    </p>
+  </div>
+  <div class="flex items-center gap-3 shrink-0">
+    <div class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs"
+         style="background-color: rgba(93,202,165,0.06); border: 0.5px solid rgba(93,202,165,0.2);">
+      <span class="live-dot"
+            style="background-color: #5DCAA5; flex-shrink: 0;"
+            aria-hidden="true"></span>
+      <span class="text-emerald-300 font-medium">{{ _t("live") }}</span>
+      <span class="text-neutral-500">·</span>
+      <span class="text-neutral-400">{{ _t("updated") }}</span>
+      <span id="ca-last-updated"
+            class="text-neutral-300 font-medium">—</span>
+    </div>
+    <button id="ca-refresh-btn"
+      onclick="customerAccountsRefresh()"
+      class="btn btn-secondary btn-sm">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      {{ _t("Refresh") }}
+    </button>
+  </div>
+</header>
+
+{# ── Section 1 — Overview (3 KPI cards) ─────────────────────────────────── #}
+<section>
+  <h2 class="text-xs font-semibold uppercase tracking-wider
+             text-neutral-500 dark:text-neutral-400
+             mt-8 mb-3 text-start">
+    {{ _t("ca_overview") }}
+  </h2>
+
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+    {# KPI A — Total Customer Receivables #}
+    <div id="ca-kpia-container"
+         class="kpi-card border border-neutral-200 dark:border-neutral-700
+                group flex flex-col overflow-hidden"
+         aria-label="{{ _t('ca_total_receivables') }}: —">
+      <div class="mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
+          {{ _t("ca_total_receivables") }}
+        </p>
+      </div>
+      <p id="ca-kpia-value"
+         class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100 opacity-0 transition-opacity duration-200">—</p>
+      <p id="ca-kpia-subtitle"
+         class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
+    </div>
+
+    {# KPI B — Overdue Risk (concentration card) #}
+    <div id="ca-kpib-container"
+         class="kpi-card border border-neutral-200 dark:border-neutral-700
+                group flex flex-col overflow-hidden"
+         aria-label="{{ _t('ca_top_risk_concentration') }}: —">
+      <div class="mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
+          {{ _t("ca_top_risk_concentration") }}
+        </p>
+      </div>
+      <p id="ca-kpib-concentration"
+         class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100 opacity-0 transition-opacity duration-200">—</p>
+      <p id="ca-kpib-subtitle"
+         class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
+    </div>
+
+    {# KPI C — Unallocated Wallet Balance #}
+    <div id="ca-kpic-container"
+         class="kpi-card border border-neutral-200 dark:border-neutral-700
+                group flex flex-col overflow-hidden"
+         aria-label="{{ _t('ca_unallocated_wallet') }}: —">
+      <div class="mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">
+          {{ _t("ca_unallocated_wallet") }}
+        </p>
+      </div>
+      <p id="ca-kpic-value"
+         class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100 opacity-0 transition-opacity duration-200">—</p>
+      <p id="ca-kpic-subtitle"
+         class="text-xs text-neutral-500 dark:text-neutral-400 mt-2 opacity-0 transition-opacity duration-200">—</p>
+    </div>
+
+  </div>
+</section>
+
+{# ── Section 2 — Top Overdue Customers table (KPI B detail) ──────────────── #}
+<section>
+  <h2 class="text-xs font-semibold uppercase tracking-wider
+             text-neutral-500 dark:text-neutral-400
+             mt-8 mb-3 text-start">
+    {{ _t("ca_top_overdue_section") }}
+  </h2>
+
+  <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-neutral-200 dark:border-neutral-700
+                   bg-neutral-50 dark:bg-neutral-800/50">
+          <th class="px-4 py-3 text-start text-xs font-semibold
+                     text-neutral-500 dark:text-neutral-400 uppercase tracking-wide w-12">
+            {{ _t("ca_rank") }}
+          </th>
+          <th class="px-4 py-3 text-start text-xs font-semibold
+                     text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">
+            {{ _t("ca_customer") }}
+          </th>
+          <th class="px-4 py-3 text-end text-xs font-semibold
+                     text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">
+            {{ _t("ca_overdue_amount") }}
+          </th>
+          <th class="px-4 py-3 text-end text-xs font-semibold
+                     text-neutral-500 dark:text-neutral-400 uppercase tracking-wide w-28">
+            {{ _t("ca_overdue_installments") }}
+          </th>
+        </tr>
+      </thead>
+      <tbody id="ca-kpib-table-body">
+        <tr>
+          <td colspan="4"
+              class="px-4 py-8 text-center text-sm text-neutral-400 dark:text-neutral-500">
+            {{ _t("Loading...") }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{# ── Section 3 — Refunds Alert ────────────────────────────────────────────── #}
+<section>
+  <h2 class="text-xs font-semibold uppercase tracking-wider
+             text-neutral-500 dark:text-neutral-400
+             mt-8 mb-3 text-start">
+    {{ _t("ca_refunds_alert") }}
+  </h2>
+
+  <div id="ca-refunds-container"
+       class="flex items-start gap-3 px-4 py-4 rounded-xl
+              bg-warning-50 dark:bg-warning-950/30
+              border border-warning-200 dark:border-warning-800">
+    <svg class="w-5 h-5 shrink-0 text-warning-500 dark:text-warning-400 mt-0.5"
+         fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+    </svg>
+    <div id="ca-refunds-content"
+         class="text-sm text-warning-700 dark:text-warning-300 opacity-0 transition-opacity duration-200">
+      {{ _t("Loading...") }}
+    </div>
+  </div>
+</section>
+
+{# ── Error banner (hidden until an API call fails) ────────────────────────── #}
+<div id="ca-error-banner"
+     class="hidden mt-4 flex items-center gap-2 px-4 py-3 rounded-xl
+            bg-danger-50 dark:bg-danger-950/30
+            border border-danger-200 dark:border-danger-800
+            text-sm text-danger-700 dark:text-danger-300">
+  <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M6 18L18 6M6 6l12 12"/>
+  </svg>
+  <span>{{ _t("Error loading data") }}</span>
+  <button onclick="customerAccountsRefresh()"
+          class="ms-2 underline text-danger-600 dark:text-danger-400 text-xs">
+    {{ _t("Try again") }}
+  </button>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Feed formatters.js with locale strings (formatters.js reads window.COLLECTIONS_STRINGS)
+window.COLLECTIONS_STRINGS = {
+  egp:     {{ _t("EGP")     | tojson }},
+  billion: {{ _t("billion") | tojson }},
+  million: {{ _t("million") | tojson }},
+};
+window.CA_STRINGS = {
+  loading:              {{ _t("Loading...")                | tojson }},
+  just_now:             {{ _t("just now")                  | tojson }},
+  ago:                  {{ _t("ago")                       | tojson }},
+  seconds_short:        {{ _t("seconds_short")             | tojson }},
+  minute_short:         {{ _t("minute_short")              | tojson }},
+  minutes_short:        {{ _t("minutes_short")             | tojson }},
+  error:                {{ _t("Error loading data")        | tojson }},
+  ca_total_receivables: {{ _t("ca_total_receivables")      | tojson }},
+  ca_top_risk:          {{ _t("ca_top_risk_concentration") | tojson }},
+  ca_unallocated:       {{ _t("ca_unallocated_wallet")     | tojson }},
+  ca_customers:         {{ _t("ca_customers")              | tojson }},
+  ca_installments:      {{ _t("ca_installments")           | tojson }},
+  ca_overdue_customers: {{ _t("ca_overdue_customers")      | tojson }},
+  ca_top_n_label:       {{ _t("ca_top_n_label")            | tojson }},
+  ca_of_total:          {{ _t("ca_of_total")               | tojson }},
+  ca_refunds_total:     {{ _t("ca_refunds_total")          | tojson }},
+  ca_refunds_records:   {{ _t("ca_refunds_records")        | tojson }},
+  ca_unknown_partners:  {{ _t("ca_unknown_partners")       | tojson }},
+  ca_no_data:           {{ _t("ca_no_data")                | tojson }},
+  lang: {{ lang | tojson }},
+};
+</script>
+<script src="/static/js/formatters.js"></script>
+<script src="/static/js/customer_accounts.js"></script>
+{% endblock %}
