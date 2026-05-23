@@ -231,5 +231,27 @@
   "ca_refunds_total": "إجمالي الاستردادات",
   "ca_refunds_records": "سجل",
   "ca_unknown_partners": "عميل غير معروف",
-  "ca_no_data": "لا توجد بيانات"
+  "ca_no_data": "لا توجد بيانات",
+
+  "ca_dd_customer_id_label":  "رقم العميل",
+  "ca_dd_exposure":           "التعرّض الكامل",
+  "ca_dd_total_due":          "إجمالي عليه",
+  "ca_dd_late_due":           "منها متأخر",
+  "ca_dd_future_due":         "منها مستقبلي",
+  "ca_dd_paid_cash":          "مدفوع نقداً",
+  "ca_dd_total_original":     "إجمالي العقد",
+  "ca_dd_behavior":           "السلوك",
+  "ca_dd_payment_ratio":      "نسبة السداد",
+  "ca_dd_wallet":             "رصيد المحفظة",
+  "ca_dd_installments_title": "الأقساط",
+  "ca_dd_due":                "المتبقي",
+  "ca_dd_timing_late":        "متأخر",
+  "ca_dd_timing_future":      "مستقبلي",
+  "ca_dd_state_unpaid":       "غير مدفوع",
+  "ca_dd_state_partial":      "جزئي",
+  "ca_dd_close":              "إغلاق",
+  "ca_dd_load_more":          "المزيد",
+  "ca_dd_no_results":         "لا توجد أقساط",
+  "ca_dd_error_fetch":        "خطأ في التحميل. حاول مجدداً.",
+  "ca_dd_try_again":          "إعادة المحاولة"
 }

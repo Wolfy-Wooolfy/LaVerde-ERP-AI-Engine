@@ -231,5 +231,27 @@
   "ca_refunds_total": "Total refunds",
   "ca_refunds_records": "records",
   "ca_unknown_partners": "unknown partner(s)",
-  "ca_no_data": "No data"
+  "ca_no_data": "No data",
+
+  "ca_dd_customer_id_label":  "Customer ID",
+  "ca_dd_exposure":           "Full Exposure",
+  "ca_dd_total_due":          "Total Due",
+  "ca_dd_late_due":           "Of Which Late",
+  "ca_dd_future_due":         "Of Which Future",
+  "ca_dd_paid_cash":          "Paid (Cash)",
+  "ca_dd_total_original":     "Contract Total",
+  "ca_dd_behavior":           "Behavior",
+  "ca_dd_payment_ratio":      "Payment Ratio",
+  "ca_dd_wallet":             "Wallet Balance",
+  "ca_dd_installments_title": "Installments",
+  "ca_dd_due":                "Due",
+  "ca_dd_timing_late":        "Late",
+  "ca_dd_timing_future":      "Future",
+  "ca_dd_state_unpaid":       "Unpaid",
+  "ca_dd_state_partial":      "Partial",
+  "ca_dd_close":              "Close",
+  "ca_dd_load_more":          "Load more",
+  "ca_dd_no_results":         "No installments found",
+  "ca_dd_error_fetch":        "Failed to load. Please try again.",
+  "ca_dd_try_again":          "Try again"
 }
