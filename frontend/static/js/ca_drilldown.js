@@ -190,7 +190,7 @@
 
     // Behavior
     _paymentRatio.textContent  = (behavior.payment_ratio_pct != null)
-      ? behavior.payment_ratio_pct.toFixed(1) + '%'
+      ? _fmtPct(behavior.payment_ratio_pct, lang)
       : '—';
     _walletBalance.textContent = _fmtFull(behavior.wallet_balance_egp, lang);
 
@@ -291,6 +291,12 @@
     if (val == null) return '—';
     if (F.formatEGP) return F.formatEGP(val, lang, { fullValue: true });
     return Math.round(val).toLocaleString('en-EG') + ' EGP';
+  }
+
+  function _fmtPct(val, lang) {
+    if (val == null) return '—';
+    var locale = lang === 'ar' ? 'ar-EG' : 'en-EG';
+    return val.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
   }
 
   function _stateLabel(state) {

@@ -69,7 +69,8 @@
 |-------|---------|-------|
 | **M3-S5** | يتقفل أول — الصفحة الأساسية بدون drill-down (شغل قائم) | frontend |
 | **M3-S6** ✅ COMPLETE | Backend — endpoint كشف حساب العميل: يجمّع التعرّض + السلوك + الأقساط لعميل واحد. 21/21 verification PASS، delta صفر على 6 حقول vs Odoo live. DR1 مؤكّد (x_studio_actual_paid_amount). DR2 مؤجّل D-4. تاريخ الإغلاق: 2026-05-23. | backend |
-| **M3-S7** | Frontend — الـ panel + الربط بالنقر على صفوف قائمة KPI B | frontend |
+| **M3-S7** ✅ COMPLETE (desktop) | Frontend — الـ panel + الربط بالنقر على صفوف قائمة KPI B. تأكّد desktop: side panel 440px، 4 أرقام تعرّض، سلوك grid، pagination، عربي + إنجليزي، stale-data isolation. تاريخ الإغلاق: 2026-05-23. | frontend |
+| | Mobile: NOT YET VERIFIED — part of D-3 (deploy pending). | |
 
 **ليه M3-S5 يتقفل الأول:** الصفحة الأساسية شغّالة ومتحقّق منها. نقفلها كـ checkpoint مستقر، وبعدها نبني الـ drill-down على أرض ثابتة. لو حشرنا الـ drill-down في M3-S5، نخاطر نكسر صفحة شغّالة.
 
