@@ -1,0 +1,199 @@
+========================================================================
+  M3-S1: Customer Accounts — Pre-Implementation Discovery
+  Run date:   2026-05-23
+  Odoo URL:   https://laverde.odoo.com/jsonrpc
+  Cost:       $0.00  (no OpenAI calls, read-only RPCs only)
+  Today:      2026-05-23  (Late domain boundary)
+========================================================================
+
+[AUTH] Authenticating...
+  OK uid=1947
+
+========================================================================
+  SECTION 1 — KPI A: إجمالي المستحق على العملاء
+  Model: rs.installment
+  Domain: [('state','=','post')]
+  Measure: due_amount | Groupby: partner_id
+========================================================================
+
+  A1 — groupby partner_id:
+    Distinct partners (groups):       1,272
+    SUM(due_amount):                 2,634,209,716.28 EGP
+
+  A2 — flat aggregate (no groupby):
+    Total records (state='post'):     42,413
+    SUM(due_amount):                  2,634,209,716.28 EGP
+
+  NULL-PARTNER CHECK:
+    A1 grouped sum:       2,634,209,716.28 EGP
+    A2 flat sum:          2,634,209,716.28 EGP
+    Delta:                            0.00 EGP  → MATCH ✓  No null-partner installments affecting KPI A.
+
+  ── BASELINE KPI A ─────────────────────────────────────────
+    إجمالي المستحق:       2,634,209,716.28 EGP
+    عدد العملاء:           1,272
+
+========================================================================
+  SECTION 2 — KPI B: أعلى العملاء تأخراً
+  Model: rs.installment
+  Domain: Late (state='post' + payment_state in [unpaid,partial] + date<2026-05-23)
+  Measure: due_amount | Groupby: partner_id
+========================================================================
+
+  B1 — groupby partner_id (all partners, no limit):
+    Overdue partners (groups):          797
+    SUM(due_amount):                   333,271,714.40 EGP
+
+  Top 20 overdue customers (names redacted):
+  RANK         DUE_AMOUNT EGP  INSTALLMENTS  PARTNER_ID
+  -----  --------------------  ------------  --------------------
+  1             18,202,000.00            76  [REDACTED id=639975]
+  2             16,425,000.00             1  [REDACTED id=1124144]
+  3             12,267,500.00             4  [REDACTED id=59398]
+  4              5,388,656.00             5  [REDACTED id=275466]
+  5              3,860,000.00            20  [REDACTED id=659646]
+  6              3,600,553.00             9  [REDACTED id=633702]
+  7              3,511,226.00             2  [REDACTED id=863804]
+  8              3,209,874.00             8  [REDACTED id=553177]
+  9              3,095,987.00             8  [REDACTED id=1063686]
+  10             2,976,187.00            12  [REDACTED id=62112]
+  11             2,911,600.00             4  [REDACTED id=638267]
+  12             2,820,000.00             2  [REDACTED id=60059]
+  13             2,697,726.00            15  [REDACTED id=653163]
+  14             2,373,086.00             2  [REDACTED id=934810]
+  15             2,321,964.00             3  [REDACTED id=523581]
+  16             2,075,615.00             5  [REDACTED id=932040]
+  17             1,956,500.00             1  [REDACTED id=635900]
+  18             1,951,000.00            24  [REDACTED id=639162]
+  19             1,890,000.00            14  [REDACTED id=640856]
+  20             1,874,925.00             3  [REDACTED id=521813]
+
+  CONCENTRATION RATIO:
+    Top 10 sum:          72,536,983.00 EGP
+    Grand total:        333,271,714.40 EGP
+    أعلى 10 عملاء = 21.8% من إجمالي التأخير
+
+  B2 — flat aggregate (same Late domain, no groupby):
+    Total records matched:             2,042
+    SUM(due_amount):                    333,271,714.40 EGP
+    SUM(amount):                        395,699,297.00 EGP
+    SUM(x_studio_actual_paid):           60,498,582.60 EGP
+    PATH A (amount - actual):           335,200,714.40 EGP
+    SUM(total_due_amount):              335,200,714.40 EGP
+
+  R1a — DOMAIN INTEGRITY (groupby partner sum vs flat sum):
+    B1 Python sum (grouped):        333,271,714.40 EGP
+    B2 flat total:                  333,271,714.40 EGP
+    Delta:                                    0.00 EGP  → EXACT MATCH ✓
+  Late domain applies with equal accuracy to partner-grouped and flat queries.
+  R1 (MODULE_3_PLAN.md §6): domain integrity CONFIRMED.
+
+  R1b — KPI 2 IDENTITY (PATH A vs total_due_amount):
+    PATH A = amount - x_studio_actual_paid:        335,200,714.40 EGP
+    SUM(total_due_amount):                         335,200,714.40 EGP
+    Delta:                                                   0.00 EGP  → IDENTITY HOLDS ✓  (< 1 EGP — kpi_service.py tier: no flag)
+
+  ── BASELINE KPI B ─────────────────────────────────────────
+    إجمالي التأخير:              333,271,714.40 EGP
+    عدد العملاء المتأخرين:        797
+    أعلى 10 عملاء =        21.8% من الإجمالي
+
+========================================================================
+  SECTION 3 — KPI C: رصيد المحفظة غير المخصص
+  Model: rs.account.payment.reconcile
+  Domain: [('state','=','post'), ('residual_amount','>',0)]
+  Measure: residual_amount | Groupby: partner_id
+========================================================================
+
+  C1 — groupby partner_id (residual_amount > 0 only):
+    Reconcile records matched:              198
+    Distinct partners with balance:          27
+    SUM(residual_amount):                   17,214,301.92 EGP
+
+  ── BASELINE KPI C ─────────────────────────────────────────
+    إجمالي المحفظة غير المخصص:         17,214,301.92 EGP
+    عدد العملاء بالرصيد:                 27
+
+========================================================================
+  SECTION 4 — الاستردادات / Refunds
+  Model: rs.account.payment.reconcile
+  Domain: [('state','=','post'), ('amount','<',0)]
+========================================================================
+
+  Flat aggregate (all refunds):
+    Records (amount < 0):           7
+    SUM(amount):                    -719,812.00 EGP  (negative = outflow to customers)
+
+  Null-partner check (عميل غير معروف):
+    Refunds with partner_id=False:           0
+    % of total refund records:             0.0%
+
+  ── BASELINE الاستردادات ──────────────────────────────────
+    إجمالي:                  -719,812.00 EGP
+    عدد السجلات:             7
+    عميل غير معروف:          0  (0.0%)
+
+========================================================================
+  SECTION 5 — OQ2: Reconcile Sub-lines — When Is It Populated?
+  Model: rs.account.payment.reconcile.line
+========================================================================
+
+  search_count([]): 0 record(s)
+
+  OQ2 STATUS: Still 0 records (unchanged from Phase 3, 2026-05-22).
+  Sub-lines remain unused. Per-installment application history is NOT
+  recorded on the wallet side. Impact: Low — does not affect KPI A/B/C.
+
+========================================================================
+  SECTION 6 — OQ4: Reconcile Request — Workflow Role
+  Model: rs.account.payment.reconcile.request
+========================================================================
+
+  OQ4-1 — State distribution (total: 1 request(s)):
+  STATE                         COUNT
+  -------------------------  --------
+  new                               1
+
+  OQ4-2 — Sample request records (limit=3, non-PII fields only):
+
+  Request 1:
+    create_date                               2026-05-17 14:48:27
+    date                                      2026-05-17 12:51:56
+    id                                        2
+    name                                      RR/2026/05/00002
+    state                                     new
+
+  OQ4-3 — Payments per request (groupby reconcile_request_id on rs.account.payment.reconcile):
+     REQUEST (ID only)    PAYMENTS       SUM(amount) EGP
+  --------------------  ----------  --------------------
+          request id=2         205         16,539,062.92
+
+========================================================================
+  DISCOVERY SUMMARY — M3-S1
+========================================================================
+
+  KPI A — إجمالي المستحق على العملاء:
+    Baseline:       2,634,209,716.28 EGP
+    Partners:        1,272
+    Null-partner check: PASS
+
+  KPI B — أعلى العملاء تأخراً:
+    Total late:        333,271,714.40 EGP
+    Partners:           797
+    أعلى 10 =    21.8%
+    R1a (domain integrity): PASS — exact match
+    R1b (KPI2 identity):    PASS — delta=0.0000 EGP
+
+  KPI C — رصيد المحفظة غير المخصص:
+    Baseline:          17,214,301.92 EGP
+    Partners:           27
+
+  الاستردادات:
+    Total:               -719,812.00 EGP
+    Records:             7
+    Null partner:        0  (0.0%)
+
+  OQ2 (reconcile.line): STILL EMPTY — unchanged from Phase 3
+  OQ4 (reconcile.request): 1 request(s) — see §6 above
+
+  All read-only. No data modified in Odoo.
