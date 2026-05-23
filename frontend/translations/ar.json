@@ -209,5 +209,27 @@
   "dd_pending_cheque_note": "يشمل شيك",
   "dd_dq_unassigned": "بعض السجلات ليس لها مشروع محدد.",
   "dd_by_type": "التوزيع بالنوع",
-  "dd_installment_type": "النوع"
+  "dd_installment_type": "النوع",
+
+  "Customer Accounts": "حسابات العملاء",
+  "Customer Accounts Dashboard": "لوحة حسابات العملاء",
+  "ca_overview": "نظرة عامة",
+  "ca_top_overdue_section": "أعلى العملاء تأخراً",
+  "ca_refunds_alert": "تنبيه الاستردادات",
+  "ca_total_receivables": "إجمالي المستحق",
+  "ca_top_risk_concentration": "مخاطر التأخير",
+  "ca_unallocated_wallet": "المحفظة غير المخصّصة",
+  "ca_customers": "عميل",
+  "ca_installments": "قسط",
+  "ca_overdue_customers": "عميل متأخر",
+  "ca_top_n_label": "أعلى {n} عميل",
+  "ca_of_total": "من إجمالي التأخير",
+  "ca_rank": "#",
+  "ca_customer": "العميل",
+  "ca_overdue_amount": "المبلغ المتأخر",
+  "ca_overdue_installments": "الأقساط",
+  "ca_refunds_total": "إجمالي الاستردادات",
+  "ca_refunds_records": "سجل",
+  "ca_unknown_partners": "عميل غير معروف",
+  "ca_no_data": "لا توجد بيانات"
 }

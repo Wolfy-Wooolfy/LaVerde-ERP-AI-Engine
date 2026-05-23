@@ -209,5 +209,27 @@
   "dd_pending_cheque_note": "incl. cheque",
   "dd_dq_unassigned": "Some records have no project assigned.",
   "dd_by_type": "By Type",
-  "dd_installment_type": "Type"
+  "dd_installment_type": "Type",
+
+  "Customer Accounts": "Customer Accounts",
+  "Customer Accounts Dashboard": "Customer Accounts Dashboard",
+  "ca_overview": "Overview",
+  "ca_top_overdue_section": "Top Overdue Customers",
+  "ca_refunds_alert": "Refunds Alert",
+  "ca_total_receivables": "Total Receivables",
+  "ca_top_risk_concentration": "Overdue Risk",
+  "ca_unallocated_wallet": "Unallocated Wallet",
+  "ca_customers": "customers",
+  "ca_installments": "installments",
+  "ca_overdue_customers": "overdue customers",
+  "ca_top_n_label": "Top {n} customers",
+  "ca_of_total": "of total overdue",
+  "ca_rank": "#",
+  "ca_customer": "Customer",
+  "ca_overdue_amount": "Overdue Amount",
+  "ca_overdue_installments": "Installments",
+  "ca_refunds_total": "Total refunds",
+  "ca_refunds_records": "records",
+  "ca_unknown_partners": "unknown partner(s)",
+  "ca_no_data": "No data"
 }
