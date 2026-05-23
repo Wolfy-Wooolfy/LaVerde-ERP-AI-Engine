@@ -1,7 +1,8 @@
 """
 Customer Accounts KPI endpoints.
 
-GET /api/v1/customer-accounts/kpi/total-receivables  — KPI A: Total Customer Receivables
+GET /api/v1/customer-accounts/kpi/total-receivables      — KPI A: Total Customer Receivables
+GET /api/v1/customer-accounts/kpi/top-overdue-customers  — KPI B: Top Overdue Customers
 """
 
 from fastapi import APIRouter, Request, Response
@@ -10,8 +11,12 @@ from loguru import logger
 
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
-from backend.modules.customer_accounts.schemas import TotalReceivablesResponse
+from backend.modules.customer_accounts.schemas import (
+    TopOverdueCustomersResponse,
+    TotalReceivablesResponse,
+)
 from backend.modules.customer_accounts.services.kpi_service import (
+    get_top_overdue_customers,
     get_total_customer_receivables,
 )
 
@@ -38,6 +43,30 @@ async def total_customer_receivables(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("KPI A — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/kpi/top-overdue-customers",
+    summary="KPI B — Top Overdue Customers",
+    response_model=TopOverdueCustomersResponse,
+)
+@limiter.limit("60/minute")
+async def top_overdue_customers(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
+    try:
+        data = await get_top_overdue_customers()
+    except OdooQueryError:
+        logger.warning("KPI B — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("KPI B — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"
