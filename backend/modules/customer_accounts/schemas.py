@@ -5,6 +5,7 @@ KPI A — Total Customer Receivables    (M3-S2).
 KPI B — Top Overdue Customers         (M3-S3).
 KPI C — Unallocated Wallet Balance    (M3-S4).
 Refunds — Alert section summary       (M3-S4).
+Customer Drill-Down                   (M3-S6).
 """
 
 from typing import Literal
@@ -76,3 +77,68 @@ class RefundsSummaryResponse(BaseModel):
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int
     domain: list
+
+
+# ── Customer Drill-Down (M3-S6) ───────────────────────────────────────────────
+
+class DrilldownInstallmentRow(BaseModel):
+    record_id: int
+    date: str                       # YYYY-MM-DD (due date)
+    installment_type_id: int
+    installment_type_name_ar: str
+    payment_state: str              # 'unpaid' | 'partial'
+    timing: str                     # 'late' | 'future' — computed Python-side
+    amount: float                   # face value EGP
+    due_amount: float               # remaining balance EGP
+
+
+class DrilldownExposure(BaseModel):
+    total_due_egp: float            # إجمالي عليه = late + future (متأخر + مستقبلي)
+    late_due_egp: float             # منها متأخر (date < today)
+    future_due_egp: float           # منها مستقبلي (date >= today)
+    paid_cash_egp: float            # دفع — x_studio_actual_paid_amount (cash only)
+    total_original_egp: float       # الإجمالي الأصلي — SUM(amount) all posted installments
+    total_installments: int         # عدد كل أقساط العميل (posted, all states)
+    unpaid_installment_count: int   # عدد الأقساط غير المدفوعة (late + future)
+
+
+class DrilldownBehavior(BaseModel):
+    payment_ratio_pct: float        # نسبة السداد = x_studio_actual_paid / amount × 100
+    wallet_balance_egp: float       # رصيد المحفظة (rs.account.payment.reconcile residual)
+    wallet_record_count: int        # عدد سجلات المحفظة للعميل (residual > 0)
+
+
+class DrilldownHeader(BaseModel):
+    partner_id: int
+    customer_name: str
+
+
+class DrilldownInstallmentPage(BaseModel):
+    items: list[DrilldownInstallmentRow]
+    total_count: int                # total unpaid installments (for pagination display)
+    cursor_current: str | None
+    cursor_next: str | None
+    has_next: bool
+
+
+class CustomerDrilldownData(BaseModel):
+    header: DrilldownHeader
+    exposure: DrilldownExposure
+    behavior: DrilldownBehavior
+    installments: DrilldownInstallmentPage
+
+
+class CustomerDrilldownMeta(BaseModel):
+    request_id: str
+    as_of: str                      # ISO 8601 UTC
+    rpc_duration_ms: int
+    today: str                      # YYYY-MM-DD — the boundary used for late/future split
+    page_size: int
+    sort_by: str
+    sort_dir: str
+
+
+class CustomerDrilldownResponse(BaseModel):
+    version: str
+    data: CustomerDrilldownData
+    meta: CustomerDrilldownMeta

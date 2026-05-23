@@ -41,9 +41,9 @@
 تحقّق منطقي: متأخر + مستقبلي = إجمالي عليه. (assertion في الكود.)
 
 ### 3.3 السلوك
-- آخر دفعة (أحدث تاريخ دفع للعميل).
-- نسبة السداد (دفع ÷ إجمالي الأصلي).
+- نسبة السداد (SUM(x_studio_actual_paid_amount) ÷ SUM(amount) على كل posted installments للعميل). DR1 مؤكّد من M3-S6 discovery.
 - رصيد المحفظة (`rs.account.payment.reconcile` residual للعميل — ممكن صفر).
+- ~~آخر دفعة~~ — **مؤجّل (D-4).** M3-S6 discovery أثبت إن `rs.account.payment.installment` فاضي لعملاء العيّنة (الأقساط "المدفوعة" opening balances مستوردة، مفيش payment events). `write_date` غير صالح (يعرض تاريخ bulk import كأنه دفعة). يُعاد تناولها لما La Verde تكمّل إدخال payment events الحقيقية.
 
 ### 3.4 جدول الأقساط
 كل الأقساط غير المدفوعة للعميل — متأخرة ومستقبلية. كل صف: التاريخ، النوع، الحالة (متأخر/مستقبلي + payment_state)، المبلغ. مرتّب بالتاريخ. pagination لو العميل عنده أقساط كتير (cursor-based، نفس نمط Collections drilldown).
