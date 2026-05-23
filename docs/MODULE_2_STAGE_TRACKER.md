@@ -1,6 +1,6 @@
 # Module 2 — Stage Tracker
 
-**Last updated:** 2026-05-22 (Stage 6 browser verification complete)
+**Last updated:** 2026-05-23 (D-3 added — Module 3 mobile test deferred)
 
 This is the single source of truth for "where are we?" in
 Module 2. Update at the close of every stage.
@@ -59,6 +59,7 @@ into a numbered stage. Each entry carries enough context to pick up cold.
 |---|---|---|---|---|---|
 | D-1 | Stage 8 (proposed) — English installment type names | Cosmetic, non-urgent | Khaled (browser visual check) | 2026-05-22 | In EN mode, the type-breakdown section on KPI 7 cards and drill-down shows Arabic names (قسط دوري, الجراج, …) inside an otherwise English UI. Root cause: Stage 7 Choice 2ج used Arabic-only mapping (`installment_type_name_ar`; see `installment_type_names.py`) with no EN counterpart. Fix: (1) add `installment_type_name_en` to KPI 7 schema, (2) populate EN names in `installment_type_names.py` — names known from Stage 7 Gate 1 discovery: Reservation, Down Payment, Regular, Maintenance, Pool, Club, Garage, Penalty, Modification, Service, Other Service, Termination, Administrative Fees, (3) update frontend to select name by current locale. Scope: backend + frontend, Module 2. |
 | D-2 | today_str() timezone fragility in cache.py | Non-urgent, important — not cosmetic | M3-S3 design (KhElmasry) | 2026-05-23 | `backend/modules/collections/services/cache.py` `today_str()` docstring says "UTC date" but the implementation uses `date.today()` which returns the **local system clock date**, not UTC. Currently correct only because the server runs in Egypt (Cairo). If the server is ever moved to UTC or any other timezone, the Late domain boundary (`date < today`) in KPI 2, KPI 5, and Module 3 KPI B will shift by one day, silently pulling installments into or out of the overdue set. Decision 5.9 mandates `ZoneInfo('Africa/Cairo')` for time boundaries. Required fix: change `today_str()` in both `collections/services/cache.py` and `customer_accounts/services/cache.py` to use `datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()`, correct the docstring, and verify KPI 2, KPI 5, and Module 3 KPI B remain consistent after the change. The same fragility exists in `customer_accounts/services/cache.py` (copied pattern). Raised during M3-S3 design review, 2026-05-23. |
+| D-3 | Mobile responsive — Customer Accounts dashboard (Module 3) | Non-urgent — requires deploy or LAN access | M3-S5 close (KhElmasry) | 2026-05-23 | صفحة `/customer-accounts/dashboard` اتأكّدت على الـ desktop (عربي + إنجليزي) في M3-S5 على fresh server. الموبايل لسه ماتأكّدش — التحقق من الـ responsive layout محتاج deploy أو وصول من جهاز موبايل على نفس الشبكة. المطلوب وقت الاختبار: (1) الـ 3 KPI cards تتراص تحت بعض على الشاشات الصغيرة (grid-cols-1 sm:grid-cols-3)، (2) جدول KPI B مقروء ومتحرّك horizontally (overflow-x-auto)، (3) قسم الاستردادات ظاهر صح، (4) مدخل "Customer Accounts" شغّال في الـ mobile drawer. بعد التأكيد، يتحط tag على M3-S5. المطلوب بعد الاختبار: تحديث MODULE_3_PLAN.md §5 mobile note + تحديث هذا البند إلى "Done". |
 
 ---
 

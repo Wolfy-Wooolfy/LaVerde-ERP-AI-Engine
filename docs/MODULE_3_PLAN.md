@@ -128,7 +128,9 @@
 | **M3-S2** | Backend KPI A — module scaffold + خدمة + endpoint + tests + verification | backend | ✅ COMPLETE — commit 19b5283، 2026-05-23. value=2,634,209,716.28 EGP / 1,272 عميل / 42,413 قسط. delta=0.00 vs baseline. 11 unit tests pass. verified on fresh server (uptime=26.6s، cache_status=fresh). |
 | **M3-S3** | Backend KPI B | backend | ✅ COMPLETE — commit 8876dda، 2026-05-23. total_overdue=333,271,714.40 EGP / 797 عميل / top10=21.8% (21.77% مطابق، اختلاف عرض الخانات فقط). 14 unit tests pass. verified fresh server delta=0.00. |
 | **M3-S4** | Backend KPI C + قسم الاستردادات | backend | ✅ COMPLETE — 2026-05-23. KPI C = 17,214,301.92 EGP / 27 عميل / 198 record (identity delta=0.00). Refunds = −719,812 EGP / 7 records / 0 null-partner (identity delta=0.00). 26 unit tests pass. verified on fresh server (cache_status=fresh, both identity deltas=0.0000 EGP). |
-| **M3-S5** | Frontend — صفحة حسابات العملاء، الـ 3 كروت + قسم الاستردادات + مدخل sidebar | frontend | ⏳ pending |
+| **M3-S5** | Frontend — صفحة حسابات العملاء، الـ 3 كروت + قسم الاستردادات + مدخل sidebar | frontend | ✅ COMPLETE (desktop) — 2026-05-23. template + JS + route (GET /customer-accounts/dashboard) + sidebar entry (desktop + mobile drawer) + app.css rebuild. All 4 endpoints rendering live. AR + EN verified on fresh server (uptime=67s). 2 atomic commits: dc0b7bd (i18n) + c7b2c9a (frontend). |
+
+**Mobile responsive: NOT YET VERIFIED — requires deploy or LAN access. Pending.** (see D-3 in MODULE_2_STAGE_TRACKER.md)
 
 **ملاحظة على M3-S1:** ده مش نفس Phase 3 discovery. Phase 3 اكتشف الـ reconcile model. M3-S1 بيأكّد domains الـ KPIs و baselines — زي pre-implementation discovery اللي كل KPI في Collections كان بيعمله.
 
