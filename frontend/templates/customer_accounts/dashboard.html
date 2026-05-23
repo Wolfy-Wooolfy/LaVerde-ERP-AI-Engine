@@ -4,6 +4,8 @@
 
 {% block page_title %}{{ _t("Customer Accounts Dashboard") }}{% endblock %}
 
+{% from "components/_ca_drilldown_panel.html" import ca_drilldown_panel with context %}
+
 {% block content %}
 
 {# ── Page header ──────────────────────────────────────────────────────────── #}
@@ -189,6 +191,8 @@
 
 {% endblock %}
 
+{% block portal %}{{ ca_drilldown_panel() }}{% endblock %}
+
 {% block extra_scripts %}
 <script>
 // Feed formatters.js with locale strings (formatters.js reads window.COLLECTIONS_STRINGS)
@@ -219,7 +223,33 @@ window.CA_STRINGS = {
   ca_no_data:           {{ _t("ca_no_data")                | tojson }},
   lang: {{ lang | tojson }},
 };
+window.CA_DD_STRINGS = {
+  ca_dd_customer_id_label:  {{ _t("ca_dd_customer_id_label")  | tojson }},
+  ca_dd_exposure:           {{ _t("ca_dd_exposure")           | tojson }},
+  ca_dd_total_due:          {{ _t("ca_dd_total_due")          | tojson }},
+  ca_dd_late_due:           {{ _t("ca_dd_late_due")           | tojson }},
+  ca_dd_future_due:         {{ _t("ca_dd_future_due")         | tojson }},
+  ca_dd_paid_cash:          {{ _t("ca_dd_paid_cash")          | tojson }},
+  ca_dd_total_original:     {{ _t("ca_dd_total_original")     | tojson }},
+  ca_dd_behavior:           {{ _t("ca_dd_behavior")           | tojson }},
+  ca_dd_payment_ratio:      {{ _t("ca_dd_payment_ratio")      | tojson }},
+  ca_dd_wallet:             {{ _t("ca_dd_wallet")             | tojson }},
+  ca_dd_installments_title: {{ _t("ca_dd_installments_title") | tojson }},
+  ca_dd_due:                {{ _t("ca_dd_due")                | tojson }},
+  ca_dd_timing_late:        {{ _t("ca_dd_timing_late")        | tojson }},
+  ca_dd_timing_future:      {{ _t("ca_dd_timing_future")      | tojson }},
+  ca_dd_state_unpaid:       {{ _t("ca_dd_state_unpaid")       | tojson }},
+  ca_dd_state_partial:      {{ _t("ca_dd_state_partial")      | tojson }},
+  ca_dd_close:              {{ _t("ca_dd_close")              | tojson }},
+  ca_dd_load_more:          {{ _t("ca_dd_load_more")          | tojson }},
+  ca_dd_no_results:         {{ _t("ca_dd_no_results")         | tojson }},
+  ca_dd_error_fetch:        {{ _t("ca_dd_error_fetch")        | tojson }},
+  ca_dd_try_again:          {{ _t("ca_dd_try_again")          | tojson }},
+  ca_installments:          {{ _t("ca_installments")          | tojson }},
+  lang: {{ lang | tojson }},
+};
 </script>
 <script src="/static/js/formatters.js"></script>
 <script src="/static/js/customer_accounts.js"></script>
+<script src="/static/js/ca_drilldown.js"></script>
 {% endblock %}

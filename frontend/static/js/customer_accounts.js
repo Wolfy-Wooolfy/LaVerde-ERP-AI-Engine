@@ -100,7 +100,12 @@
       var amtFull = fmt.formatEGP(c.due_amount, lang, { fullValue: true });
       var insts   = fmt.formatCount(c.installment_count, lang);
       rows += '<tr class="border-b border-neutral-100 dark:border-neutral-800'
-            + ' hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">'
+            + ' hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors'
+            + ' cursor-pointer focus-visible:outline-none'
+            + ' focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500"'
+            + ' data-partner-id="' + _escHtml(String(c.customer_id)) + '"'
+            + ' role="button" tabindex="0"'
+            + ' aria-label="' + _escHtml(c.customer_name) + '">'
             + '<td class="px-4 py-3 text-sm tabular text-neutral-500 dark:text-neutral-400">'
             +   _escHtml(String(c.rank))
             + '</td>'
@@ -273,9 +278,36 @@
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
+  function _wireKpiBDrilldown() {
+    var tbody = document.getElementById('ca-kpib-table-body');
+    if (!tbody) return;
+
+    function _openPanel(e) {
+      var tr = e.target.closest('[data-partner-id]');
+      if (!tr) return;
+      var pid = parseInt(tr.getAttribute('data-partner-id'), 10);
+      if (!pid || !window.caCustomerPanel) return;
+      window.caCustomerPanel.open(pid, tr);
+    }
+
+    tbody.addEventListener('click', _openPanel);
+
+    tbody.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var tr = e.target.closest('[data-partner-id]');
+      if (!tr) return;
+      var pid = parseInt(tr.getAttribute('data-partner-id'), 10);
+      if (!pid || !window.caCustomerPanel) return;
+      e.preventDefault();
+      window.caCustomerPanel.open(pid, tr);
+    });
+  }
+
   function init() {
     var topbarBtn = document.getElementById('refresh-btn');
     if (topbarBtn) topbarBtn.onclick = window.customerAccountsRefresh;
+
+    _wireKpiBDrilldown();
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
