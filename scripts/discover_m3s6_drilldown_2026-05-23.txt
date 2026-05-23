@@ -1,0 +1,148 @@
+========================================================================
+  Module 3 — M3-S6: Customer Drill-Down Discovery
+  Run at : 2026-05-23T16:48:05.228496
+  Today  : 2026-05-23
+  ALLOWED_METHODS: ['fields_get', 'read', 'read_group', 'search', 'search_count', 'search_read']
+  READ-ONLY. No writes. No OpenAI. AI cost = $0.00
+========================================================================
+
+[AUTH] Authenticating...
+  OK uid=1947
+
+========================================================================
+  SECTION 1: Identify Sample Customer (Rank 1 — KPI B Late Domain)
+========================================================================
+  Today  : 2026-05-23
+  Domain : [('state', '=', 'post'), ('payment_state', 'in', ['unpaid', 'partial']), ('date', '<', '2026-05-23')]
+
+  Rank-1 customer:
+    partner_id              = 639975
+    customer_name           = [REDACTED]
+    late due_amount         =        18,202,000.00 EGP
+    late installment_count  = 76
+
+  Baseline (M3-S1, 2026-05-23): ~= 18,202,000.00 EGP / 76 installments
+    delta vs baseline = 0.00 EGP — PASS
+
+========================================================================
+  SECTION 2: DR1 — الإجمالي الأصلي (Payment Ratio Denominator)
+========================================================================
+  Goal: which field = 'full original contracted amount' for this customer?
+  Also verify: late + future == unpaid total (التصحيح المفاهيمي assertion).
+------------------------------------------------------------------------
+
+  2A — ALL posted installments for partner_id=639975:
+    __count                              = 120
+    SUM(amount)                          =          29,800,000.00 EGP  ← candidate: إجمالي الأصلي
+    SUM(due_amount)                      =          26,820,000.00 EGP  ← remaining balance
+    SUM(paid_amount)                     =           2,980,000.00 EGP  ← incl. pending cheques
+    SUM(x_studio_actual_paid_amount)     =           2,980,000.00 EGP  ← cash received only
+
+  EQ1: amount == due_amount + paid_amount ?
+    29,800,000.00 == 29,800,000.00  delta=0.0000  PASS
+
+  نسبة السداد candidates (over SUM(amount) as denominator):
+    Formula A (cash):   x_studio_actual_paid_amount / amount = 10.00%
+    Formula B (cheque): paid_amount / amount                  = 10.00%
+
+  2B — Unpaid/Partial (all dates — إجمالي غير المدفوع):
+    __count        = 112
+    SUM(amount)    =          26,820,000.00 EGP
+    SUM(due_amount)=          26,820,000.00 EGP  ← 'إجمالي عليه' for panel header
+
+  2C — Late (متأخر: date < 2026-05-23, unpaid/partial):
+    __count        = 76
+    SUM(due_amount)=          18,202,000.00 EGP  ← 'منها متأخر'
+
+  2D — Future (مستقبلي: date >= 2026-05-23, unpaid/partial):
+    __count        = 36
+    SUM(due_amount)=           8,618,000.00 EGP  ← 'منها مستقبلي'
+
+  ASSERTION — متأخر + مستقبلي = إجمالي عليه (التصحيح المفاهيمي):
+    count: 76 + 36 = 112 vs 112 — PASS
+    due:   18,202,000.00 + 8,618,000.00 = 26,820,000.00 vs 26,820,000.00  delta=0.0000  PASS
+    ASSERTION HOLDS — both count and amount match exactly.
+
+========================================================================
+  SECTION 3: DR2 — آخر دفعة فعلية (Last Payment Date)
+========================================================================
+  Approach A: MAX(write_date) on paid/partial rs.installment records.
+  Approach B: MAX(date) on rs.account.payment.installment via payment_line IDs.
+------------------------------------------------------------------------
+
+  3A — write_date on paid/partial rs.installment:
+    Total paid/partial installments for customer: 8
+    Top 3 by write_date desc:
+      id=14561, due_date=2021-07-11, write_date=2026-04-15 16:47:36, state=paid, amount=742,500.00
+      id=14590, due_date=2021-07-04, write_date=2026-04-15 16:47:36, state=paid, amount=2,500.00
+      id=14560, due_date=2021-07-04, write_date=2026-04-15 16:47:36, state=paid, amount=2,500.00
+    → write_date MAX (fallback candidate): 2026-04-15 16:47:36
+
+  3B — fields_get on rs.account.payment.installment:
+    Filtered fields (20 matching date/partner/installment/amount):
+      activity_date_deadline                     date           'Next Activity Deadline'  
+      activity_state                             selection      'Activity State'  
+      amount                                     monetary       'Amount to Pay'  
+      amount_company_currency                    monetary       'Amount in Company Currency'  
+      amount_currency                            monetary       'Amount in Currency'  
+      create_date                                datetime       'Created on'  
+      date                                       datetime       'Date'  
+      message_partner_ids                        many2many      'Followers (Partners)'   → res.partner
+      my_activity_date_deadline                  date           'My Activity Deadline'  
+      outstanding_amount                         monetary       'Outstanding'  
+      outstanding_amount_json                    json           'Outstanding'  
+      outstanding_amount_preview                 html           'Outstanding Amount Preview'  
+      partner_id                                 many2one       'Partner'   → res.partner
+      payment_line                               one2many       'Payment Lines'   → rs.account.payment.installment.line
+      payment_reconcile_request_id               many2one       'Reconcile Request'   → rs.account.payment.reconcile.request
+      payment_type                               selection      'Payment Type'  
+      reconcile_outstanding_amount               boolean        'Reconcile Outstanding Amount'  
+      reconcile_payment_ids                      many2many      'Payments to Reconcile'   → rs.account.payment.reconcile
+      state                                      selection      'Status'  
+      write_date                                 datetime       'Last Updated on'  
+
+  3C — partner_id on rs.account.payment.installment: YES
+    read_group (no groupby): __count=0, date=None
+
+  3D — payment_line one2many approach:
+    Scanned 120 installments → 0 payment_line IDs collected.
+    No payment_line IDs found — customer has no linked payment records.
+
+========================================================================
+  SECTION 4: Recommendation Summary — DR1 / DR2
+========================================================================
+
+  DR1 — الإجمالي الأصلي (نسبة السداد denominator):
+  ─────────────────────────────────────────────────────────────────────────
+  FIELD: SUM(amount) on ALL posted installments for partner_id.
+  This is the full contractual face value (paid + unpaid combined).
+
+  نسبة السداد = SUM(x_studio_actual_paid_amount) / SUM(amount) × 100
+
+  Why x_studio_actual_paid_amount (not paid_amount)?
+    paid_amount includes pending cheques (received but not yet banked).
+    x_studio_actual_paid_amount = confirmed cash only (PATH A, Collections KPI 2).
+
+  See 2A output above for actual values on sample customer.
+  ─────────────────────────────────────────────────────────────────────────
+
+  DR2 — آخر دفعة فعلية (last payment date):
+  ─────────────────────────────────────────────────────────────────────────
+  PREFERRED: MAX(date) from rs.account.payment.installment
+    via payment_line IDs from rs.installment (Approach 3D).
+    date = payment posting datetime — semantically correct.
+
+  IF partner_id EXISTS on payment.installment (3C result):
+    simpler path: MAX(date) WHERE partner_id = X AND state = 'post'.
+
+  FALLBACK: MAX(write_date) on paid/partial rs.installment (Approach 3A).
+    write_date can update for non-payment reasons — less reliable.
+
+  See Section 3 output above. If both approaches return the same date,
+  prefer the payment.installment path for semantic correctness.
+  ─────────────────────────────────────────────────────────────────────────
+
+
+========================================================================
+  DONE
+========================================================================
