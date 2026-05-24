@@ -5,6 +5,7 @@
 {% block page_title %}{{ _t("Customer Accounts Dashboard") }}{% endblock %}
 
 {% from "components/_ca_drilldown_panel.html" import ca_drilldown_panel with context %}
+{% from "components/_ca_refunds_panel.html" import ca_refunds_panel with context %}
 
 {% block content %}
 
@@ -159,7 +160,13 @@
   <div id="ca-refunds-container"
        class="flex items-start gap-3 px-4 py-4 rounded-xl
               bg-warning-50 dark:bg-warning-950/30
-              border border-warning-200 dark:border-warning-800">
+              border border-warning-200 dark:border-warning-800
+              cursor-pointer hover:opacity-90 transition-opacity
+              focus-visible:outline-none focus-visible:ring-2
+              focus-visible:ring-inset focus-visible:ring-primary-500"
+       role="button"
+       tabindex="0"
+       aria-label="{{ _t('ca_refunds_alert') }}">
     <svg class="w-5 h-5 shrink-0 text-warning-500 dark:text-warning-400 mt-0.5"
          fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -191,7 +198,7 @@
 
 {% endblock %}
 
-{% block portal %}{{ ca_drilldown_panel() }}{% endblock %}
+{% block portal %}{{ ca_drilldown_panel() }}{{ ca_refunds_panel() }}{% endblock %}
 
 {% block extra_scripts %}
 <script>
@@ -248,8 +255,21 @@ window.CA_DD_STRINGS = {
   ca_installments:          {{ _t("ca_installments")          | tojson }},
   lang: {{ lang | tojson }},
 };
+window.CA_RD_STRINGS = {
+  ca_rd_panel_title:  {{ _t("ca_rd_panel_title")  | tojson }},
+  ca_rd_close:        {{ _t("ca_rd_close")        | tojson }},
+  ca_rd_total_label:  {{ _t("ca_rd_total_label")  | tojson }},
+  ca_rd_count_label:  {{ _t("ca_rd_count_label")  | tojson }},
+  ca_rd_date_label:   {{ _t("ca_rd_date_label")   | tojson }},
+  ca_rd_amount_label: {{ _t("ca_rd_amount_label") | tojson }},
+  ca_rd_empty:        {{ _t("ca_rd_empty")        | tojson }},
+  ca_rd_error_fetch:  {{ _t("ca_rd_error_fetch")  | tojson }},
+  ca_rd_try_again:    {{ _t("ca_rd_try_again")    | tojson }},
+  lang: {{ lang | tojson }},
+};
 </script>
 <script src="/static/js/formatters.js"></script>
 <script src="/static/js/customer_accounts.js"></script>
 <script src="/static/js/ca_drilldown.js"></script>
+<script src="/static/js/ca_refunds_panel.js"></script>
 {% endblock %}

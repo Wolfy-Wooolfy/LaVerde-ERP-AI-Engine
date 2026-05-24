@@ -1,0 +1,128 @@
+{# _ca_refunds_panel.html — Refunds detail panel (M3-S8).
+   Usage: {% from "components/_ca_refunds_panel.html" import ca_refunds_panel with context %}
+          {{ ca_refunds_panel() }}
+   Controller: window.caRefundsPanel.open(triggerEl) / .close()
+   IDs: ca-rd-backdrop, ca-rd-panel, ca-rd-close-btn,
+        ca-rd-loading-sentinel, ca-rd-summary, ca-rd-total, ca-rd-count,
+        ca-rd-list-body, ca-rd-empty-msg, ca-rd-error-msg
+   Animation and visibility fully managed by ca_refunds_panel.js.
+   READ-ONLY: no POST or Odoo mutation.
+#}
+
+{% macro ca_refunds_panel() %}
+
+{# ── Backdrop ─────────────────────────────────────────────────────────────── #}
+<div id="ca-rd-backdrop"
+     class="fixed inset-0 z-40 bg-black/50 hidden"
+     aria-hidden="true">
+</div>
+
+{# ── Panel shell ──────────────────────────────────────────────────────────── #}
+<aside id="ca-rd-panel"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="ca-rd-title"
+       class="fixed inset-y-0 end-0 z-50
+              w-full lg:w-[440px]
+              bg-white dark:bg-neutral-900
+              border-s border-neutral-200 dark:border-neutral-800
+              shadow-2xl
+              transition-transform duration-300 ease-in-out"
+       hidden
+       tabindex="-1">
+
+  <div class="flex flex-col h-full">
+
+    {# ── Header ───────────────────────────────────────────────────────────── #}
+    <header class="px-5 py-4 shrink-0
+                   border-b border-neutral-200 dark:border-neutral-700">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <h2 id="ca-rd-title"
+              class="text-base font-semibold
+                     text-neutral-900 dark:text-neutral-100
+                     truncate">
+            {{ _t("ca_rd_panel_title") }}
+          </h2>
+        </div>
+        <button id="ca-rd-close-btn"
+                type="button"
+                class="shrink-0 p-1.5 rounded-lg
+                       text-neutral-500 dark:text-neutral-400
+                       hover:bg-neutral-100 dark:hover:bg-neutral-800
+                       focus-visible:ring-2 focus-visible:ring-primary-500
+                       transition-colors"
+                aria-label="{{ _t('ca_rd_close') }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    {# ── Summary bar — hidden until JS populates it ────────────────────────── #}
+    <div id="ca-rd-summary"
+         class="hidden shrink-0
+                px-5 py-3
+                border-b border-neutral-100 dark:border-neutral-800
+                bg-warning-50 dark:bg-warning-900/40">
+      <div class="flex items-baseline gap-2 flex-wrap">
+        <span class="text-xs font-semibold uppercase tracking-wide
+                     text-warning-600 dark:text-warning-400">
+          {{ _t("ca_rd_total_label") }}:
+        </span>
+        <span id="ca-rd-total"
+              class="text-sm font-bold tabular
+                     text-warning-700 dark:text-warning-300">
+          —
+        </span>
+        <span id="ca-rd-count"
+              class="text-xs text-warning-500 dark:text-warning-500">
+        </span>
+      </div>
+    </div>
+
+    {# ── Scrollable body ──────────────────────────────────────────────────── #}
+    <div class="flex-1 overflow-y-auto min-h-0">
+
+      {# Loading skeleton — shown by JS on open, hidden after data arrives #}
+      <div id="ca-rd-loading-sentinel" class="px-5 py-6 space-y-4 hidden">
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-2/3"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-5/6"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-2/3"></div>
+      </div>
+
+      {# Refund rows — appended by JS #}
+      <ul id="ca-rd-list-body"
+          class="divide-y divide-neutral-100 dark:divide-neutral-800"
+          aria-live="polite">
+      </ul>
+
+      {# Empty state #}
+      <p id="ca-rd-empty-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-neutral-400 dark:text-neutral-500">
+        {{ _t("ca_rd_empty") }}
+      </p>
+
+      {# Error state — message set by JS #}
+      <p id="ca-rd-error-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-danger-600 dark:text-danger-400">
+      </p>
+
+    </div>{# /.scrollable body #}
+
+  </div>
+
+</aside>
+
+{% endmacro %}

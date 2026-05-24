@@ -303,11 +303,27 @@
     });
   }
 
+  function _wireRefundsDrilldown() {
+    var card = document.getElementById('ca-refunds-container');
+    if (!card) return;
+
+    card.addEventListener('click', function () {
+      if (window.caRefundsPanel) window.caRefundsPanel.open(card);
+    });
+
+    card.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      if (window.caRefundsPanel) window.caRefundsPanel.open(card);
+    });
+  }
+
   function init() {
     var topbarBtn = document.getElementById('refresh-btn');
     if (topbarBtn) topbarBtn.onclick = window.customerAccountsRefresh;
 
     _wireKpiBDrilldown();
+    _wireRefundsDrilldown();
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
