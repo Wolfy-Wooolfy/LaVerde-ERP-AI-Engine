@@ -253,5 +253,15 @@
   "ca_dd_load_more":          "Load more",
   "ca_dd_no_results":         "No installments found",
   "ca_dd_error_fetch":        "Failed to load. Please try again.",
-  "ca_dd_try_again":          "Try again"
+  "ca_dd_try_again":          "Try again",
+
+  "ca_rd_panel_title":        "Refunds",
+  "ca_rd_close":              "Close",
+  "ca_rd_total_label":        "Total refunded",
+  "ca_rd_count_label":        "records",
+  "ca_rd_date_label":         "Date",
+  "ca_rd_amount_label":       "Amount",
+  "ca_rd_empty":              "No refunds found",
+  "ca_rd_error_fetch":        "Failed to load. Please try again.",
+  "ca_rd_try_again":          "Try again"
 }

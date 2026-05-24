@@ -253,5 +253,15 @@
   "ca_dd_load_more":          "المزيد",
   "ca_dd_no_results":         "لا توجد أقساط",
   "ca_dd_error_fetch":        "خطأ في التحميل. حاول مجدداً.",
-  "ca_dd_try_again":          "إعادة المحاولة"
+  "ca_dd_try_again":          "إعادة المحاولة",
+
+  "ca_rd_panel_title":        "الاستردادات",
+  "ca_rd_close":              "إغلاق",
+  "ca_rd_total_label":        "الإجمالي",
+  "ca_rd_count_label":        "سجلات",
+  "ca_rd_date_label":         "التاريخ",
+  "ca_rd_amount_label":       "المبلغ",
+  "ca_rd_empty":              "لا توجد استردادات",
+  "ca_rd_error_fetch":        "تعذّر التحميل. حاول مرة أخرى.",
+  "ca_rd_try_again":          "أعد المحاولة"
 }
