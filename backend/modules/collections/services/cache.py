@@ -2,7 +2,7 @@
 Collections module — in-memory cache abstraction (Decision 1.1).
 
 Thin dict-based store with a 60-second TTL. Keys include today's date
-(YYYY-MM-DD) so entries auto-invalidate at UTC midnight without an
+(YYYY-MM-DD) so entries auto-invalidate at Cairo midnight without an
 explicit flush — a call on "today" and a call on "yesterday" never
 share a cache entry.
 
@@ -13,8 +13,9 @@ invalidate / clear) stays identical, so no caller changes are required.
 
 import threading
 import time
-from datetime import date, timezone
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 _lock = threading.Lock()
 _store: dict[str, tuple[Any, float, int]] = {}  # (value, stored_at, ttl)
@@ -27,12 +28,12 @@ def _is_expired(stored_at: float, ttl: int) -> bool:
 
 
 def today_str() -> str:
-    """Return today's UTC date as YYYY-MM-DD. Extracted so tests can patch it."""
-    return date.today().isoformat()
+    """Return today's Cairo-local date as YYYY-MM-DD. Extracted so tests can patch it."""
+    return datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
 
 
 def make_key(name: str) -> str:
-    """Build a cache key scoped to today's UTC date."""
+    """Build a cache key scoped to today's Cairo-local date."""
     return f"{name}:{today_str()}"
 
 

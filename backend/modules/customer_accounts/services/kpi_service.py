@@ -148,10 +148,9 @@ async def get_top_overdue_customers(client: Optional[OdooClient] = None) -> dict
     Domain: Late (Candidate C — MODULE_3_DISCOVERY_M3S1.md §3, R1a PASS):
         state='post'  +  payment_state in [unpaid,partial]  +  date < today
 
-    today source: _cache.today_str() = date.today() (system local date).
+    today source: _cache.today_str() = Cairo-local date (Africa/Cairo, Decision 5.9).
     Uses the same source as Collections KPI 2 (get_late_uncollected) for
     consistency — both KPIs query the identical Late installment set.
-    See D-2 in MODULE_2_STAGE_TRACKER.md for the deferred timezone-hardening note.
 
     All rows are fetched before sorting; the total and customer_count reflect
     ALL overdue customers, not only the top-20. The top-N concentration ratio

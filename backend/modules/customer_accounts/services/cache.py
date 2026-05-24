@@ -2,13 +2,14 @@
 Customer Accounts module — in-memory cache (same interface as collections/services/cache.py).
 
 Separate _store dict so Customer Accounts and Collections never share cache state.
-60-second TTL. Keys include today's date so entries auto-invalidate at UTC midnight.
+60-second TTL. Keys include today's date so entries auto-invalidate at Cairo midnight.
 """
 
 import threading
 import time
-from datetime import date
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 _lock = threading.Lock()
 _store: dict[str, tuple[Any, float, int]] = {}
@@ -21,12 +22,12 @@ def _is_expired(stored_at: float, ttl: int) -> bool:
 
 
 def today_str() -> str:
-    """Return today's UTC date as YYYY-MM-DD. Extracted so tests can patch it."""
-    return date.today().isoformat()
+    """Return today's Cairo-local date as YYYY-MM-DD. Extracted so tests can patch it."""
+    return datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
 
 
 def make_key(name: str) -> str:
-    """Build a cache key scoped to today's UTC date."""
+    """Build a cache key scoped to today's Cairo-local date."""
     return f"{name}:{today_str()}"
 
 
