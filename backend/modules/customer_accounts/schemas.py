@@ -5,6 +5,7 @@ KPI A — Total Customer Receivables    (M3-S2).
 KPI B — Top Overdue Customers         (M3-S3).
 KPI C — Unallocated Wallet Balance    (M3-S4).
 Refunds — Alert section summary       (M3-S4).
+Refunds — Per-record detail           (M3-S8).
 Customer Drill-Down                   (M3-S6).
 """
 
@@ -72,6 +73,27 @@ class RefundsSummaryResponse(BaseModel):
     total_refunds: float                    # EGP SUM(amount) — negative (amount<0 records)
     refund_count: int                       # total refund records (sum of __count per group)
     null_partner_count: int                 # records where partner_id = False (currently 0, per M3-S1)
+    currency: Literal["EGP"]
+    as_of: str
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int
+    domain: list
+
+
+# ── Refunds detail (M3-S8) ───────────────────────────────────────────────────
+
+class RefundsDetailRow(BaseModel):
+    record_id: int
+    customer_id: int                    # partner_id[0]; 0 if partner_id is False
+    customer_name: str                  # partner_id[1]; "غير معروف" if partner_id is False
+    amount: float                       # negative — the refund amount from Odoo
+    date: str                           # YYYY-MM-DD
+
+
+class RefundsDetailResponse(BaseModel):
+    items: list[RefundsDetailRow]
+    total_amount: float                 # SUM(amount) — negative
+    record_count: int
     currency: Literal["EGP"]
     as_of: str
     cache_status: Literal["fresh", "cached"]

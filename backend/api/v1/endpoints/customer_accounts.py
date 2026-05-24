@@ -5,6 +5,7 @@ GET /api/v1/customer-accounts/kpi/total-receivables          — KPI A: Total Cu
 GET /api/v1/customer-accounts/kpi/top-overdue-customers      — KPI B: Top Overdue Customers
 GET /api/v1/customer-accounts/kpi/unallocated-wallet-balance — KPI C: Unallocated Wallet Balance
 GET /api/v1/customer-accounts/refunds/summary                — Refunds alert section
+GET /api/v1/customer-accounts/refunds/detail                 — Refunds per-record detail (M3-S8)
 GET /api/v1/customer-accounts/customer/{partner_id}          — M3-S6: Customer drill-down
 """
 
@@ -19,6 +20,7 @@ from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.customer_accounts.schemas import (
     CustomerDrilldownResponse,
+    RefundsDetailResponse,
     RefundsSummaryResponse,
     TopOverdueCustomersResponse,
     TotalReceivablesResponse,
@@ -32,6 +34,9 @@ from backend.modules.customer_accounts.services.kpi_service import (
     get_top_overdue_customers,
     get_total_customer_receivables,
     get_unallocated_wallet_balance,
+)
+from backend.modules.customer_accounts.services.refunds_detail_service import (
+    get_refunds_detail,
 )
 
 router = APIRouter(prefix="/customer-accounts", tags=["customer_accounts"])
@@ -133,6 +138,30 @@ async def refunds_summary(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("Refunds — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/refunds/detail",
+    summary="Refunds detail — per-record list of all posted refunds (M3-S8)",
+    response_model=RefundsDetailResponse,
+)
+@limiter.limit("60/minute")
+async def refunds_detail(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
+    try:
+        data = await get_refunds_detail()
+    except OdooQueryError:
+        logger.warning("Refunds detail — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("Refunds detail — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"
