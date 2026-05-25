@@ -116,6 +116,11 @@
 
 **القرار المؤجّل (من Phase 3 §4.1):** هل نعرض الاستردادات لعملاء معروفين كخصم من حسابهم، ولا منفصلة تماماً؟ — يتحسم في تصميم الـ frontend stage.
 
+**Drill-down: ✅ COMPLETE (desktop) — 2026-05-24 (M3-S8).**
+البطاقة clickable — دوسة عليها بتفتح panel (IDs: `ca-rd-*`) بقائمة الـ 7 سجلات: اسم العميل، المبلغ (absolute value)، التاريخ. الإجمالي 719,812 EGP / 7 سجلات مطابق identity-equal لـ `/refunds/summary`. 3 عملاء حقيقيين + 4 catch-all "عميل غير معروف". AR + EN verified. التداخل مع ca-dd-* panel اتأكّد — مفيش تسريب بيانات.
+
+**Mobile: NOT YET VERIFIED — part of D-3 (deploy pending).**
+
 ---
 
 ## 5. تقسيم الـ Stages المقترح
