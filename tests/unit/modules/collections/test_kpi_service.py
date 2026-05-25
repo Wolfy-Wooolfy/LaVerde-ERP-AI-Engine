@@ -12,6 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 import pytest
 
 from backend.core.exceptions import OdooQueryError, ReadOnlyViolationError
+from backend.modules.collections.installment_type_names import (
+    INSTALLMENT_TYPE_NAMES_EN,
+    get_type_name_en,
+    _UNKNOWN_TYPE_EN,
+)
 from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX,
@@ -20,6 +25,7 @@ from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX_KPI6,
     _CACHE_KEY_PREFIX_KPI7,
     _PAYMENT_HEADER_MODEL,
+    _fetch_bucket_type_breakdown,
     get_collection_rate_mtd_ytd,
     get_collection_trend_6m,
     get_expected_collections_forecast,
@@ -2226,10 +2232,12 @@ _KPI7_RPC2 = [{"paid_amount": 26_408.0, "x_studio_actual_paid_amount": 26_408.0}
 
 
 @pytest.fixture
-def mock_client_kpi7() -> MagicMock:
-    client = MagicMock()
+def mock_client_kpi7():
     # _rg_responses consumed by _fetch_bucket (2 RPCs per bucket × 4 buckets = 8 total).
     # search_count calls (4 total, one per bucket) return a plain int for cheques_record_count.
+    # _fetch_bucket_type_breakdown is patched at the function level (see below) so its
+    # RPC never reaches execute_kw — this keeps the iterator size stable at 8 entries.
+    client = MagicMock()
     _rg_responses = iter([
         _KPI7_RPC1, _KPI7_RPC2,   # this_month
         _KPI7_RPC1, _KPI7_RPC2,   # this_quarter
@@ -2243,7 +2251,23 @@ def mock_client_kpi7() -> MagicMock:
         return next(_rg_responses)
 
     client.execute_kw = AsyncMock(side_effect=_execute_kw)
-    return client
+
+    async def _mock_type_breakdown(_client, _today, _end, bucket_total):
+        if bucket_total == 0.0:
+            return []
+        return [{
+            "installment_type_id": 3,
+            "installment_type_name_ar": "قسط دوري",
+            "installment_type_name_en": "Regular",
+            "amount": bucket_total,
+            "record_count": 133,
+        }]
+
+    with patch(
+        "backend.modules.collections.services.kpi_service._fetch_bucket_type_breakdown",
+        side_effect=_mock_type_breakdown,
+    ):
+        yield client
 
 
 # ── Test K7-1 — Returns all four buckets ─────────────────────────────────────
@@ -2562,3 +2586,81 @@ async def test_kpi7_year_end_full_collapse(mock_client_kpi7: MagicMock) -> None:
             f"got {result['buckets'][bname]['period_end']!r}"
         )
         assert result["buckets"][bname]["period_start"] == "2026-12-31"
+
+
+# ── D-1 — EN installment type names ──────────────────────────────────────────
+# Tests for INSTALLMENT_TYPE_NAMES_EN, get_type_name_en(), and the EN field
+# returned by _fetch_bucket_type_breakdown. All 13 IDs must be present and
+# match the D-1 specification confirmed from Stage 7 Gate 1 discovery.
+
+
+def test_en_mapping_has_all_13_ids() -> None:
+    assert set(INSTALLMENT_TYPE_NAMES_EN.keys()) == set(range(1, 14))
+
+
+def test_en_mapping_every_id_has_non_empty_name() -> None:
+    for tid, name in INSTALLMENT_TYPE_NAMES_EN.items():
+        assert isinstance(name, str) and name.strip(), (
+            f"ID {tid} has an empty or non-string English name"
+        )
+
+
+def test_en_mapping_matches_d1_spec() -> None:
+    expected = {
+        1:  "Reservation",
+        2:  "Down Payment",
+        3:  "Regular",
+        4:  "Maintenance",
+        5:  "Pool",
+        6:  "Club",
+        7:  "Garage",
+        8:  "Penalty",
+        9:  "Modification",
+        10: "Service",
+        11: "Other Service",
+        12: "Termination",
+        13: "Administrative Fees",
+    }
+    assert INSTALLMENT_TYPE_NAMES_EN == expected
+
+
+def test_get_type_name_en_known_ids() -> None:
+    assert get_type_name_en(3)  == "Regular"
+    assert get_type_name_en(2)  == "Down Payment"
+    assert get_type_name_en(8)  == "Penalty"
+    assert get_type_name_en(13) == "Administrative Fees"
+
+
+def test_get_type_name_en_unknown_id_returns_sentinel() -> None:
+    assert get_type_name_en(99) == _UNKNOWN_TYPE_EN
+
+
+def test_en_and_ar_sentinels_are_distinct() -> None:
+    from backend.modules.collections.installment_type_names import _UNKNOWN_TYPE_AR
+    assert _UNKNOWN_TYPE_EN != _UNKNOWN_TYPE_AR
+
+
+@pytest.mark.asyncio
+async def test_fetch_bucket_type_breakdown_returns_en_name() -> None:
+    rows = [
+        {"installment_type_id": [3, "Regular"],  "amount": 5000.0, "__count": 3},
+        {"installment_type_id": [8, "Penalty"],  "amount": 2000.0, "__count": 1},
+        {"installment_type_id": [13, "AdminFee"], "amount": 1000.0, "__count": 1},
+    ]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    result = await _fetch_bucket_type_breakdown(client, "2026-05-25", "2026-12-31", 8000.0)
+    by_id = {e["installment_type_id"]: e for e in result}
+    assert by_id[3]["installment_type_name_en"]  == "Regular"
+    assert by_id[8]["installment_type_name_en"]  == "Penalty"
+    assert by_id[13]["installment_type_name_en"] == "Administrative Fees"
+
+
+@pytest.mark.asyncio
+async def test_fetch_bucket_type_breakdown_returns_both_names() -> None:
+    rows = [{"installment_type_id": [7, "Garage"], "amount": 1000.0, "__count": 2}]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    result = await _fetch_bucket_type_breakdown(client, "2026-05-25", "2026-12-31", 1000.0)
+    assert result[0]["installment_type_name_ar"] == "الجراج"
+    assert result[0]["installment_type_name_en"] == "Garage"

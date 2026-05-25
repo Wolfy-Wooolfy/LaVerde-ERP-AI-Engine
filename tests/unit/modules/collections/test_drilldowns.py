@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.api.v1.endpoints.collections import _req_id
+from backend.modules.collections.installment_type_names import INSTALLMENT_TYPE_NAMES_EN
 from backend.modules.collections.services.drilldown_service import (
     _decode_cursor,
     _encode_cursor,
@@ -185,6 +186,42 @@ def test_serialize_row_pending_cheque_clamped_to_zero() -> None:
     # paid < actual → max(..., 0) must clamp to 0, never negative (Decision 9.1)
     row = {**_SAMPLE_ROW, "paid_amount": 20_000.0, "x_studio_actual_paid_amount": 30_000.0}
     assert _serialize_row(row)["pending_cheque"] == pytest.approx(0.0)
+
+
+# D-1 — _serialize_row must include installment_type_name_en
+
+
+def test_serialize_row_has_installment_type_name_en_field() -> None:
+    row = {**_SAMPLE_ROW, "installment_type_id": [3, "Regular"]}
+    result = _serialize_row(row)
+    assert "installment_type_name_en" in result
+
+
+def test_serialize_row_type_name_en_resolved_from_mapping() -> None:
+    row = {**_SAMPLE_ROW, "installment_type_id": [3, "Regular"]}
+    assert _serialize_row(row)["installment_type_name_en"] == "Regular"
+
+
+def test_serialize_row_type_name_en_for_garage() -> None:
+    row = {**_SAMPLE_ROW, "installment_type_id": [7, "Garage"]}
+    assert _serialize_row(row)["installment_type_name_en"] == "Garage"
+
+
+def test_serialize_row_ar_and_en_names_coexist() -> None:
+    row = {**_SAMPLE_ROW, "installment_type_id": [2, "Down Payment"]}
+    result = _serialize_row(row)
+    assert result["installment_type_name_ar"] == "المقدمة"
+    assert result["installment_type_name_en"] == "Down Payment"
+
+
+def test_serialize_row_en_name_all_13_ids_resolvable() -> None:
+    for tid in range(1, 14):
+        row = {**_SAMPLE_ROW, "installment_type_id": [tid, "dummy"]}
+        result = _serialize_row(row)
+        assert result["installment_type_name_en"] == INSTALLMENT_TYPE_NAMES_EN[tid], (
+            f"ID {tid}: expected {INSTALLMENT_TYPE_NAMES_EN[tid]!r}, "
+            f"got {result['installment_type_name_en']!r}"
+        )
 
 
 async def test_portfolio_drilldown_uses_read_group_not_search_read(mc: MagicMock) -> None:
