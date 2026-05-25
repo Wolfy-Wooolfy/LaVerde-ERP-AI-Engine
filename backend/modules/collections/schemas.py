@@ -30,6 +30,7 @@ class LateUncollectedResponse(BaseModel):
 class TypeBreakdownEntry(BaseModel):
     installment_type_id: int
     installment_type_name_ar: str
+    installment_type_name_en: str
     amount: float
     record_count: int
 
@@ -92,6 +93,7 @@ class InstallmentRow(BaseModel):
     project_name_en: str
     installment_type_id: int
     installment_type_name_ar: str
+    installment_type_name_en: str
     date: str
     amount: float
     due_amount: float

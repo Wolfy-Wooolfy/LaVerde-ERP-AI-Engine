@@ -23,7 +23,7 @@ from backend.core.exceptions import OdooQueryError
 from backend.shared.odoo.client import OdooClient
 from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.services.kpi_service import _compute_bucket_ends
-from backend.modules.collections.installment_type_names import get_type_name_ar
+from backend.modules.collections.installment_type_names import get_type_name_ar, get_type_name_en
 
 _MODEL = "rs.installment"
 _LA_VERDE_TZ = ZoneInfo("Africa/Cairo")
@@ -129,6 +129,7 @@ def _serialize_row(rec: dict) -> dict:
         "project_name_en":          _PROJECT_NAMES_EN.get(pid, ""),
         "installment_type_id":      type_id,
         "installment_type_name_ar": get_type_name_ar(type_id),
+        "installment_type_name_en": get_type_name_en(type_id),
         "date":                     str(rec.get("date") or ""),
         "amount":                   amount,
         "due_amount":               float(rec.get("due_amount") or 0.0),

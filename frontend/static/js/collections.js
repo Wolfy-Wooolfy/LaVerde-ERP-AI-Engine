@@ -180,8 +180,8 @@
         : (e.amount.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { maximumFractionDigits: 0 }));
       html += '<div>'
         + '<div class="flex items-center justify-between gap-1 mb-0.5">'
-          + '<span class="text-[10px] text-neutral-500 dark:text-neutral-400 truncate" dir="rtl">'
-            + _escHtml(e.installment_type_name_ar)
+          + '<span class="text-[10px] text-neutral-500 dark:text-neutral-400 truncate">'
+            + _escHtml(lang === 'ar' ? e.installment_type_name_ar : (e.installment_type_name_en || e.installment_type_name_ar))
           + '</span>'
           + '<span class="text-[10px] tabular text-neutral-600 dark:text-neutral-300 shrink-0">'
             + _escHtml(pctStr)

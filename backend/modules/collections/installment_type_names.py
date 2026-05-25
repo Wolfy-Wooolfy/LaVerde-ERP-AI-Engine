@@ -1,9 +1,12 @@
 """
-Installment-type ID → official Arabic display name mapping.
+Installment-type ID → official display name mappings (AR + EN).
 
 Source: Gate 1 discovery (2026-05-22) — 13 records in rs.installment.type,
 reviewed against live Odoo by Khaled. All 13 IDs are covered.
 No raw Odoo name reaches any API response (Choice 2ج).
+
+EN names added D-1 (2026-05-25) — official names confirmed from Stage 7
+Gate 1 discovery, keyed to same IDs as the AR mapping.
 
 Live finding: only 8 IDs have actual installment records in Odoo.
 IDs 5, 9, 10, 11, 12 are defined but have zero associated rs.installment rows.
@@ -27,9 +30,26 @@ INSTALLMENT_TYPE_NAMES_AR: dict[int, str] = {
     13: "مصاريف إدارية",
 }
 
-# Sentinel used when an installment_type_id is not in the mapping.
+INSTALLMENT_TYPE_NAMES_EN: dict[int, str] = {
+    1:  "Reservation",
+    2:  "Down Payment",
+    3:  "Regular",
+    4:  "Maintenance",
+    5:  "Pool",
+    6:  "Club",
+    7:  "Garage",
+    8:  "Penalty",
+    9:  "Modification",
+    10: "Service",
+    11: "Other Service",
+    12: "Termination",
+    13: "Administrative Fees",
+}
+
+# Sentinels used when an installment_type_id is not in the mapping.
 # Should never appear in Board-facing output — callers must assert this.
 _UNKNOWN_TYPE_AR = "نوع غير معروف"
+_UNKNOWN_TYPE_EN = "Unknown Type"
 
 
 def get_type_name_ar(type_id: int) -> str:
@@ -40,3 +60,11 @@ def get_type_name_ar(type_id: int) -> str:
     _UNKNOWN_TYPE_AR (or equivalently, that type_id is in INSTALLMENT_TYPE_NAMES_AR).
     """
     return INSTALLMENT_TYPE_NAMES_AR.get(type_id, _UNKNOWN_TYPE_AR)
+
+
+def get_type_name_en(type_id: int) -> str:
+    """Return the reviewed English name for the given installment type ID.
+
+    Falls back to _UNKNOWN_TYPE_EN if the ID is not in the mapping.
+    """
+    return INSTALLMENT_TYPE_NAMES_EN.get(type_id, _UNKNOWN_TYPE_EN)

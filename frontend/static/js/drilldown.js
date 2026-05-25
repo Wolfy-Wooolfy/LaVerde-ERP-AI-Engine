@@ -325,8 +325,8 @@
         : e.amount.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { maximumFractionDigits: 0 });
       html += '<div>'
         + '<div class="flex items-center justify-between gap-2 mb-0.5">'
-          + '<span class="text-xs text-neutral-600 dark:text-neutral-300 truncate" dir="rtl">'
-            + _esc(e.installment_type_name_ar)
+          + '<span class="text-xs text-neutral-600 dark:text-neutral-300 truncate">'
+            + _esc(lang === 'ar' ? e.installment_type_name_ar : (e.installment_type_name_en || e.installment_type_name_ar))
           + '</span>'
           + '<span class="text-xs tabular text-neutral-500 dark:text-neutral-400 shrink-0">'
             + _esc(amtStr)
@@ -367,12 +367,14 @@
           + '</p>'
       : '';
 
-    // Stage 7 — installment_type_name_ar label on each row
-    var typeNote = row.installment_type_name_ar
+    var _typeName = lang === 'ar'
+      ? row.installment_type_name_ar
+      : (row.installment_type_name_en || row.installment_type_name_ar);
+    var typeNote = _typeName
       ? '<span class="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px]'
           + ' bg-neutral-100 dark:bg-neutral-800'
-          + ' text-neutral-500 dark:text-neutral-400" dir="rtl">'
-          + _esc(row.installment_type_name_ar)
+          + ' text-neutral-500 dark:text-neutral-400">'
+          + _esc(_typeName)
         + '</span>'
       : '';
 

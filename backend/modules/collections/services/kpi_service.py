@@ -24,6 +24,7 @@ from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.installment_type_names import (
     INSTALLMENT_TYPE_NAMES_AR,
     get_type_name_ar,
+    get_type_name_en,
     _UNKNOWN_TYPE_AR,
 )
 
@@ -1328,6 +1329,7 @@ async def _fetch_bucket_type_breakdown(
         entries.append({
             "installment_type_id":      type_id,
             "installment_type_name_ar": get_type_name_ar(type_id),
+            "installment_type_name_en": get_type_name_en(type_id),
             "amount":                   float(row.get("amount") or 0.0),
             "record_count":             count,
         })
