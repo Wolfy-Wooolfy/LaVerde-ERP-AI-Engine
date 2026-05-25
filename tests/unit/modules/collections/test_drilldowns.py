@@ -224,6 +224,53 @@ def test_serialize_row_en_name_all_13_ids_resolvable() -> None:
         )
 
 
+# D-6 — installment_type_id field extraction and base-field preservation
+# Migrated from backend/modules/collections/tests/test_stage7.py (legacy path).
+# These complement the D-1 EN-name tests above: D-1 verified the EN name field
+# exists and resolves correctly; these verify the type_id integer and that adding
+# the type-name fields does not corrupt the pre-existing serialised fields.
+
+
+def test_serialize_row_type_id_extracted_from_list() -> None:
+    row = {**_SAMPLE_ROW, "installment_type_id": [3, "Regular"]}
+    assert _serialize_row(row)["installment_type_id"] == 3
+
+
+def test_serialize_row_type_id_from_plain_int() -> None:
+    row = {**_SAMPLE_ROW, "installment_type_id": 7}
+    assert _serialize_row(row)["installment_type_id"] == 7
+
+
+def test_serialize_row_type_id_zero_when_false() -> None:
+    row = {**_SAMPLE_ROW, "installment_type_id": False}
+    assert _serialize_row(row)["installment_type_id"] == 0
+
+
+def test_serialize_row_base_fields_unchanged_after_type_fields_added() -> None:
+    # _SAMPLE_ROW: amount=100_000, x_studio_actual_paid_amount=3_000
+    # → late_amount = 100_000 − 3_000 = 97_000
+    row = {**_SAMPLE_ROW, "installment_type_id": [3, "Regular"]}
+    result = _serialize_row(row)
+    assert result["record_id"] == 1001
+    assert result["payment_state"] == "partial"
+    assert result["amount"] == pytest.approx(100_000.0)
+    assert result["late_amount"] == pytest.approx(97_000.0)
+
+
+def test_serialize_row_all_required_fields_present() -> None:
+    # Includes installment_type_name_en: added by D-1, not in original Stage 7 spec.
+    row = {**_SAMPLE_ROW, "installment_type_id": [3, "Regular"]}
+    result = _serialize_row(row)
+    required = {
+        "record_id", "customer_name", "project_id", "project_name_ar",
+        "project_name_en", "installment_type_id", "installment_type_name_ar",
+        "installment_type_name_en", "date", "amount", "due_amount",
+        "paid_amount", "actual_paid_amount", "pending_cheque",
+        "payment_state", "late_amount",
+    }
+    assert required.issubset(result.keys())
+
+
 async def test_portfolio_drilldown_uses_read_group_not_search_read(mc: MagicMock) -> None:
     """Decision 14.12: portfolio must aggregate via read_group, not pull raw rows.
     Regression guard — if changed to search_read the 42K-row transfer problem returns.

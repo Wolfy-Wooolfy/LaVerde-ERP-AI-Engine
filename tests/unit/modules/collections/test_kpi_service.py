@@ -2664,3 +2664,90 @@ async def test_fetch_bucket_type_breakdown_returns_both_names() -> None:
     result = await _fetch_bucket_type_breakdown(client, "2026-05-25", "2026-12-31", 1000.0)
     assert result[0]["installment_type_name_ar"] == "الجراج"
     assert result[0]["installment_type_name_en"] == "Garage"
+
+
+# ── D-6 — _fetch_bucket_type_breakdown behaviour ─────────────────────────────
+# Migrated from backend/modules/collections/tests/test_stage7.py (legacy path).
+# The D-1 tests above verify name resolution; these cover the remaining
+# behavioural contracts: sort order, identity assertion, zero-count exclusion,
+# unknown-ID guard, empty input, and plain-int type_id handling.
+
+
+@pytest.mark.asyncio
+async def test_breakdown_sort_order_is_amount_descending() -> None:
+    rows = [
+        {"installment_type_id": [3, "Regular"], "amount": 1000.0, "__count": 5},
+        {"installment_type_id": [7, "Garage"],  "amount": 5000.0, "__count": 2},
+        {"installment_type_id": [6, "Club"],    "amount": 2000.0, "__count": 1},
+    ]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
+    amounts = [e["amount"] for e in result]
+    assert amounts == sorted(amounts, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_breakdown_identity_check_passes_when_sums_match() -> None:
+    rows = [
+        {"installment_type_id": [3, "Regular"],     "amount": 6000.0, "__count": 3},
+        {"installment_type_id": [2, "Down Payment"], "amount": 2000.0, "__count": 1},
+    ]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
+    assert abs(sum(e["amount"] for e in result) - 8000.0) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_breakdown_identity_check_raises_on_mismatch() -> None:
+    rows = [
+        {"installment_type_id": [3, "Regular"], "amount": 5000.0, "__count": 3},
+    ]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    with pytest.raises(AssertionError, match="type_breakdown sum"):
+        await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 9999.0)
+
+
+@pytest.mark.asyncio
+async def test_breakdown_zero_count_entries_excluded() -> None:
+    rows = [
+        {"installment_type_id": [3, "Regular"], "amount": 8000.0, "__count": 5},
+        {"installment_type_id": [6, "Club"],    "amount": 0.0,    "__count": 0},
+    ]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
+    assert all(e["record_count"] > 0 for e in result)
+    assert len(result) == 1
+
+
+@pytest.mark.asyncio
+async def test_breakdown_unknown_type_id_raises_value_error() -> None:
+    rows = [
+        {"installment_type_id": [999, "Mystery Type"], "amount": 8000.0, "__count": 3},
+    ]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    with pytest.raises(ValueError, match="installment_type_id=999"):
+        await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
+
+
+@pytest.mark.asyncio
+async def test_breakdown_empty_input_returns_empty_list() -> None:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=[])
+    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 0.0)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_breakdown_type_id_from_plain_int() -> None:
+    rows = [
+        {"installment_type_id": 3, "amount": 1000.0, "__count": 2},
+    ]
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=rows)
+    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 1000.0)
+    assert result[0]["installment_type_id"] == 3
