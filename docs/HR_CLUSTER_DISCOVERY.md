@@ -1,0 +1,224 @@
+# HR Cluster Discovery — Read-Only Pre-Implementation
+## Discovery Evidence Artifact — Provisional, Deferred to Post-June 2026
+
+> **Status:** Provisional. Discovery complete 2026-05-28. Deferred to post-June 2026 (real HR data entry begins June 2026; attendance/payroll data is test data until then).
+> **Script:** `scripts/discover_hr_cluster.py` — commit b7f8c61
+> **Log:** `logs/hr_discovery.log` — canonical run 2026-05-28T13:43:49Z (76 RPC calls)
+> **Method:** JSON-RPC read-only (`search_count`, `search_read`, `read_group`, `fields_get` only — no writes, no AI, no PII).
+
+---
+
+## 1. Model Inventory (Section S1 + S2)
+
+All counts from canonical run 2026-05-28T13:43:49Z.
+
+| Model | Installed? | Count | Data type | Stable? |
+|-------|-----------|-------|-----------|---------|
+| `hr.employee` | ✅ YES | 136 active / 24 inactive | Real | ✅ Stable |
+| `hr.contract` | ✅ YES | 149 total (136 open, 13 close) | Real | Counts real; date_end artifact — see §5 |
+| `hr.attendance` | ✅ YES | 21,800 | **TEST DATA** | ❌ Provisional — real entry begins Jun 2026 |
+| `hr.leave` | ✅ YES | 1 | Empty (expected 0) | ✅ Stable |
+| `hr.leave.allocation` | ✅ YES | 0 | Empty | ✅ Stable |
+| `hr.payslip` | ⚠️ ACCESS ERROR | N/A | Provisional | ❌ Model installed; API user lacks read permission — see §6 |
+| `hr.payslip.run` | ✅ YES | 0 | Provisional | ❌ Provisional |
+| `hr.applicant` | ✅ YES | 0 | Empty | ✅ Stable |
+| `hr.job` | ✅ YES | 84 | Real | ✅ Stable |
+| `hr.department` | ✅ YES | 24 | Real | ✅ Stable — NOT flat; see §3 |
+
+### Custom / Overtime models (S2)
+
+Discovered via `ir.model` keyword search.
+
+| Technical model | Label | State | Count | HR relevance |
+|----------------|-------|-------|-------|-------------|
+| `hr.attendance.overtime` | Attendance Overtime | base | 9,005 | **TEST DATA** — auto-generated from test attendance |
+| `hr.overtime.request` | Overtime Request | base | 0 | Workflow model — empty; real use post-Jun 2026 |
+| `hr.overtime.request.config` | Overtime Request Config | base | 0 | Configuration — empty |
+| `hr.overtime.rule` | Over time Rules | base | 3 | Config rules — 3 records present |
+| `hr.policy.overtime.line` | Overtime Policy Lines | base | 0 | Policy config — empty |
+| `mission.request` | Mission Request | base | 0 | Business Missions workflow — empty |
+| `mission.request.config` | Mission Request Config | base | 0 | Configuration — empty |
+| `commission.*` | Various | base | 0 | **NOT HR** — real-estate sales commission; see §7 |
+| `contract.commission.*` | Various | base | 0 | **NOT HR** — real-estate sales commission; see §7 |
+
+---
+
+## 2. Employee Data Quality (Section S3)
+
+All checks NON-PII: IDs, states, counts, dates only. No names, emails, wages read.
+
+### S3.1 — Active vs inactive
+
+| Category | Count |
+|----------|-------|
+| active = True | **136** |
+| active = False | **24** |
+| **Total (incl. archived)** | **160** |
+
+### S3.2 — Structural gaps (active + inactive)
+
+| Gap | Count | Note |
+|-----|-------|------|
+| No department | 4 | Includes archived employees |
+| No job title | 3 | Minor gap |
+| No manager | 4 | Includes top-level roles |
+
+### S3.3 — Department distribution (active employees, 24 groups)
+
+The UI described departments as "flat — all under Board / top Management." **RPC confirms this is wrong.** There are 24 real sub-departments with a genuine hierarchy. Top groups by headcount:
+
+| Department | Count |
+|-----------|-------|
+| Board / top Management / Finance | 18 |
+| Board / top Management / Commercial / Sales 2 | 14 |
+| Board / top Management / Administration / Services | 14 |
+| Board / top Management / Commercial / Sales 1 | 12 |
+| Board / top Management / Commercial / Sales 3 | 12 |
+| Board / top Management / Fleet | 11 |
+| Board / top Management / Commercial / Marketing | 8 |
+| Board / top Management / HR | 7 |
+| *(17 more groups — 1–5 employees each)* | — |
+
+### S3.4 — Job title distribution (67 groups)
+
+Top titles: Senior Sales Executive (15), Driver (9), Sales Supervisor (9), Cleaner (7), Office Boy (6), Sales Executive (6), Sales Manager (4).
+
+### S3.5 — Tenure date field
+
+`hire_date` does **NOT** exist on `hr.employee`. Discovery found two date candidates: `start_date`, `first_contract_date`. Selected: **`first_contract_date`**.
+
+| Date field | Earliest | Latest |
+|-----------|---------|--------|
+| `first_contract_date` (active employees) | 2017-12-26 | 2025-11-17 |
+| `create_date` (active employees) | 2025-07-07 | 2026-05-25 |
+
+---
+
+## 3. Contracts (Section S4)
+
+### S4.1 — State distribution
+
+| State key | Count | UI label |
+|-----------|-------|---------|
+| `open` | **136** | Running |
+| `close` | **13** | Expired |
+| **Total** | **149** | — |
+
+**UI discrepancy:** Odoo UI showed "124 Running / 12 Expired." RPC count (149 total / 136 open / 13 close) is authoritative. Confirmed by Khaled 2026-05-28 — RPC is ground truth.
+
+### S4.2 — Key fields confirmed
+
+| Field | Type | Label |
+|-------|------|-------|
+| `date_start` | date | Start Date |
+| `date_end` | date | End Date |
+| `state` | selection | Status |
+
+`wage` field NOT read (PII guard — type confirmed via fields_get only).
+
+### S4.3 — Contract expiry in next 60 days
+
+**[FLAG] 114 of 136 open contracts have `date_end` ≤ 2026-07-27.**
+
+This is a **bulk-entry artifact** — confirmed by Khaled 2026-05-28. All 114 contracts share a uniform `date_end` of 2026-06-30 entered during bulk data migration. This is NOT a real expiry wave. The figure is not usable as a KPI baseline until contracts are individually dated.
+
+1 open contract has `date_end = False` (no end date set).
+
+---
+
+## 4. Business Missions (Section S2)
+
+`mission.request` (Mission Request) **EXISTS** as a real model (state=base, 49 fields). Current count = 0 — no missions submitted yet.
+
+Key fields on `mission.request`: `employee_id`, `department_id`, `job_position_id`, `date_from`, `date_to`, `duration`, `duration_type`, `state`, `config_id` (stage workflow), `attendance_sheet_id`.
+
+The model is a full workflow: stages via `mission.request.config.line`, employee + department + job linkage, attendance sheet integration, manager approval. Usable for HR KPIs once real data exists.
+
+---
+
+## 5. Attendance / Payroll — PROVISIONAL (Section S5)
+
+> **!! ALL FIGURES IN THIS SECTION ARE TEST DATA !!**
+> Real HR entry begins June 2026. Do NOT use any number here as a KPI baseline.
+
+### S5.1 — hr.attendance
+
+- Total records: **21,800** (test data)
+- Monthly distribution (test data span):
+
+| Month | Count |
+|-------|-------|
+| November 2025 | 1,183 |
+| December 2025 | 437 |
+| January 2026 | 3,848 |
+| February 2026 | 4,194 |
+| March 2026 | 3,778 |
+| April 2026 | 4,641 |
+| May 2026 | 3,719 |
+
+- Extra/overtime fields on `hr.attendance` (safe, non-relation): `no_validated_overtime_hours` (boolean), `overtime_hours` (float), `overtime_progress` (float), `overtime_status` (selection), `validated_overtime_hours` (float).
+
+### S5.2 — Negative extra-hours hypothesis
+
+The UI showed "Worked Extra Hours" values like −15,537:16. **Hypothesis (confirmed as test-data artifact):** The system working schedule defines expected weekly hours. Since test data was loaded without real check-ins for full scheduled hours, the formula `extra_hours = worked_hours − expected_hours` produces a large negative number per employee. NOT a real HR anomaly.
+
+### S5.3 — hr.attendance.overtime
+
+9,005 records — **auto-generated from test attendance**, not real overtime approvals. Real overtime requests go through `hr.overtime.request` (currently 0 records).
+
+### S5.4 — hr.payslip
+
+`hr.payslip` returned `AccessError` — the model IS installed in Odoo, but the API user account does not have HR/Payroll read permission. Count: unknown. `hr.payslip.run`: count = 0 (provisional).
+
+---
+
+## 6. Notable Findings
+
+| # | Finding | Impact | Action |
+|---|---------|--------|--------|
+| F1 | `hr.department` is NOT flat — 24 real sub-departments with hierarchy | Department-level HR KPIs are feasible | No action needed; was a UI misread |
+| F2 | `hire_date` absent — tenure field is `first_contract_date` | Any "tenure" KPI must use `first_contract_date` | Use confirmed field name in any HR module |
+| F3 | 114/136 open contracts expire ≤ 60d — **bulk artifact**, uniform date 2026-06-30 | "Contract expiry" KPI is NOT usable until contracts individually dated | Defer contract-expiry KPI; revisit post-migration cleanup |
+| F4 | `hr.payslip` blocked by AccessError | Payroll KPIs not currently possible via RPC | See §8 Action A1 |
+| F5 | `mission.request` model exists and has full workflow schema | Business Missions KPIs are technically feasible | No action; ready for use once data exists |
+| F6 | `hr.attendance` = 21,800 test records; `hr.attendance.overtime` = 9,005 auto-generated | All attendance figures provisional | Re-run discovery after June 2026 go-live |
+
+---
+
+## 7. Exclusions
+
+| Name | Why excluded |
+|------|-------------|
+| **Terminations** | Not HR — UI evidence (Terminations app screenshot, 2026-05-28) shows reservation/contract terminations with real-estate fields (Unit, Building, Project, Customer). Technical model not yet identified — to be resolved in a future Collections/Contracts cluster discovery. Out of HR scope. |
+| **`commission.*` models** | Not HR — real-estate sales commission models (`commission.contract`, `commission.line`, `commission.request`, `commission.strategy`, etc.). False positive from "mission" keyword in `ir.model` search. All counts = 0. |
+| **`contract.commission.*` models** | Same as above — real-estate commission distribution, not HR. |
+
+---
+
+## 8. Actions Before Module Build
+
+| ID | Action | Owner | When |
+|----|--------|-------|------|
+| **A1** | Decide whether to grant the API user HR/Payroll read access. If granted, `hr.payslip` becomes readable via RPC and the cluster can include payroll KPIs. | Khaled | Before HR module design |
+| **A2** | Confirm test-data cleanup plan for `hr.attendance` and `hr.attendance.overtime` before June 2026 go-live. Baseline counts should be re-established after cleanup. | Khaled | Before June 2026 |
+| **A3** | Re-run `discover_hr_cluster.py` after June 2026 go-live to establish real baselines for attendance, overtime, and payslip. This document is provisional until then. | AI Engine | Post-June 2026 |
+| **A4** | Identify the technical model name behind the Terminations app (real-estate scope) — to be done in Collections/Contracts cluster discovery, not here. | AI Engine | Collections/Contracts discovery session |
+
+---
+
+## 9. Discovery Metadata
+
+| Item | Value |
+|------|-------|
+| Script | `scripts/discover_hr_cluster.py` |
+| Script commit | b7f8c61 |
+| Log file | `logs/hr_discovery.log` |
+| Canonical run | 2026-05-28T13:43:49Z |
+| Total RPC calls | 76 |
+| Methods used | `search_count`, `search_read`, `read_group`, `fields_get`, `ir.model` reads only |
+| PII read | None — no names, emails, wages, phone numbers, private fields |
+| Writes to Odoo | None |
+
+---
+
+*Provisional artifact. Re-run discovery post-June 2026 before any HR module code is written.*
