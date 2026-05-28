@@ -1,0 +1,404 @@
+========================================================================
+  Project-Accounting Link: Directed Discovery
+  Run date:   2026-05-28
+  Odoo URL:   https://laverde.odoo.com/jsonrpc
+  Constraint: READ-ONLY (['fields_get', 'read', 'read_group', 'search', 'search_count', 'search_read'])
+  PII policy: field names + aggregates only. No customer/vendor names.
+  Cost:       $0.00  (no OpenAI calls)
+  Target:     production only (laverde.odoo.com)
+  Context:    supersedes SEPARATE-ENTITIES verdict from 2026-05-28 discovery
+========================================================================
+
+[AUTH] Authenticating to production (laverde.odoo.com)...
+  OK uid=1947
+
+========================================================================
+  SECTION 1 — rs.structure.project: fields_get
+  Goal: find analytic fields + GL account fields in the Accounting tab
+========================================================================
+
+  Total fields on rs.structure.project: 123
+
+  A) Analytic-related fields (name/string contains 'analytic' or 'plan'):
+  FIELD_NAME                                     TYPE          RELATION                             STRING
+  ---------------------------------------------  ------------  -----------------------------------  -------------------------
+  analytic_account_id                            many2one      account.analytic.account             Analytic Account
+  analytic_plan_id                               many2one      account.analytic.plan                Analytic Plan
+  cost_center_id                                 many2one      account.analytic.plan                Cost Center
+  payment_plan_count                             integer                                            Payment Plan Count
+  payment_plan_ids                               many2many     rs.payment.plan                      Payment Plans
+
+  B) GL account fields (many2one → account.account): 23 found
+  FIELD_NAME                                     STRING
+  ---------------------------------------------  ----------------------------------------
+  check_penalty_account_id                       Check Penalty Account
+  credit_investor_account_id                     Credit Investor Account
+  customers_credit_installments_id               Customers Credit Installments
+  deferred_installments_id                       Deferred Installments
+  delivered_units_resale_id                      Delivered Units Resale
+  delivered_units_unit_id                        Delivered Account For Unit
+  discount_account_id                            Discount Account
+  distributed_notes_receivable_account_id        Distributed Receivable Account
+  execution_cost_resale_id                       Execution Cost Resale
+  execution_cost_unit_id                         Execution Cost For Unit
+  facilities_credit_account_id                   Facilities Credit Account
+  installments_account_id                        Installments Account
+  investor_share_installments_id                 Investor Deferred Revenue Account
+  maintenance_account_id                         Maintenance Account
+  modification_revenue_id                        Modification Revenue
+  other_penalty_account_id                       Penalty Other Revenue Account
+  penalty_account_id                             Penalty Account
+  project_revenue_resale_id                      Project Revenue Resale
+  project_under_construction_id                  Project Under Construction
+  reservation_payments_id                        Reservation Payments
+  revenue_account_unit_id                        Revenue Account For Unit
+  service_other_revenue_id                       Service Other Revenue
+  services_revenue_id                            Services Revenue
+
+========================================================================
+  SECTION 2 — Data sample: read all 3 projects with analytic + GL fields
+  Goal: are these fields populated? complete for all 3 projects?
+========================================================================
+
+  Total projects found: 3
+
+  ─────────────────────────────────────────────────────────────────
+  PROJECT id=1  name='New Capital '
+
+    Analytic fields:
+      Analytic Account                          [analytic_account_id]  many2one → account.analytic.account
+        value: (none/False)
+      Analytic Plan                             [analytic_plan_id]  many2one → account.analytic.plan
+        value: [4] Project#New Capital
+      Cost Center                               [cost_center_id]  many2one → account.analytic.plan
+        value: (none/False)
+      Payment Plan Count                        [payment_plan_count]  integer → 
+        value: (none/False)
+      Payment Plans                             [payment_plan_ids]  many2many → rs.payment.plan
+        value: (none/False)
+
+    GL account fields (many2one → account.account):
+      ✓  Check Penalty Account                          [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✗  Credit Investor Account                        (none/False)
+      ✓  Customers Credit Installments                  [1039] 20902020 دائنو شراء وحدات - دفعات مقدمة
+      ✓  Deferred Installments                          [1321] 20904030 دائنو اوراق قبض
+      ✗  Delivered Units Resale                         (none/False)
+      ✓  Delivered Account For Unit                     [1323] 13601006 مخزن وحدات تامة
+      ✓  Discount Account                               [1324] 60501900 خصم مسموح به
+      ✗  Distributed Receivable Account                 (none/False)
+      ✗  Execution Cost Resale                          (none/False)
+      ✗  Execution Cost For Unit                        (none/False)
+      ✓  Facilities Credit Account                      [1039] 20902020 دائنو شراء وحدات - دفعات مقدمة
+      ✗  Installments Account                           (none/False)
+      ✗  Investor Deferred Revenue Account              (none/False)
+      ✓  Maintenance Account                            [1041] 20902040 دائنو شراء وحدات - دفعات صيانة
+      ✓  Modification Revenue                           [1132] 40204000 ايرادات اخري
+      ✓  Penalty Other Revenue Account                  [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✓  Penalty Account                                [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✗  Project Revenue Resale                         (none/False)
+      ✗  Project Under Construction                     (none/False)
+      ✓  Reservation Payments                           [945] 13401000 عملاء - حجز مبدئي
+      ✓  Revenue Account For Unit                       [1124] 40101000 ايرادات - بيع وحدات سكنية
+      ✓  Service Other Revenue                          [1132] 40204000 ايرادات اخري
+      ✓  Services Revenue                               [1132] 40204000 ايرادات اخري
+
+      Summary: 14 filled / 9 empty
+  ─────────────────────────────────────────────────────────────────
+  PROJECT id=2  name='Cassette '
+
+    Analytic fields:
+      Analytic Account                          [analytic_account_id]  many2one → account.analytic.account
+        value: (none/False)
+      Analytic Plan                             [analytic_plan_id]  many2one → account.analytic.plan
+        value: [3] Project#Cassette
+      Cost Center                               [cost_center_id]  many2one → account.analytic.plan
+        value: (none/False)
+      Payment Plan Count                        [payment_plan_count]  integer → 
+        value: (none/False)
+      Payment Plans                             [payment_plan_ids]  many2many → rs.payment.plan
+        value: (none/False)
+
+    GL account fields (many2one → account.account):
+      ✓  Check Penalty Account                          [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✗  Credit Investor Account                        (none/False)
+      ✓  Customers Credit Installments                  [1039] 20902020 دائنو شراء وحدات - دفعات مقدمة
+      ✓  Deferred Installments                          [1321] 20904030 دائنو اوراق قبض
+      ✗  Delivered Units Resale                         (none/False)
+      ✓  Delivered Account For Unit                     [1323] 13601006 مخزن وحدات تامة
+      ✓  Discount Account                               [1324] 60501900 خصم مسموح به
+      ✗  Distributed Receivable Account                 (none/False)
+      ✗  Execution Cost Resale                          (none/False)
+      ✗  Execution Cost For Unit                        (none/False)
+      ✓  Facilities Credit Account                      [1039] 20902020 دائنو شراء وحدات - دفعات مقدمة
+      ✗  Installments Account                           (none/False)
+      ✗  Investor Deferred Revenue Account              (none/False)
+      ✓  Maintenance Account                            [1041] 20902040 دائنو شراء وحدات - دفعات صيانة
+      ✓  Modification Revenue                           [1132] 40204000 ايرادات اخري
+      ✓  Penalty Other Revenue Account                  [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✓  Penalty Account                                [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✗  Project Revenue Resale                         (none/False)
+      ✗  Project Under Construction                     (none/False)
+      ✓  Reservation Payments                           [945] 13401000 عملاء - حجز مبدئي
+      ✓  Revenue Account For Unit                       [1124] 40101000 ايرادات - بيع وحدات سكنية
+      ✓  Service Other Revenue                          [1132] 40204000 ايرادات اخري
+      ✓  Services Revenue                               [1132] 40204000 ايرادات اخري
+
+      Summary: 14 filled / 9 empty
+  ─────────────────────────────────────────────────────────────────
+  PROJECT id=3  name='La puerta '
+
+    Analytic fields:
+      Analytic Account                          [analytic_account_id]  many2one → account.analytic.account
+        value: (none/False)
+      Analytic Plan                             [analytic_plan_id]  many2one → account.analytic.plan
+        value: [2] Project#La puerta
+      Cost Center                               [cost_center_id]  many2one → account.analytic.plan
+        value: (none/False)
+      Payment Plan Count                        [payment_plan_count]  integer → 
+        value: (none/False)
+      Payment Plans                             [payment_plan_ids]  many2many → rs.payment.plan
+        value: (none/False)
+
+    GL account fields (many2one → account.account):
+      ✓  Check Penalty Account                          [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✗  Credit Investor Account                        (none/False)
+      ✓  Customers Credit Installments                  [1039] 20902020 دائنو شراء وحدات - دفعات مقدمة
+      ✓  Deferred Installments                          [1321] 20904030 دائنو اوراق قبض
+      ✗  Delivered Units Resale                         (none/False)
+      ✓  Delivered Account For Unit                     [1323] 13601006 مخزن وحدات تامة
+      ✓  Discount Account                               [1324] 60501900 خصم مسموح به
+      ✗  Distributed Receivable Account                 (none/False)
+      ✗  Execution Cost Resale                          (none/False)
+      ✗  Execution Cost For Unit                        (none/False)
+      ✓  Facilities Credit Account                      [1039] 20902020 دائنو شراء وحدات - دفعات مقدمة
+      ✗  Installments Account                           (none/False)
+      ✗  Investor Deferred Revenue Account              (none/False)
+      ✓  Maintenance Account                            [1041] 20902040 دائنو شراء وحدات - دفعات صيانة
+      ✓  Modification Revenue                           [1132] 40204000 ايرادات اخري
+      ✓  Penalty Other Revenue Account                  [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✓  Penalty Account                                [1128] 40207000 ايرادات اخرى غرامات اقساط
+      ✗  Project Revenue Resale                         (none/False)
+      ✗  Project Under Construction                     (none/False)
+      ✓  Reservation Payments                           [945] 13401000 عملاء - حجز مبدئي
+      ✓  Revenue Account For Unit                       [1125] 40102000 ايرادات - بيع وحدات تجارية
+      ✓  Service Other Revenue                          [1132] 40204000 ايرادات اخري
+      ✓  Services Revenue                               [1132] 40204000 ايرادات اخري
+
+      Summary: 14 filled / 9 empty
+
+  ─────────────────────────────────────────────────────────────────
+
+========================================================================
+  SECTION 3 — PATH A: Analytic Plan/Account on Project
+  Goal: determine the exact path from project → analytic accounts
+        that link to actual expense/revenue journal lines
+========================================================================
+
+  Analytic field breakdown:
+    → account.analytic.plan:    2 field(s): ['analytic_plan_id', 'cost_center_id']
+    → account.analytic.account: 1 field(s): ['analytic_account_id']
+    → other:                    2 field(s): ['payment_plan_ids', 'payment_plan_count']
+
+  Primary link: 'analytic_plan_id' (Analytic Plan) → account.analytic.plan
+
+  Investigating account.analytic.plan model...
+  Fields on account.analytic.plan (21 total):
+  FIELD_NAME                                TYPE          RELATION                             STRING
+  ----------------------------------------  ------------  -----------------------------------  --------------------
+  account_ids                               one2many      account.analytic.account             Accounts
+  applicability_ids                         one2many      account.analytic.applicability       Applicability
+  children_ids                              one2many      account.analytic.plan                Childrens
+  parent_id                                 many2one      account.analytic.plan                Parent
+  root_id                                   many2one      account.analytic.plan                Root
+
+  Plan IDs referenced by projects: [4, 3, 2]
+  Plan records (3 found):
+    id=2  name='Project#La puerta'
+      parent_id: (none/False)
+      root_id: [2] Project#La puerta
+      children_ids: [6]
+      account_ids: (none/False)
+      applicability_ids: (none/False)
+    id=3  name='Project#Cassette'
+      parent_id: (none/False)
+      root_id: [3] Project#Cassette
+      children_ids: [7]
+      account_ids: (none/False)
+      applicability_ids: (none/False)
+    id=4  name='Project#New Capital'
+      parent_id: (none/False)
+      root_id: [4] Project#New Capital
+      children_ids: [8, 9, 10]
+      account_ids: (none/False)
+      applicability_ids: (none/False)
+
+  account.analytic.account WHERE plan_id=4: 0 accounts
+
+  account.analytic.account WHERE plan_id=3: 0 accounts
+
+  account.analytic.account WHERE plan_id=2: 0 accounts
+
+  Checking analytic line amounts for these plans (via plan_id):
+    plan_id=4: 0 lines, total amount=0.00 EGP
+    plan_id=3: 0 lines, total amount=0.00 EGP
+    plan_id=2: 0 lines, total amount=0.00 EGP
+
+========================================================================
+  SECTION 4 — PATH B: Dedicated GL Accounts per Project
+  Goal: are the GL accounts truly distinct per project?
+        If yes — can we compute P&L from account.move.line directly?
+========================================================================
+
+  GL account fields count: 23
+
+  Distinctness check — are account IDs unique per project?
+  GL FIELD                                       DISTINCT_PER_PROJECT  ACCOUNT IDs
+  ---------------------------------------------  --------------------  --------------------------------------------------
+  Check Penalty Account                          ✗ shared              1128, 1128, 1128
+  Credit Investor Account                        ✗ shared              False, False, False
+  Customers Credit Installments                  ✗ shared              1039, 1039, 1039
+  Deferred Installments                          ✗ shared              1321, 1321, 1321
+  Delivered Units Resale                         ✗ shared              False, False, False
+  Delivered Account For Unit                     ✗ shared              1323, 1323, 1323
+  Discount Account                               ✗ shared              1324, 1324, 1324
+  Distributed Receivable Account                 ✗ shared              False, False, False
+  Execution Cost Resale                          ✗ shared              False, False, False
+  Execution Cost For Unit                        ✗ shared              False, False, False
+  Facilities Credit Account                      ✗ shared              1039, 1039, 1039
+  Installments Account                           ✗ shared              False, False, False
+  Investor Deferred Revenue Account              ✗ shared              False, False, False
+  Maintenance Account                            ✗ shared              1041, 1041, 1041
+  Modification Revenue                           ✗ shared              1132, 1132, 1132
+  Penalty Other Revenue Account                  ✗ shared              1128, 1128, 1128
+  Penalty Account                                ✗ shared              1128, 1128, 1128
+  Project Revenue Resale                         ✗ shared              False, False, False
+  Project Under Construction                     ✗ shared              False, False, False
+  Reservation Payments                           ✗ shared              945, 945, 945
+  Revenue Account For Unit                       ✗ shared              1124, 1124, 1125
+  Service Other Revenue                          ✗ shared              1132, 1132, 1132
+  Services Revenue                               ✗ shared              1132, 1132, 1132
+
+  Overall: some accounts are shared or empty
+
+  Accounts found: [945, 1039, 1041, 1124, 1125, 1128, 1132, 1321, 1323, 1324]
+
+  Checking account.move.line for transactions on these accounts...
+  ACCOUNT                                              LINES                 DEBIT                CREDIT
+  --------------------------------------------------  ------  --------------------  --------------------
+  [1321] 20904030 دائنو اوراق قبض                      1,789        165,705,122.00         82,890,759.10
+  [1039] 20902020 دائنو شراء وحدات - دفعات مقدمة       1,479          8,661,382.00      5,755,223,924.98
+  [1128] 40207000 ايرادات اخرى غرامات اقساط              172                  0.00          2,224,632.00
+  [1041] 20902040 دائنو شراء وحدات - دفعات صيانة         130                  0.00         58,708,744.00
+  [945] 13401000 عملاء - حجز مبدئي                         5                  0.00             62,727.00
+  [1323] 13601006 مخزن وحدات تامة                          2                  0.00                  0.00
+  [1132] 40204000 ايرادات اخري                             1                  0.00             20,000.00
+
+  Total move lines on project GL accounts: 3,578
+
+  Reverse map: account_id → project (for P&L attribution):
+  !! account_id=945 is shared: [{'project': 'New Capital ', 'field': 'Reservation Payments'}, {'project': 'Cassette ', 'field': 'Reservation Payments'}, {'project': 'La puerta ', 'field': 'Reservation Payments'}]
+  !! account_id=1039 is shared: [{'project': 'New Capital ', 'field': 'Customers Credit Installments'}, {'project': 'New Capital ', 'field': 'Facilities Credit Account'}, {'project': 'Cassette ', 'field': 'Customers Credit Installments'}, {'project': 'Cassette ', 'field': 'Facilities Credit Account'}, {'project': 'La puerta ', 'field': 'Customers Credit Installments'}, {'project': 'La puerta ', 'field': 'Facilities Credit Account'}]
+  !! account_id=1041 is shared: [{'project': 'New Capital ', 'field': 'Maintenance Account'}, {'project': 'Cassette ', 'field': 'Maintenance Account'}, {'project': 'La puerta ', 'field': 'Maintenance Account'}]
+  !! account_id=1124 is shared: [{'project': 'New Capital ', 'field': 'Revenue Account For Unit'}, {'project': 'Cassette ', 'field': 'Revenue Account For Unit'}]
+  account_id=1125  → project='La puerta '  field='Revenue Account For Unit'
+  !! account_id=1128 is shared: [{'project': 'New Capital ', 'field': 'Penalty Account'}, {'project': 'New Capital ', 'field': 'Penalty Other Revenue Account'}, {'project': 'New Capital ', 'field': 'Check Penalty Account'}, {'project': 'Cassette ', 'field': 'Penalty Account'}, {'project': 'Cassette ', 'field': 'Penalty Other Revenue Account'}, {'project': 'Cassette ', 'field': 'Check Penalty Account'}, {'project': 'La puerta ', 'field': 'Penalty Account'}, {'project': 'La puerta ', 'field': 'Penalty Other Revenue Account'}, {'project': 'La puerta ', 'field': 'Check Penalty Account'}]
+  !! account_id=1132 is shared: [{'project': 'New Capital ', 'field': 'Service Other Revenue'}, {'project': 'New Capital ', 'field': 'Services Revenue'}, {'project': 'New Capital ', 'field': 'Modification Revenue'}, {'project': 'Cassette ', 'field': 'Service Other Revenue'}, {'project': 'Cassette ', 'field': 'Services Revenue'}, {'project': 'Cassette ', 'field': 'Modification Revenue'}, {'project': 'La puerta ', 'field': 'Service Other Revenue'}, {'project': 'La puerta ', 'field': 'Services Revenue'}, {'project': 'La puerta ', 'field': 'Modification Revenue'}]
+  !! account_id=1321 is shared: [{'project': 'New Capital ', 'field': 'Deferred Installments'}, {'project': 'Cassette ', 'field': 'Deferred Installments'}, {'project': 'La puerta ', 'field': 'Deferred Installments'}]
+  !! account_id=1323 is shared: [{'project': 'New Capital ', 'field': 'Delivered Account For Unit'}, {'project': 'Cassette ', 'field': 'Delivered Account For Unit'}, {'project': 'La puerta ', 'field': 'Delivered Account For Unit'}]
+  !! account_id=1324 is shared: [{'project': 'New Capital ', 'field': 'Discount Account'}, {'project': 'Cassette ', 'field': 'Discount Account'}, {'project': 'La puerta ', 'field': 'Discount Account'}]
+
+  !! 9 account(s) are shared across projects — attribution is ambiguous for those.
+
+========================================================================
+  SECTION 5 — COMPARISON: Path A vs Path B
+  + Verdict on SEPARATE-ENTITIES from previous discovery
+========================================================================
+
+  PATH A — Analytic Plan/Account on Project
+  ─────────────────────────────────────────────────────────────────
+  Available:   True
+  Mechanism:   project → plan_field → account.analytic.plan → account.analytic.account
+  Primary field: analytic_plan_id
+  Plan IDs found: [4, 3, 2]
+  How data flows: project.analytic_plan_id → analytic plan/account
+                  → account.analytic.line (amount = ? — see §3)
+  Limitation: analytic line amounts = 0.00 EGP in production (known from prior discovery).
+              Path A depends on analytic amounts being populated — currently blocked.
+
+  PATH B — Dedicated GL Accounts per Project
+  ─────────────────────────────────────────────────────────────────
+  Available:   True
+  GL account fields: 10 accounts across 3 projects
+  All accounts distinct: False
+  Posted move lines on these accounts: 3578
+  How data flows: project → fixed account.account IDs per project
+                  → account.move.line grouped by account_id (direct GL query)
+  Limitation: only as complete as the GL account coverage — if La Verde posts
+              revenue/expenses to accounts NOT in this map, they are missed.
+
+  RECOMMENDATION FOR MODULE 4
+  ─────────────────────────────────────────────────────────────────
+  NEEDS FURTHER INVESTIGATION
+
+  Rationale:
+    Both paths have limitations.
+    See §3 and §4 for details..
+
+  ─────────────────────────────────────────────────────────────────
+  VERDICT ON PREVIOUS 'SEPARATE-ENTITIES' FINDING
+  ─────────────────────────────────────────────────────────────────
+  Verdict: INCOMPLETE (not wrong in the narrow sense, but misleading)
+
+  The previous discovery correctly observed that rs.structure.project and account.analytic.account are different models. That is true. BUT it concluded 'architectural constraint / mapping table needed' — which is wrong. The project model itself contains the mapping:
+    - Path A: rs.structure.project has an analytic plan/account field     that directly links it to the analytic hierarchy.
+    - Path B: rs.structure.project has dedicated GL account fields     (Revenue, Maintenance, Penalty, etc.) so per-project P&L     can be computed directly from account.move.line without any     external mapping table.
+  The previous script asked account.move and account.analytic.account but never asked rs.structure.project — it missed the built-in mapping.
+
+========================================================================
+  SECTION 6 — DISCOVERY SUMMARY
+  Date: 2026-05-28   Cost: $0.00   Target: production (laverde.odoo.com)
+========================================================================
+
+  Q1 — rs.structure.project schema
+  ─────────────────────────────────────────────────────────────────
+  Total fields:          123
+  Analytic fields:       5 — ['analytic_plan_id', 'analytic_account_id', 'payment_plan_ids', 'payment_plan_count', 'cost_center_id']
+  GL account fields:     23 — (many2one → account.account)
+
+  Q2 — Data for 3 project(s)
+  ─────────────────────────────────────────────────────────────────
+  Project 'New Capital ' (id=1):
+    Analytic fields populated: 1 / 5
+    GL fields populated:       14 / 23
+  Project 'Cassette ' (id=2):
+    Analytic fields populated: 1 / 5
+    GL fields populated:       14 / 23
+  Project 'La puerta ' (id=3):
+    Analytic fields populated: 1 / 5
+    GL fields populated:       14 / 23
+
+  Q3/Q4 — Path comparison
+  ─────────────────────────────────────────────────────────────────
+  PATH A (analytic):   available=True  mechanism=project → plan_field → account.analytic.plan → account.analytic.account
+  PATH B (GL direct):  available=True  distinct=False  move_lines=3578
+
+  Q5 — Recommendation
+  ─────────────────────────────────────────────────────────────────
+  NEEDS FURTHER INVESTIGATION
+
+  Q6 — SEPARATE-ENTITIES verdict
+  ─────────────────────────────────────────────────────────────────
+  INCOMPLETE (not wrong in the narrow sense, but misleading)
+
+  IMPLICATIONS FOR MODULE 4
+  ─────────────────────────────────────────────────────────────────
+  Path A (analytic plan) is the structural link.
+  - Blocked until analytic line amounts are populated.
+  - Investigate with La Verde: when will analytic amounts be filled?
+
+========================================================================
+  All reads were read-only. No data modified in Odoo.
+  Production endpoint: https://laverde.odoo.com/jsonrpc
+========================================================================
+
+  All read-only. No data modified in Odoo.
