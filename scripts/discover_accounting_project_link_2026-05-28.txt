@@ -1,0 +1,292 @@
+========================================================================
+  Accounting Project-Link Discovery
+  Run date:   2026-05-28
+  Odoo URL:   https://laverde.odoo.com/jsonrpc
+  Constraint: READ-ONLY (['fields_get', 'read', 'read_group', 'search', 'search_count', 'search_read'])
+  PII policy: customer/vendor names redacted; field names + aggregates OK
+  Cost:       $0.00  (no OpenAI calls)
+  Target:     production only — NOT the test DB (laverde-test.odoo.com)
+========================================================================
+
+[AUTH] Authenticating to production (laverde.odoo.com)...
+  OK uid=1947
+
+========================================================================
+  SECTION 1 — Schema Discovery
+  Goal: technical field names on account.move and account.move.line
+  A) Real Estate Details fields (unit/building/zone/phase/project/reservation)
+  B) Analytic fields (analytic_distribution and related)
+========================================================================
+
+  A) account.move — fields_get
+
+  Found 6 RE candidate field(s) on account.move:
+  FIELD_NAME                                     TYPE          RELATION                             STRING
+  ---------------------------------------------  ------------  -----------------------------------  --------------------
+  building_id                                    many2one      rs.structure.building                Building
+  phase_id                                       many2one      rs.structure.phase                   Phase
+  project_id                                     many2one      rs.structure.project                 Project
+  reservation_id                                 many2one      rs.reservation                       Reservation
+  unit_id                                        many2one      rs.structure.unit                    Unit
+  zone_id                                        many2one      rs.structure.zone                    Zone
+
+  B) account.move.line — fields_get
+
+  Found 6 RE candidate field(s) on account.move.line:
+    building_id                                    many2one      rs.structure.building                Building
+    phase_id                                       many2one      rs.structure.phase                   Phase
+    price_unit                                     float                                              Unit Price
+    project_id                                     many2one      rs.structure.project                 Project
+    unit_id                                        many2one      rs.structure.unit                    Unit
+    zone_id                                        many2one      rs.structure.zone                    Zone
+
+  Analytic fields on account.move.line:
+    analytic_coverage                              float                                              Analytic Coverage
+    analytic_distribution                          json                                               Analytic Distribution
+    analytic_line_ids                              one2many      account.analytic.line                Analytic lines
+    analytic_precision                             integer                                            Analytic Precision
+    distribution_analytic_account_ids              many2many     account.analytic.account             Distribution Analytic Account
+
+========================================================================
+  SECTION 2 — Revenue Coverage: entries with Project set (Real Estate Details)
+  Goal: coverage count + move_type breakdown
+========================================================================
+
+  Project field identified: 'project_id'
+  Type: many2one  Relation: rs.structure.project  String: Project
+
+  Posted entries (total):              9,158
+  Posted entries WITH Project:         8,966  (97.9%)
+  Posted entries WITHOUT Project:        192
+
+  Move type breakdown (entries WITH project set):
+  MOVE_TYPE                          COUNT
+  ------------------------------  --------
+  entry                              8,966
+
+========================================================================
+  SECTION 3 — Analytic Hierarchy: Project-level accounts + Phase → Project path
+  Goal: identify root accounts (Project level) for data-level comparison in §5
+========================================================================
+
+  Available key fields: parent_id=False, complete_name=False, plan_id=True
+
+  parent_id not available — fetching sample of all accounts for hierarchy clues:
+  1         Internal
+  38        Phase#4
+  39        Phase#1
+  40        Phase#3
+  41        Phase#2
+  42        Phase#1
+  43        Zone#9
+  44        Zone#8
+  45        Zone#2
+  46        Zone#1
+  47        Zone#7
+  48        Zone#6
+  49        Zone#5
+  50        Zone#4
+  51        Zone#3
+  52        Zone#2
+  53        Zone#1
+  311       Building#La puerta
+  312       Building#225
+  313       Building#224
+  314       Building#223
+  315       Building#222
+  316       Building#221
+  317       Building#220
+  318       Building#219
+  319       Building#218
+  320       Building#217
+  321       Building#216
+  322       Building#215
+  323       Building#214
+  324       Building#213
+  325       Building#212
+  326       Building#211
+  327       Building#210
+  328       Building#209
+  329       Building#208
+  330       Building#207
+  331       Building#206
+  332       Building#205
+  333       Building#204
+  334       Building#203
+  335       Building#202
+  336       Building#201
+  337       Building#200
+  338       Building#199
+  339       Building#198
+  340       Building#197
+  341       Building#196
+  342       Building#195
+  343       Building#194
+
+  Total analytic accounts: 2,167   Root (Project-tier): 50
+
+========================================================================
+  SECTION 4 — Production Expense State
+  EXPECTED RESULT: likely zero — production has not received expense data yet.
+  Zero is the expected finding here, not a failure.
+========================================================================
+
+  Posted vendor bills (in_invoice + in_refund):        0
+
+  All posted move_types (context):
+    entry                              9,158
+
+  Expense move lines (posted, account_type in ['expense', 'expense_depreciation', 'expense_direct_cost']):
+    Line count:            0
+    SUM(debit):                   0.00 EGP
+    SUM(credit):                  0.00 EGP
+
+  ── Test DB context (laverde-test.odoo.com) ──────────────────────────────
+  Source: Khaled's manual inspection — NOT an RPC. Zero RPCs sent to test DB.
+  Observed: 9 vendor bills (in_invoice), total ~85,496 EGP.
+  Analytic Distribution on those bills links at Phase level
+    (e.g. 'PhasePhase1998', not Project directly).
+  Phase.parent_id → Project (to be confirmed vs §3 hierarchy).
+  This is a MODEL for how expenses will look when they enter production.
+  It is NOT a statement about production state (production measured above).
+
+  ⚠️  IMPLICATION (production = 0 vendor bills):
+  The expense-linking mechanism (Analytic Distribution) is documented
+  from schema (fields_get in §1) + test DB observation (above) ONLY.
+  It cannot be verified against real production expense data at this time.
+  DEFERRED: verify Analytic Distribution in a later discovery session
+  after expense data is entered into production.
+
+========================================================================
+  SECTION 5 — Unification: are the two 'Project' references the same entity?
+  Method: DATA-LEVEL comparison, not schema-only.
+  Step A: read actual Project values (ID + name) from RE Details on posted entries
+  Step B: list Project-tier analytic accounts (from §3)
+  Step C: compare IDs and names — same model? overlapping records?
+  Verdict: identical / same-model-different-records / separate-entities / inconclusive
+========================================================================
+
+  RE Details project field: 'project_id'
+  Field type:     many2one
+  Relation model: rs.structure.project
+
+  Step A — Reading actual Project values from account.move (up to 50 entries):
+  Distinct Project values in RE Details (2 found):
+  ID          NAME
+  ----------  -------------------------------------------------------
+  2           Project#Cassette
+  1           Project#New Capital
+
+  Step B — Analytic Project-tier accounts (root-level from §3):
+  ID          NAME
+  ----------  -------------------------------------------------------
+  1           Internal
+  38          Phase#4
+  39          Phase#1
+  40          Phase#3
+  41          Phase#2
+  42          Phase#1
+  43          Zone#9
+  44          Zone#8
+  45          Zone#2
+  46          Zone#1
+  47          Zone#7
+  48          Zone#6
+  49          Zone#5
+  50          Zone#4
+  51          Zone#3
+  52          Zone#2
+  53          Zone#1
+  311         Building#La puerta
+  312         Building#225
+  313         Building#224
+  314         Building#223
+  315         Building#222
+  316         Building#221
+  317         Building#220
+  318         Building#219
+  319         Building#218
+  320         Building#217
+  321         Building#216
+  322         Building#215
+  323         Building#214
+  324         Building#213
+  325         Building#212
+  326         Building#211
+  327         Building#210
+  328         Building#209
+  329         Building#208
+  330         Building#207
+  331         Building#206
+  332         Building#205
+  333         Building#204
+  334         Building#203
+  335         Building#202
+  336         Building#201
+  337         Building#200
+  338         Building#199
+  339         Building#198
+  340         Building#197
+  341         Building#196
+  342         Building#195
+  343         Building#194
+
+  Step C — Comparison:
+  RE relation model:       rs.structure.project
+  Analytic account model:  account.analytic.account
+  Relation matches model:  False
+  RE project IDs:          [1, 2]
+  Analytic root IDs:       [1, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343]
+  ID overlap:              [1]
+  Name overlap:            []
+
+  ─────────────────────────────────────────────────────────────────
+  UNIFICATION VERDICT: SEPARATE-ENTITIES
+  RE Details 'project_id' points to 'rs.structure.project', NOT to account.analytic.account. These are separate entity types. Module 4 would need a mapping between 'rs.structure.project' records and account.analytic.account records to unify revenue and expense by project. This is a significant architectural constraint — must be resolved before planning.
+  ─────────────────────────────────────────────────────────────────
+
+========================================================================
+  SECTION 6 — DISCOVERY SUMMARY
+  Date: 2026-05-28   Cost: $0.00   Target: production (laverde.odoo.com)
+========================================================================
+
+  Q1 — Mechanism 1: Real Estate Details (Revenue)
+  ─────────────────────────────────────────────────────────────────
+  RE fields on account.move:      6
+  Field names:                    ['unit_id', 'building_id', 'zone_id', 'phase_id', 'project_id', 'reservation_id']
+  Project field identified:       project_id
+  Coverage:                       8,966 / 9,158 posted entries (97.9%)
+
+  Q2 — Mechanism 2: Analytic Distribution (Expenses)
+  ─────────────────────────────────────────────────────────────────
+  Analytic fields on move.line:   ['analytic_distribution', 'analytic_precision', 'distribution_analytic_account_ids', 'analytic_line_ids', 'analytic_coverage']
+  Analytic Project-tier accounts: 50 (of 2,167 total analytic accounts)
+  Project names:                  ['Internal', 'Phase#4', 'Phase#1', 'Phase#3', 'Phase#2', 'Phase#1', 'Zone#9', 'Zone#8', 'Zone#2', 'Zone#1', 'Zone#7', 'Zone#6', 'Zone#5', 'Zone#4', 'Zone#3', 'Zone#2', 'Zone#1', 'Building#La puerta', 'Building#225', 'Building#224', 'Building#223', 'Building#222', 'Building#221', 'Building#220', 'Building#219', 'Building#218', 'Building#217', 'Building#216', 'Building#215', 'Building#214', 'Building#213', 'Building#212', 'Building#211', 'Building#210', 'Building#209', 'Building#208', 'Building#207', 'Building#206', 'Building#205', 'Building#204', 'Building#203', 'Building#202', 'Building#201', 'Building#200', 'Building#199', 'Building#198', 'Building#197', 'Building#196', 'Building#195', 'Building#194']
+
+  Q3 — Unification (data-level)
+  ─────────────────────────────────────────────────────────────────
+  Verdict:   SEPARATE-ENTITIES
+  Detail:    RE Details 'project_id' points to 'rs.structure.project', NOT to account.analytic.account. These are separate entity types. Module 4 would need a mapping between 'rs.structure.project' records and account.analytic.account records to unify revenue and expense by project. This is a significant architectural constraint — must be resolved before planning.
+
+  Q4 — Production Expense State
+  ─────────────────────────────────────────────────────────────────
+  Posted vendor bills (in_invoice/in_refund):         0
+  Expense move lines (GL, posted):                    0
+  Test DB (Khaled manual, NOT production):     9 vendor bills, ~85,496 EGP — MODEL only
+  ⚠️  Expense mechanism documented from schema + test DB observation ONLY.
+    Verification deferred to later discovery after expenses enter production.
+
+  IMPLICATIONS FOR MODULE 4
+  ─────────────────────────────────────────────────────────────────
+  Revenue and expense Project references are SEPARATE entity types.
+  Module 4 cannot join them directly — a mapping table is required.
+  This must be designed before Module 4 planning can proceed.
+  Action: confirm with La Verde how RE project entity relates to analytic accounts.
+
+========================================================================
+  All reads were read-only. No data modified in Odoo.
+  Production endpoint: https://laverde.odoo.com/jsonrpc
+  Test DB context: from Khaled's manual inspection only — zero RPCs to test DB.
+========================================================================
+
+  All read-only. No data modified in Odoo.
