@@ -244,7 +244,7 @@ Project#La puerta / Phase#4 / Zone#9 / Building#La puerta / Unit#DO-244
 | # | السؤال | الأولوية |
 |---|--------|---------|
 | OQ-ACC-1 | **المصروفات = 0** — هل لسه ما انتقلتش في الـ migration؟ هل فيه خطة لإدخالها؟ | **حرج — يمنع P&L** |
-| OQ-ACC-2 | **Analytic amounts = 0** — هل ده migration issue؟ هل يمكن استرداد الأرقام من GL (account.move.line) عبر `move_line_id`؟ | **حرج — يمنع project P&L** |
+| OQ-ACC-2 | **Analytic amounts = 0** — الأرقام ما اتملّيتش بعد (migration issue مرجّح). لكن per-project P&L وجد مساراً مباشراً بديلاً — **Path C** عبر `project_id` على `account.move` (97.9% coverage). المنع الحقيقي للـ per-project P&L هو غياب المصروفات، مش الـ analytic amounts. التفاصيل: `scripts/discover_project_accounting_link.py` (2026-05-28). | **السؤال الأهم الآن:** هل المصروفات لما تتدخل ستحمل `project_id` على القيد؟ — يتحدّد لما المصروفات تتدخل في production |
 | OQ-ACC-3 | **Cash one-sided** — هل ده opening balances فقط؟ متى بيبدأ تسجيل الصرف (مدفوعات للموردين/مصاريف)؟ | عالية |
 | OQ-ACC-4 | **Date anomalies** — قيد بتاريخ 1015-05-31 وقيد بتاريخ 2026-10-22 (مستقبلي) — يُصحَّحوا؟ | متوسطة |
 | OQ-ACC-5 | **Analytic account_id = (none)** — لماذا 1,977 سطر تحليلي بدون `account_id`؟ هل التحليلي linked بطريقة مختلفة في هذا الـ version؟ | عالية |
@@ -304,5 +304,36 @@ Discovery تاني يتعمل بعد ما **كل الشروط الثلاثة** �
 
 ---
 
+---
+
+## 12. تحديث 2026-05-28 — الربط المباشر عبر project_id (Discovery موجَّه)
+
+> **السكربت:** `scripts/discover_project_accounting_link.py` — run 2026-05-28.
+> **الهدف:** مراجعة نتيجة "SEPARATE-ENTITIES" من discovery ثانٍ بنفس التاريخ.
+
+### نتيجة "SEPARATE-ENTITIES" — اتراجعت
+
+نتيجة discovery سابق (2026-05-28، `discover_accounting_project_link.py`) كانت:
+> "RE Details `project_id` points to `rs.structure.project`, NOT to `account.analytic.account` — عقبة معمارية — mapping table مطلوب."
+
+هذه النتيجة **INCOMPLETE / مضلّلة**. صح في المعنى الضيّق (الموديلين مختلفان) لكن خاطئة في الاستنتاج. السكربت السابق لم يسأل `rs.structure.project` عن نفسه — وحين سُئل:
+
+### الاكتشافات الثلاثة الرئيسية
+
+**1. Path C — project_id على account.move (المسار الأساسي ✓)**
+كل قيد محاسبي (`account.move`) يحمل `project_id` → `rs.structure.project` مباشرةً. تغطية 8,966 / 9,158 قيود (97.9%). Per-project P&L = `account.move.line` WHERE `move_id.project_id = X` AND income/expense. لا mapping table، لا analytic amounts، لا join معقّد. 192 قيد بدون `project_id` = "غير مخصّص" (قرار تصميم لاحق، مش عقبة الآن).
+
+**2. Path A — Analytic Plan (احتياطي)**
+`rs.structure.project` عنده `analytic_plan_id` → `account.analytic.plan` مملوء للمشاريع الثلاثة (plan IDs: 2, 3, 4). الحسابات التحليلية تحت child plans (6/7/8/9/10) — غير مؤكّدة بالكامل. Analytic line amounts = 0 — محجوب. يُعاد تقييمه لما analytic amounts تتملأ.
+
+**3. Path B — خريطة حسابات GL للمشروع (مرفوض)**
+`rs.structure.project` عنده 23 حقل GL (Revenue, Maintenance, Penalty, إلخ) — لكن الحسابات **مشتركة** بين المشاريع الثلاثة (9 من 10 نفس account_id). Attribution من account_id وحده غير ممكن.
+
+### السؤال المفتوح الجديد (يحلّ محلّ OQ-ACC-2)
+
+لما المصروفات تتدخل في production: هل ستحمل `project_id` على القيد (فـ Path C يشتغل لها) أم ستربط بالمشروع فقط عبر analytic distribution (فـ Path A يصبح ضروريًا)؟ هذا يتحدّد من أول فاتورة مصروف حقيقية تدخل production.
+
+---
+
 *Discovery complete 2026-05-25. لا كود تطبيق كُتب. لا تعديل على Odoo.*
-*الخطوة التالية: خالد يراجع OQ-ACC-1 و OQ-ACC-2 و OQ-ACC-7، ويحدّد قرار التوقيت.*
+*تحديث 2026-05-28: SEPARATE-ENTITIES اتراجعت — Path C محدَّد كمسار أساسي. التفاصيل في §12 أعلاه وفي `docs/MODULE_4_PLAN.md §5.2`.*

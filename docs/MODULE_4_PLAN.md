@@ -2,7 +2,7 @@
 ## خطة مفاهيمية — Conceptual Plan v1
 
 > **الحالة:** مخطّط — مؤجّل (D-5)، التنفيذ ينتظر اكتمال بيانات La Verde.
-> **تاريخ الوثيقة:** 2026-05-25
+> **تاريخ الوثيقة:** 2026-05-25 (محدَّث: 2026-05-28 — §3، §5.2 بعد discovery موجَّه)
 > **المراجع:**
 > - `docs/ACCOUNTING_DISCOVERY.md` — نتائج discovery المرحلة الأولى (كامل)
 > - `docs/LA_VERDE_DATA_STATE.md` — حالة بيانات Odoo Accounting + شروط إعادة التقييم
@@ -108,8 +108,8 @@
 | **إجمالي المصروفات** | تكاليف التشغيل الفعلية | GL — حسابات expense + expense_direct_cost + expense_depreciation (85 حساب) | **ينتظر migration المصروفات** — 0 قيود حالياً | Phase A |
 | **صافي الربح / الخسارة** | إيرادات − مصروفات | اشتقاق من الاثنين | **ينتظر كلاهما** — مُضلّل بدون مصروفات، لا يُعرض ناقصاً | Phase A |
 | **الكاش الإجمالي** | رصيد البنوك والخزائن | GL — حسابات bank/cash (asset_cash، 68 يومية) | موجود (~584M EGP) لكن one-sided — **يحتاج two-sided للموثوقية** | Phase A |
-| **الربحية لكل مشروع** | P&L على مستوى المشروع | المحاسبة التحليلية — groupby Project | **ينتظر OQ-ACC-2** — analytic amounts = 0 حالياً | Phase B |
-| **مقارنة أداء المشاريع** | ترتيب New Capital / Cassette / La Puerta بالربحية | نفس المصدر التحليلي | **نفس الشرط** | Phase B |
+| **الربحية لكل مشروع** | P&L على مستوى المشروع | **Path C** — `account.move.line` WHERE `move_id.project_id = X` (97.9% coverage) | يعتمد على دخول المصروفات في GL + تأكيد ربط المصروفات بـ `project_id` — تفصيل §5.2 | Phase B |
+| **مقارنة أداء المشاريع** | ترتيب New Capital / Cassette / La Puerta بالربحية | نفس Path C | نفس الشرط | Phase B |
 
 **ملاحظة على الفترة الزمنية:** كيف تُحسب الـ KPIs (YTD؟ فترة محاسبية محدّدة؟ كامل التاريخ؟) يتحدّد في discovery المرحلة التانية — بعد ما الفترات تبدأ تُقفل وتكون الأرقام ذات معنى.
 
@@ -158,22 +158,34 @@ Module 4 يعتمد كلياً على اكتمال بيانات La Verde في Od
 الثلاثة شروط من `docs/LA_VERDE_DATA_STATE.md §4 D-5`:
 
 1. حسابات المصروفات تتملّأ في GL (expense accounts > 0 قيود).
-2. Analytic amounts تتملّأ **أو** OQ-ACC-2 يتحسم (GL linkage مؤكّد).
+2. **Path C مؤكّد لربط المصروفات** — يتحدّد لما المصروفات تتدخل: هل ستحمل `project_id` على القيد (فـ Path C يشتغل) أم ستربط بالمشروع فقط عبر analytic (فـ Path A يصبح ضروريًا). هذا أهم سؤال مفتوح لـ Module 4.
 3. شرط الموثوقية للـ Board — تفصيل في §5.3.
 
 ---
 
-### 5.2 مخاطرة الـ Analytic Amounts *(الأعلى أثراً)*
+### 5.2 مسارات ربط المشروع بالمحاسبة *(محدَّث 2026-05-28)*
 
-**الوضع:** 1,977 سطر تحليلي موجود ومربوط بالـ GL عبر `move_line_id` — لكن `amount = 0.00` على الكل. الـ per-project P&L يعتمد على هذه الأرقام كلياً.
+> **السياق:** discovery موجَّه (2026-05-28، `scripts/discover_project_accounting_link.py`) حلّ مخاطرة الـ analytic amounts وحدّد 3 مسارات. نتيجة "SEPARATE-ENTITIES / عقبة معمارية" اتراجعت — تفاصيل في `docs/ACCOUNTING_DISCOVERY.md §12`.
 
-**لو المخاطرة تحقّقت** — analytic amounts ما اتملّيتش وال GL linkage ما اتأكّدش — discovery المرحلة التانية لازم يستكشف بدائل لتوزيع الإيراد والمصروف على المشاريع:
+**Path C — project_id على account.move ✓ (الأساسي)**
 
-- **البديل الأول — توزيع عبر اليوميات:** 88 يومية (50 bank + 18 cash + 18 general) موزّعة على الأرجح بالمشروع أو المرحلة. لو كل مشروع/مرحلة له journal خاص، groupby على `journal_id` ممكن يدّي توزيع تقريبي. يُتأكّد في discovery التانية.
+كل قيد محاسبي يحمل `project_id` → `rs.structure.project` مباشرةً. 8,966 / 9,158 قيود (97.9%). Per-project P&L = `account.move.line` WHERE `move_id.project_id = X` AND income/expense account types.
+- لا analytic amounts مطلوبة.
+- لا mapping table.
+- 192 قيد بدون `project_id` = "غير مخصّص" — يُعامَل كـ unattributed (قرار تصميم في implementation، مش عقبة الآن).
+- **محجوب بنفس الحاجز:** المصروفات = 0 في production. بمجرد دخول المصروفات، Path C جاهز للإيرادات فوراً ومنتظر تأكيد ربط المصروفات.
 
-- **البديل الثاني — توزيع عبر الحسابات:** بعض حسابات GL ممكن تكون مربوطة بمشروع معيّن بحكم التسمية أو الكود. يُتأكّد في discovery التانية.
+**Path A — Analytic Plan (احتياطي)**
 
-**الحد الأدنى:** لو كل البدائل ما نجحتش، Module 4 يُطلق بـ Phase A فقط (P&L عامة + كاش) ويُشار صراحةً إن per-project P&L يحتاج بيانات إضافية. P&L العامة + الكاش لا يزالان قيّمَين للـ Board وحدهما.
+`rs.structure.project.analytic_plan_id` → `account.analytic.plan` مملوء للمشاريع الثلاثة (plan IDs: 2, 3, 4). الحسابات التحليلية تحت child plans (6/7/8/9/10) — غير مؤكّدة بالكامل. Analytic line amounts = 0.00 EGP — محجوب. مسار احتياطي: يُعاد تقييمه لو Path C لم يشمل المصروفات.
+
+**Path B — خريطة حسابات GL للمشروع (مرفوض)**
+
+`rs.structure.project` عنده 23 حقل GL (Revenue, Maintenance, Penalty, إلخ) — لكن 9 من 10 حسابات **مشتركة** بين المشاريع الثلاثة. Attribution من account_id وحده غير ممكن. لا يُستخدم لـ per-project P&L.
+
+**السؤال المفتوح الأهم — ربط المصروفات:**
+
+الـ 97.9% coverage محقّق على إيرادات فقط. السؤال: لما المصروفات تتدخل، هل ستحمل `project_id` على القيد (Path C يشتغل لها تلقائياً) أم ستربط بالمشروع فقط عبر analytic distribution (فـ Path A ضروري لها)؟ يتحدّد من أول فاتورة مصروف حقيقية تدخل production.
 
 ---
 
@@ -194,19 +206,16 @@ Module 4 يعتمد كلياً على اكتمال بيانات La Verde في Od
 
 **لا action مطلوبة دلوقتي.**
 
-الخطوة الوحيدة قبل البدء في التنفيذ: **discovery مرحلة تانية** — بعد ما الشروط الثلاثة في §5.1 تتحقق.
+الخطوة الوحيدة قبل البدء في التنفيذ: **تأكيد ربط المصروفات** — بعد ما الشرط الأول (المصروفات تدخل GL) يتحقق.
 
-**كيف تتحقق من الجاهزية:** إعادة تشغيل نفس السكربت الموجود بدون تعديلات:
-```
-python scripts/discover_accounting_phase1.py
-```
-السكربت يجيب على الأسئلة الثلاثة مباشرةً.
+**كيف تتحقق من الجاهزية:** إعادة تشغيل `scripts/discover_accounting_phase1.py` يأكّد الشرط الأول (expense lines > 0). بعدها، قيد مصروف عيّنة واحدة يُجيب على السؤال المفتوح: هل يحمل `project_id`؟
 
-**ما الذي يتغيّر بعد discovery التانية:**
+**ما الذي يتغيّر بعد تأكيد ربط المصروفات:**
 
-الخطة المفاهيمية دي تتحوّل لـ implementation plan — مع domains حقيقية، KPI baselines مؤكّدة، تأكيد أسلوب توزيع per-project (analytic أو بديل)، قرار Phase A / Phase B، وتقسيم stages للتنفيذ.
+- لو project_id موجود على المصروفات → Path C يشتغل لكل شيء، implementation plan يبني مباشرةً على GL query بدون analytic.
+- لو project_id غائب على المصروفات → Path A ضروري، implementation plan يحدّد strategy الجمع بين Path C (إيراد) وPath A (مصروف).
 
 ---
 
-*الخطة المفاهيمية معتمدة 2026-05-25. لا كود كُتب. لا تعديل على Odoo.*
-*المراجع: `docs/ACCOUNTING_DISCOVERY.md` — `docs/LA_VERDE_DATA_STATE.md` — بند D-5 في `docs/MODULE_2_STAGE_TRACKER.md`.*
+*الخطة المفاهيمية معتمدة 2026-05-25. محدَّثة 2026-05-28 (§3، §5.2): Path C محدَّد كمسار أساسي، SEPARATE-ENTITIES اتراجعت. لا كود كُتب. لا تعديل على Odoo.*
+*المراجع: `docs/ACCOUNTING_DISCOVERY.md §12` — `docs/LA_VERDE_DATA_STATE.md` — بند D-5 في `docs/MODULE_2_STAGE_TRACKER.md` — `scripts/discover_project_accounting_link.py`.*

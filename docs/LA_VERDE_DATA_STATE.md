@@ -1,6 +1,6 @@
 # حالة بيانات La Verde في Odoo
 
-> **آخر تحديث:** 2026-05-25
+> **آخر تحديث:** 2026-05-28 (§2.4، §2.5، §3، §4 D-5 — بعد discovery موجَّه)
 > **الغرض:** مرجع واحد لحالة بيانات La Verde في Odoo — أي منطقة مكتملة، أي منطقة انتقالية، وما الذي يجب أن يتغيّر قبل العودة للبنود المؤجّلة.
 > **هذه الوثيقة:** وصف للبيانات فقط، لا كود، لا feature design.
 
@@ -98,6 +98,7 @@ La Verde انتقلت إلى Odoo من نظام أريب. البيانات لم 
 **ما هو موجود:**
 - حسابات إيراد جزئية: 14 حساب income/income_other، 173 سطر فعلي، إجمالي **2,244,632 EGP**.
 - 68 يومية بنك/خزينة مرتبطة بحسابات.
+- **attribution المشروع (Path C):** `project_id` على `account.move` مملوء لـ 8,966 / 9,158 قيود (97.9%). يسمح بحساب per-project P&L مباشرةً من GL — `account.move.line` WHERE `move_id.project_id = X`. لا mapping table، لا analytic amounts. 192 قيد بدون `project_id` = "غير مخصّص" (قرار تصميم لاحق). تفاصيل: `scripts/discover_project_accounting_link.py` (2026-05-28).
 
 **ما هو ناقص:**
 
@@ -138,12 +139,22 @@ La Puerta    : Phase 4
 ```
 مثال: `Project#New Capital / Phase#2 / Zone#2 / Building#6 / Unit#BF175-6-301`
 
-**المشكلة:** 1,977 سطر موجود ومربوط بقيود GL عبر `move_line_id`، لكن حقل `amount` = 0.00 على الكل. يعني البُعد التحليلي مُعدّ بشكل صحيح هيكلياً، لكن الأرقام لم تُملَأ في الـ migration.
+**المشكلة:** 1,977 سطر موجود ومربوط بقيود GL عبر `move_line_id`، لكن حقل `amount` = 0.00 على الكل. يعني الـ per-project P&L عبر analytic غير متاح.
 
-**Open Question (OQ-ACC-2):** هل يمكن استرداد الأرقام من GL side عبر الـ `move_line_id` link؟ هذا يتحسم مع La Verde.
+**محلول بديل — Path C (محدَّد 2026-05-28):** per-project P&L لا يحتاج analytic amounts. `project_id` على `account.move` هو مسار الـ attribution المباشر (97.9% coverage). تفاصيل: §2.4 أعلاه و`docs/ACCOUNTING_DISCOVERY.md §12`.
+
+**مسارات الربط — ثلاثة (discovery 2026-05-28):**
+
+| المسار | الآلية | الحالة |
+|--------|--------|--------|
+| **Path C (أساسي)** | `project_id` على `account.move` → GL query مباشر | ✓ جاهز هيكلياً — محجوب بالمصروفات فقط |
+| **Path A (احتياطي)** | `analytic_plan_id` على المشروع → analytic plan → child plans → analytic accounts | محجوب — amounts = 0، child plans غير مؤكّدة |
+| **Path B (مرفوض)** | خريطة GL accounts على المشروع (23 حقل) | مرفوض — الحسابات مشتركة بين المشاريع |
+
+**السؤال المفتوح الأهم:** لما المصروفات تتدخل، هل ستحمل `project_id` على القيد (Path C يشتغل تلقائياً) أم ستربط عبر analytic فقط (Path A ضروري)؟
 
 **التأثير على المشروع:**
-- **D-5 — per-project P&L:** مؤجّل لحد ما `amount` يتملأ أو OQ-ACC-2 يتحسم.
+- **D-5 — per-project P&L:** مؤجّل — الحاجز الوحيد المتبقّي هو دخول المصروفات في GL (مش analytic amounts).
 
 ---
 
@@ -155,7 +166,7 @@ La Puerta    : Phase 4
 | محفظة العملاء | `rs.account.payment.reconcile` | ✅ مكتملة + حيّة | نعم (KPI C متحرّك بطبعه) | KPI C، Refunds (M3) |
 | سجلات الدفع | `rs.account.payment.installment` | ❌ فاضية فعلياً | لا — opening balances فقط | D-4 |
 | الدفتر العام | `account.move(.line)` | ⚠️ انتقالية | جزئياً (إيرادات فقط) | D-5 (كامل) |
-| المحاسبة التحليلية | `account.analytic.*` | ⚠️ هيكل فقط | لا — أرقام فاضية | D-5 (per-project P&L) |
+| المحاسبة التحليلية | `account.analytic.*` | ⚠️ هيكل فقط / amounts=0 | Path C يتجاوزها (project_id على account.move) | D-5 — Path C جاهز هيكلياً |
 
 ---
 
@@ -179,19 +190,16 @@ La Puerta    : Phase 4
 **الشرط 1 — P&L (إيرادات ومصروفات):**
 حسابات المصروفات تتملأ: `search_count(account.move.line, [('parent_state','=','posted'), ('account_id.account_type','in',['expense','expense_depreciation','expense_direct_cost'])])` يرجع > 0.
 
-**الشرط 2 — Per-project P&L (الأداء بالمشروع):**
-أحد البديلين:
-- `account.analytic.line.amount` يتملأ: `read_group(account.analytic.line, [], ['amount'], [])` يرجع total > 0.
-- **أو** OQ-ACC-2 يتحسم: يتأكّد إن الأرقام قابلة للاشتقاق من GL side عبر `move_line_id`.
+**الشرط 2 — Per-project P&L (الأداء بالمشروع) — محدَّث 2026-05-28:**
+Path C جاهز هيكلياً — `project_id` على `account.move` هو مسار الـ attribution (97.9% coverage). الشرط الآن:
+- المصروفات تدخل GL (الشرط 1 أعلاه).
+- **تأكيد** إن المصروفات ستحمل `project_id` على القيد — يتحدّد من أول فاتورة مصروف حقيقية في production.
+- لو `project_id` غائب على المصروفات → Path A (analytic) ضروري لها — يُعاد التقييم حينها.
 
 **الشرط 3 — موثوقية الأرقام للـ Board:**
 فترة محاسبية واحدة على الأقل تُقفل (`fiscalyear_lock_date` يتملأ)، **أو** خالد يقرر إن اللحظة مناسبة لعرض أرقام مؤشّرية مع disclaimer.
 
-**كيف تتحقق:** إعادة تشغيل **نفس** السكربت الموجود:
-```
-python scripts/discover_accounting_phase1.py
-```
-لا تعديلات مطلوبة — السكربت يجيب على الأسئلة الثلاثة.
+**كيف تتحقق:** إعادة تشغيل `scripts/discover_accounting_phase1.py` للشرط الأول (expense lines > 0). بعدها، قيد مصروف عيّنة واحدة يُجيب على الشرط الثاني (هل يحمل `project_id`؟).
 
 **المرجع:** `docs/ACCOUNTING_DISCOVERY.md`، `docs/MODULE_2_STAGE_TRACKER.md D-5`.
 
