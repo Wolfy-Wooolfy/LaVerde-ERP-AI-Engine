@@ -1,7 +1,12 @@
 # HR Cluster Discovery — Read-Only Pre-Implementation
-## Discovery Evidence Artifact — Provisional, Deferred to Post-June 2026
+## Discovery Evidence Artifact — PHASED
 
-> **Status:** Provisional. Discovery complete 2026-05-28. Deferred to post-June 2026 (real HR data entry begins June 2026; attendance/payroll data is test data until then).
+> **Revision 2026-05-28:** §3 (Contracts) and §9 (Cross-Cutting Pattern) corrected after business owner confirmation that `hr.contract.date_end` uniform date reflects real annual labor-office renewal policy, not a bulk-entry artifact. See git log for prior version.
+
+> **Status:** Phased. Discovery complete 2026-05-28.
+> - **Phase 1 (active):** Build on stable data — employees, departments, jobs, contracts (with Renewal KPI). Module deliverable target.
+> - **Phase 2 (post-June 2026):** Extend with attendance, payroll, overtime, time-off once real entry is confirmed. Attendance/payroll data remains test data until then.
+> - **Contracts:** real annual renewal cycle confirmed — Contract Renewal KPI is in scope (see §3).
 > **Script:** `scripts/discover_hr_cluster.py` — commit b7f8c61
 > **Log:** `logs/hr_discovery.log` — canonical run 2026-05-28T13:43:49Z (76 RPC calls)
 > **Method:** JSON-RPC read-only (`search_count`, `search_read`, `read_group`, `fields_get` only — no writes, no AI, no PII).
@@ -15,7 +20,7 @@ All counts from canonical run 2026-05-28T13:43:49Z.
 | Model | Installed? | Count | Data type | Stable? |
 |-------|-----------|-------|-----------|---------|
 | `hr.employee` | ✅ YES | 136 active / 24 inactive | Real | ✅ Stable |
-| `hr.contract` | ✅ YES | 149 total (136 open, 13 close) | Real | Counts real; date_end artifact — see §5 |
+| `hr.contract` | ✅ YES | 149 total (136 open, 13 close) | Real | ✅ Real — annual renewal cycle, see §3 |
 | `hr.attendance` | ✅ YES | 21,800 | **TEST DATA** | ❌ Provisional — real entry begins Jun 2026 |
 | `hr.leave` | ✅ YES | 1 | Empty (expected 0) | ✅ Stable |
 | `hr.leave.allocation` | ✅ YES | 0 | Empty | ✅ Stable |
@@ -94,7 +99,7 @@ Top titles: Senior Sales Executive (15), Driver (9), Sales Supervisor (9), Clean
 
 ---
 
-## 3. Contracts (Section S4)
+## 3. Contracts — Annual Renewal Cycle (Egyptian Labor Office Procedure)
 
 ### S4.1 — State distribution
 
@@ -106,6 +111,8 @@ Top titles: Senior Sales Executive (15), Driver (9), Sales Supervisor (9), Clean
 
 **UI discrepancy:** Odoo UI showed "124 Running / 12 Expired." RPC count (149 total / 136 open / 13 close) is authoritative. Confirmed by Khaled 2026-05-28 — RPC is ground truth.
 
+**13 close contracts:** Minor count discrepancy vs UI (12 expired shown). Likely a UI filter difference. Non-blocking.
+
 ### S4.2 — Key fields confirmed
 
 | Field | Type | Label |
@@ -116,13 +123,19 @@ Top titles: Senior Sales Executive (15), Driver (9), Sales Supervisor (9), Clean
 
 `wage` field NOT read (PII guard — type confirmed via fields_get only).
 
-### S4.3 — Contract expiry in next 60 days
+### S4.3 — Contract Renewal: Annual Labor-Office Cycle
 
-**[FLAG] 114 of 136 open contracts have `date_end` ≤ 2026-07-27.**
+**114 of 136 running contracts share `date_end` = 2026-06-30.**
 
-This is a **bulk-entry artifact** — confirmed by Khaled 2026-05-28. All 114 contracts share a uniform `date_end` of 2026-06-30 entered during bulk data migration. This is NOT a real expiry wave. The figure is not usable as a KPI baseline until contracts are individually dated.
+This is a **real annual renewal date** driven by Egyptian labor-office procedure (مكتب العمل / Ministry of Manpower). Egyptian labor law requires periodic employee contract renewals processed in person at the labor office. La Verde HR consolidates all renewals into a single uniform date each year (currently 30/06) to minimize labor-office trips for HR staff. This is intentional operational policy, not a data-quality artifact.
 
-1 open contract has `date_end = False` (no end date set).
+**Confirmed by Khaled (business owner), 2026-05-28.**
+
+**Consequence:** Contract Renewal IS a valid Board KPI — high operational value (HR readiness for the upcoming renewal wave, departmental renewal load, capacity planning).
+
+**Edge cases:**
+- 1 open contract has `date_end = False` — open-ended contract; flag for review.
+- 13 close contracts: minor count discrepancy vs UI (12 expired shown); likely UI filter difference. Non-blocking.
 
 ---
 
@@ -178,7 +191,7 @@ The UI showed "Worked Extra Hours" values like −15,537:16. **Hypothesis (confi
 |---|---------|--------|--------|
 | F1 | `hr.department` is NOT flat — 24 real sub-departments with hierarchy | Department-level HR KPIs are feasible | No action needed; was a UI misread |
 | F2 | `hire_date` absent — tenure field is `first_contract_date` | Any "tenure" KPI must use `first_contract_date` | Use confirmed field name in any HR module |
-| F3 | 114/136 open contracts expire ≤ 60d — **bulk artifact**, uniform date 2026-06-30 | "Contract expiry" KPI is NOT usable until contracts individually dated | Defer contract-expiry KPI; revisit post-migration cleanup |
+| F3 | 114/136 running contracts share `date_end` = 2026-06-30 — **real annual renewal date** (Egyptian labor-office policy, confirmed by Khaled 2026-05-28) | Contract Renewal KPI is valid and in scope for Phase 1 | Build Contract Renewal KPI — see §3 |
 | F4 | `hr.payslip` blocked by AccessError | Payroll KPIs not currently possible via RPC | See §8 Action A1 |
 | F5 | `mission.request` model exists and has full workflow schema | Business Missions KPIs are technically feasible | No action; ready for use once data exists |
 | F6 | `hr.attendance` = 21,800 test records; `hr.attendance.overtime` = 9,005 auto-generated | All attendance figures provisional | Re-run discovery after June 2026 go-live |
@@ -200,13 +213,30 @@ The UI showed "Worked Extra Hours" values like −15,537:16. **Hypothesis (confi
 | ID | Action | Owner | When |
 |----|--------|-------|------|
 | **A1** | Decide whether to grant the API user HR/Payroll read access. If granted, `hr.payslip` becomes readable via RPC and the cluster can include payroll KPIs. | Khaled | Before HR module design |
-| **A2** | Confirm test-data cleanup plan for `hr.attendance` and `hr.attendance.overtime` before June 2026 go-live. Baseline counts should be re-established after cleanup. | Khaled | Before June 2026 |
+| **A2** | Confirm renewal day for upcoming years — whether it stays 30/06 or shifts to a different date. This affects KPI framing (the Contract Renewal KPI should display the upcoming renewal date dynamically, not hardcode 30/06). | Khaled | Before HR module build |
 | **A3** | Re-run `discover_hr_cluster.py` after June 2026 go-live to establish real baselines for attendance, overtime, and payslip. This document is provisional until then. | AI Engine | Post-June 2026 |
 | **A4** | Identify the technical model name behind the Terminations app (real-estate scope) — to be done in Collections/Contracts cluster discovery, not here. | AI Engine | Collections/Contracts discovery session |
 
 ---
 
-## 9. Discovery Metadata
+## 9. Cross-Cutting Pattern: Uniform Dates Require Business Context
+
+Three uniform-date observations emerged from this discovery run. They fall into distinct categories with different implications:
+
+**1. Confirmed real operational policy — `hr.contract.date_end` = 2026-06-30 (114 contracts)**
+La Verde HR consolidates all annual contract renewals into a single date each year to minimize trips to مكتب العمل (Egyptian Ministry of Manpower labor office). The uniform date is intentional operational policy. Confirmed by Khaled (business owner) 2026-05-28. **Contract Renewal KPI is valid and in scope for Phase 1.**
+
+**2. Confirmed test data — `hr.attendance` records (21,800 entries)**
+These records were loaded for workflow validation only. Real employee attendance entry begins June 2026. All attendance-derived figures (extra hours, overtime, monthly distributions) are provisional until then. **Re-run discovery post-June 2026 before implementing Phase 2.**
+
+**3. Unexplained — outside HR scope — Terminations uniform timestamp (2026-01-12 13:48:09, all 14 records)**
+The Terminations app uses real-estate fields (Unit, Building, Project, Customer) — it is NOT an HR model. Whether this timestamp reflects a bulk-entry day or a real operational batch is an open question. To be investigated in the Collections/Contracts cluster discovery, not here. **Not assumed artifact, not assumed real — open question.**
+
+**Lesson:** A uniform date is a signal to ask, not a verdict. The same pattern can be real operational policy or a data artifact depending on business context. Always confirm with the business owner before flagging as problematic.
+
+---
+
+## 10. Discovery Metadata
 
 | Item | Value |
 |------|-------|
@@ -221,4 +251,4 @@ The UI showed "Worked Extra Hours" values like −15,537:16. **Hypothesis (confi
 
 ---
 
-*Provisional artifact. Re-run discovery post-June 2026 before any HR module code is written.*
+*Phase 1 artifact — stable data (employees, departments, jobs, contracts). Re-run discovery post-June 2026 before implementing Phase 2 (attendance, payroll, overtime, time-off).*
