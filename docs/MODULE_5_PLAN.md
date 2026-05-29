@@ -144,32 +144,79 @@ fields = `['id', 'first_contract_date']`، بعدين حساب المدة من `
 
 ---
 
-### KPI C — موجة تجديد العقود / Contract Renewal Wave
+### KPI C — Contract Renewal: Payroll Risk Dashboard
 
-**السؤال:** "كام عقد مستحق للتجديد — وفي أنهي إدارات التحميل الأكبر؟"
+**Purpose:** Surface payroll-blocking risk from contract expiry and HR ops
+workload from onboarding limbo. NOT a renewal calendar.
 
-**التجميع المبدئي:**
-- إجمالي: `search_count([('state','=','open'), ('date_end','!=',False)])`.
-- بالإدارة:
-  `read_group([('state','=','open'), ('date_end','!=',False)], ['department_id'], ['department_id'], lazy=False)`.
+**Threshold rationale:** 45/90/135 days — derived from La Verde HR's 45-day
+labor-office response time (Khaled, 2026-05-29). NOT the industry default
+30/60/90.
 
-**الـ domain المتوقّع:**
-`[('state','=','open'), ('date_end','!=',False)]` — يستثني الـ 1 عقد المفتوح
-(date_end=False) صراحةً. Baseline: 135 عقد (136 open − 1 مفتوح).
+**Seven buckets — main response payload (all keyed to active employees):**
 
-**العرض:**
-- تاريخ التجديد القادم بارز (30/06/2026 حالياً — أو ما يُؤكّده خالد للسنوات القادمة).
-- عدد العقود المستحقة للتجديد.
-- Breakdown بالإدارة — كم عقد لكل إدارة.
+| # | Bucket | Domain | Baseline (2026-05-29) | Urgency |
+|---|--------|--------|-----------------------|---------|
+| 1 | **Active without contract** | `hr.employee` where `active=True` AND `employee.id` NOT IN (employee_ids of running contracts) | **17** | HR ops — onboarding limbo; pre-payroll state (by-design forcing function) |
+| 2 | **Expired** | `hr.contract` where `state='open'`, `date_end < today`, employee active | **0** (expected) | HIGH — payroll-blocking alert if >0 |
+| 3 | **Expiring ≤45d** | `state='open'`, `today <= date_end <= today+45`, employee active | — | MEDIUM — schedule renewal now |
+| 4 | **Expiring 46–90d** | `state='open'`, `today+45 < date_end <= today+90`, employee active | — | Begin preparation |
+| 5 | **Expiring 91–135d** | `state='open'`, `today+90 < date_end <= today+135`, employee active | — | Heads-up |
+| 6 | **Beyond 135d** | `state='open'`, `date_end > today+135`, employee active | — | Stable |
+| 7 | **Open-ended** | `state='open'`, `date_end = False`, employee active | **1** | No renewal needed |
 
-**قرار مفتوح (R1):** هل تاريخ التجديد hardcoded "30/06" ولا يُجلب ديناميكياً
-(الـ `date_end` الأكثر تكراراً بين الـ open contracts)؟ يتحسم مع خالد قبل M5-S3.
-يؤثر على تصميم الـ service.
+**Sanity invariant (main payload):**
+`sum(buckets 1..7)` == `search_count([('active','=',True)])` == **136** today.
 
-**verification:** تقرير الـ verification لازم يُظهر صراحةً:
-(أ) baseline الـ 135 عقد مؤكّد ضد الـ live — `search_count([('state','=','open'), ('date_end','!=',False)])`.
-(ب) الـ 13 عقد close — discrepancy note: RPC = 13 vs Odoo UI = 12 (see R4).
-(ج) الـ 1 عقد مفتوح (`date_end=False`) مستثنى صراحةً — يُظهر في قسم D.
+**Separate data-quality metadata — NOT in the 7 main buckets:**
+
+`orphan_contracts_count`: running contracts (`state='open'`) whose `employee_id`
+is NOT active (`employee.active=False`). Today's baseline: **17** (verified
+2026-05-29). Paperwork debt from exit workflow — HR cleanup item, NOT
+payroll-blocking.
+
+*Why separate:* The 7 main buckets describe the operational reality for 136 active
+employees. Orphan contracts belong to ex-employees and are not part of that reality.
+Mixing them into the main buckets would distort the Board's view. Showing them as
+data-quality metadata flags the workflow gap without polluting the operational picture.
+
+**Breakdown by department:** Expired and Expiring ≤45d buckets only (the two
+actionable buckets). Active-without-contract is too small at MVP for a department
+breakdown — defer.
+
+**Reference date:** today in Cairo TZ (Africa/Cairo) — same rule as KPI B.
+
+**Alert rules (priority order):**
+- **HIGH** — Expired bucket > 0: active employees with payroll blocked until renewal.
+- **MEDIUM** — Expiring ≤45d > 0: action window open; HR must schedule.
+- **LOW** — Active-without-contract growing month-over-month: onboarding velocity signal.
+- **INFO** — `orphan_contracts_count` growing: exit cleanup debt accumulating.
+
+**Implementation (~3 RPCs):**
+- RPC 1 — `search_read(hr.contract, [('state','=','open')], fields=['employee_id','date_end'])`
+  → all ~153 running contracts (136 active-employee contracts + 17 orphan). Python
+  partitions by whether `employee_id` is in the active set, then classifies
+  active-employee contracts into buckets 2–7 by `(date_end − today).days` relative
+  to 0/45/90/135.
+- RPC 2 — `search_read(hr.employee, [('active','=',True)], fields=['id'])`
+  → all 136 active employee IDs. Bucket 1 = `active_emp_set − {emp_id for c in
+  active_contracts}`. (May reuse KPI A cached response if available — see R6.)
+- RPC 3 — department `read_group` for Expired and ≤45d buckets when non-empty.
+
+**Verification baselines (2026-05-29):**
+
+| Item | Value |
+|------|-------|
+| Bucket 1 — active without contract | 17 |
+| Bucket 7 — open-ended | 1 |
+| `orphan_contracts_count` | 17 |
+| sum(buckets 1..7) | 136 |
+
+*Source: `scripts/verify_active_running_mapping.py` +
+`logs/active_running_mapping.log`, verification run 2026-05-29 12:50:02Z.*
+
+**Open decision R1 superseded:** Distance-to-expiry buckets replace the single-
+renewal-date design. No hardcoded date needed. See §6 R1 and §7 item 1.
 
 ---
 
@@ -230,17 +277,18 @@ backend/modules/hr/
 
 | # | المخاطرة / السؤال | لازم يتحسم |
 |---|-------------------|-----------|
-| R1 | **تاريخ التجديد: ديناميكي ولا hardcoded؟** لو التاريخ بيتغير كل سنة (مش دايماً 30/06)، الـ backend لازم يجيبه ديناميكياً من `date_end` الأكثر تكراراً في الـ open contracts. لو ثابت، يُعرض مع confirmation من Khaled. | قبل M5-S3 (discovery A2) |
+| R1 | **تاريخ التجديد — Superseded 2026-05-29.** KPI C redesigned as a payroll-risk dashboard using 7 distance-to-expiry buckets (thresholds: 45/90/135 days from La Verde HR response time). Single renewal date is no longer central to the KPI design. No hardcoded date needed. See §3 KPI C. | ✅ Closed — M5-S3 redesign |
 | R2 | **`first_contract_date = False`** — هل في موظفين نشطين بدون تاريخ غير الـ 4 gaps المعروفة؟ الـ backend لازم يتعامل مع الحالة دي (يستثنيها ويبلّغ في D). | M5-S2 |
 | R3 | **`hr.payslip` AccessError** — لو خالد قرر منح الـ API user read access (discovery A1)، ممكن تُضاف payroll KPIs في Phase 2. مش مطلوب Phase 1. | Phase 2 تقرير |
 | R4 | **الـ 13 close contracts vs 12 في الـ UI** — الـ discrepancy مش blocking لـ KPI C (بيشتغل على open فقط)، لكن لازم يتبان في verification report ومش يُتجاهل. | M5-S3 verification |
 | R5 | **اسم الـ module ومدخل الـ sidebar** — "HR / الموارد البشرية" ولا اسم تاني؟ | M5-S5 |
+| R6 | **KPI C implementation: reuse cached active employee IDs from KPI A, or independent RPC?** Reuse saves an RPC but creates coupling between KPI A and KPI C; independent RPC is cleaner architecturally but slightly slower. To be decided in M5-S3 build (D2). | M5-S3 D2 |
 
 ---
 
 ## 7. القرارات المتبقية
 
-1. ⏳ تاريخ التجديد: ديناميكي ولا hardcoded — يُحسم مع خالد قبل M5-S3.
+1. ✅ تاريخ التجديد — superseded. KPI C redesigned as 7-bucket payroll-risk dashboard (2026-05-29). See §3 KPI C.
 2. ⏳ اسم الـ module ومدخل الـ sidebar — يُحسم في M5-S5.
 
 ---
