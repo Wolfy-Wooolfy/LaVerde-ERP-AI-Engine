@@ -23,15 +23,18 @@ canonical run 2026-05-28T13:43:49Z):
     5 bands present in fixed order
     reference_date == today's Cairo date
 
-Band-count baselines NOT hardcoded: discovery only recorded the
-first_contract_date range (2017-12-26 → 2025-11-17), not a per-band
-breakdown. An unexpected distribution (e.g. all 136 in one band) is a
-FINDING — stop and report, do not adjust band thresholds.
+Live baselines established 2026-05-29T11:37:31Z (first KPI B run,
+logs/hr_kpi_b_tenure_verification.log, commit 80b7afc):
+    missing_date_count = 11  (11 active employees have no first_contract_date;
+                              gap surfaced by KPI B — not in original S3.2 scan)
+    band counts: <1y=14, 1-3y=46, 3-5y=19, 5-10y=46, 10+y=0
+    bimodal: 1-3y and 5-10y both 46 — two hiring waves, real signal.
+    10+y=0 expected: earliest FCD 2017-12-26 = 8.4y as of run date.
 
-Note on "10+y" band: the earliest first_contract_date in discovery is
-2017-12-26. As of 2026-05-29 that is ~8.4y — still in "5-10y". The
-"10+y" band may have count=0 on today's run. This is expected and NOT
-a bug. Document if confirmed.
+These counts will drift as headcount changes. The script reports [INFO]
+deltas vs these baselines but does NOT FAIL on drift — drift is a
+finding to review, not an assertion error. Hard FAIL checks remain on
+structural invariants (total_active, band count, sanity sum).
 """
 
 import argparse
@@ -62,6 +65,13 @@ LOG_FILE    = "logs/hr_kpi_b_tenure_verification.log"
 BASELINE_TOTAL_ACTIVE  = 136
 EXPECTED_BAND_LABELS   = ["<1y", "1-3y", "3-5y", "5-10y", "10+y"]
 CAIRO_TZ               = ZoneInfo("Africa/Cairo")
+
+# Drift-reference baselines from first live run 2026-05-29T11:37:31Z.
+# Used for [INFO] delta lines only — NOT hard FAIL checks.
+MISSING_DATE_BASELINE_2026_05_29 = 11
+BAND_BASELINE_2026_05_29 = {
+    "<1y": 14, "1-3y": 46, "3-5y": 19, "5-10y": 46, "10+y": 0,
+}
 
 _SEP = "═" * 63
 
@@ -192,7 +202,17 @@ def main() -> int:
     print(_SEP)
     print("Band breakdown:")
     for b in bands:
-        print(f"  {b['band']:>6}  :  {b['count']:>4}")
+        baseline_count = BAND_BASELINE_2026_05_29.get(b["band"], 0)
+        delta = b["count"] - baseline_count
+        delta_str = f"  (Δ {delta:+d} vs 2026-05-29 baseline)" if delta != 0 else "  (= baseline)"
+        print(f"  {b['band']:>6}  :  {b['count']:>4}{delta_str}")
+    missing_delta = missing_date_count - MISSING_DATE_BASELINE_2026_05_29
+    missing_delta_str = (
+        f"  (Δ {missing_delta:+d} vs 2026-05-29 baseline {MISSING_DATE_BASELINE_2026_05_29})"
+        if missing_delta != 0
+        else f"  (= baseline {MISSING_DATE_BASELINE_2026_05_29})"
+    )
+    print(f"  missing  :  {missing_date_count:>4}{missing_delta_str}")
     print(_SEP)
     print()
 
