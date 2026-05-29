@@ -9,8 +9,9 @@ M5-S1 scope: get_headcount() (KPI A).
 """
 
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -172,6 +173,147 @@ async def get_headcount(client: Optional[OdooClient] = None) -> dict:
         "as_of":           datetime.now(timezone.utc).isoformat(),
         "cache_status":    "fresh",
         "rpc_duration_ms": rpc_ms,
+    }
+
+    _cache.set(cache_key, result)
+    return result
+
+
+# ── KPI B — Tenure Distribution ───────────────────────────────────────────────
+
+_CAIRO_TZ = ZoneInfo("Africa/Cairo")
+_CACHE_KEY_PREFIX_TENURE = "kpi:hr:tenure"
+_BAND_LABELS = ["<1y", "1-3y", "3-5y", "5-10y", "10+y"]
+
+
+def _tenure_years(fcd: date, today: date) -> int:
+    # Use anniversary method, not (days / 365.25), because tenure in
+    # years is a calendar concept (the date of the Nth anniversary of
+    # hire), not an elapsed-duration concept. Anniversary method gives
+    # the count of completed anniversary years on `today`. The
+    # alternative (days/365.25 with floor) understates by 1 in every
+    # non-leap year because 365 / 365.25 = 0.9979... < 1, so an
+    # employee at their 1-year anniversary on a non-leap year would
+    # land in <1y.
+    #
+    # Feb 29 hires: on non-leap years, anniversary fires on Mar 1,
+    # not Feb 28 (conservative — Feb 28 has not "reached" Feb 29
+    # under tuple comparison). Acceptable behavior for an HR KPI;
+    # documented for clarity.
+    years = today.year - fcd.year
+    if (today.month, today.day) < (fcd.month, fcd.day):
+        years -= 1
+    return years
+
+
+def _assign_band(years: int) -> str:
+    if years < 1:
+        return "<1y"
+    if years < 3:
+        return "1-3y"
+    if years < 5:
+        return "3-5y"
+    if years < 10:
+        return "5-10y"
+    return "10+y"
+
+
+async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI B — Tenure Distribution.
+
+    2 RPCs against hr.employee:
+      RPC 1 — search_read([('active','=',True),('first_contract_date','!=',False)],
+                          fields=['id','first_contract_date'])
+               -> records for band computation
+      RPC 2 — search_count([('active','=',True),('first_contract_date','=',False)])
+               -> missing_date_count
+
+    total_active = len(rpc1_records) + missing_date_count  (Python, not a 3rd RPC)
+
+    Bands (half-open, anniversary method — see _tenure_years):
+      "<1y"   : tenure_years < 1
+      "1-3y"  : 1 <= tenure_years < 3
+      "3-5y"  : 3 <= tenure_years < 5
+      "5-10y" : 5 <= tenure_years < 10
+      "10+y"  : tenure_years >= 10
+
+    Reference date: today in Africa/Cairo — using UTC would place an employee
+    who started on today's Cairo date in the wrong band at 22:00+ UTC.
+
+    Cache key: kpi:hr:tenure:{cairo_date} (TTL 60s, date-scoped by make_key).
+
+    Baselines (discovery canonical run 2026-05-28T13:43:49Z):
+      total_active == 136
+      first_contract_date range (active): 2017-12-26 → 2025-11-17
+      No band before 2017; "10+y" count depends on run date.
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any Odoo RPC fails.
+    """
+    _assert_read_only()
+
+    cairo_today = datetime.now(_CAIRO_TZ).date()
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_TENURE)
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (2 RPCs)")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # RPC 1 — active employees with a contract date (for band computation)
+        records = await _client.execute_kw(
+            _MODEL,
+            "search_read",
+            args=[[("active", "=", True), ("first_contract_date", "!=", False)]],
+            kwargs={"fields": ["id", "first_contract_date"]},
+        )
+
+        # RPC 2 — active employees missing first_contract_date
+        missing_date_count = int(await _client.execute_kw(
+            _MODEL,
+            "search_count",
+            args=[[("active", "=", True), ("first_contract_date", "=", False)]],
+        ))
+
+    except Exception as exc:
+        raise OdooQueryError(
+            f"get_tenure_distribution() RPC on {_MODEL} failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"HR tenure distribution: 2 RPCs on {_MODEL} in {rpc_ms}ms | cache_key={cache_key}"
+    )
+
+    # Classify each record — IDs used only to count; no PII leaves this function
+    band_counts: dict[str, int] = {label: 0 for label in _BAND_LABELS}
+    for rec in records:
+        fcd_raw = rec.get("first_contract_date")
+        if not fcd_raw:
+            continue   # domain excludes False; guard against unexpected None
+        fcd = date.fromisoformat(str(fcd_raw))
+        band_counts[_assign_band(_tenure_years(fcd, cairo_today))] += 1
+
+    bands = [{"band": label, "count": band_counts[label]} for label in _BAND_LABELS]
+    total_active = sum(b["count"] for b in bands) + missing_date_count
+
+    result: dict = {
+        "bands":              bands,
+        "missing_date_count": missing_date_count,
+        "total_active":       total_active,
+        "reference_date":     cairo_today.isoformat(),
+        "as_of":              datetime.now(timezone.utc).isoformat(),
+        "cache_status":       "fresh",
+        "rpc_duration_ms":    rpc_ms,
     }
 
     _cache.set(cache_key, result)
