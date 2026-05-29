@@ -79,6 +79,13 @@ All checks NON-PII: IDs, states, counts, dates only. No names, emails, wages rea
 > Reconciled against live verification run 2026-05-29T10:56:42Z
 > (`logs/hr_kpi_a_verification.log`, commit bdd8843).
 
+> **Additional gap discovered 2026-05-29 (M5-S2 live verification):**
+> 11 active employees have `first_contract_date = False`. This field
+> was not part of the original S3.2 data-quality scan; the gap
+> surfaced when KPI B (Tenure Distribution) excluded records missing
+> the date. Reference: logs/hr_kpi_b_tenure_verification.log, commit
+> 80b7afc + this session's verification run 2026-05-29T11:37:31Z.
+
 ### S3.3 — Department distribution (active employees, 24 groups)
 
 The UI described departments as "flat — all under Board / top Management." **RPC confirms this is wrong.** There are 24 real sub-departments with a genuine hierarchy. Top groups by headcount:
