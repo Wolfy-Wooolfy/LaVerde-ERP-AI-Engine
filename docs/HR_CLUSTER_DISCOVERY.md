@@ -174,7 +174,15 @@ This is a **real annual renewal date** driven by Egyptian labor-office procedure
 
 **Renewal mechanics (option A — in-place update):** When a contract is renewed at the labor office, the **existing record's `date_end` is updated in place.** A new contract record with a new ID is NOT created. Evidence: active employees (136) == running contracts (136) — a 1:1 count match. Record-level 1:1 mapping verified by `scripts/verify_active_running_mapping.py` (see commit log).
 
-**The 12 Expired contracts** are confirmed ex-employees (`employee.active = False`). No current payroll-blocking incidents — no active employee holds an expired contract as of 2026-05-29 (active = 136, running = 136 verified 2026-05-29).
+**Record-level mapping — actual state (2026-05-29)**
+
+17 active employees have zero running contracts. This is a deliberate forcing function in La Verde's HR workflow: Odoo refuses to generate a payslip for an employee without a Running contract, which pressures HR to finalize contract paperwork for new hires. These 17 employees are in onboarding limbo — their employee records exist but contract paperwork is incomplete. They do NOT receive payroll until their contract is created. Source: Khaled (business owner), 2026-05-29.
+
+17 running contracts reference employee IDs that are no longer active (`employee.active=False`). When an employee is archived in Odoo, the HR workflow does not auto-close their contract — so contracts remain in `state='open'` indefinitely after exit. This is paperwork debt, NOT a payroll-blocking issue (inactive employees are not on payroll). The numerical match with onboarding-limbo employees (17 = 17 today) is coincidental — they are unrelated phenomena.
+
+Reference: `scripts/verify_active_running_mapping.py` + `logs/active_running_mapping.log`, verification run 2026-05-29 12:50:02Z. Sanity invariant for KPI C must account for both findings — see MODULE_5_PLAN.md §3 KPI C.
+
+**The 12 Expired contracts** are confirmed ex-employees (`employee.active = False`). No expired-contract incidents on active employees — no active employee holds an expired contract as of 2026-05-29. (See 'Record-level mapping' above for the 17 onboarding-limbo cases, which are by-design pre-payroll state, not contract-expiry incidents.)
 
 **Operational implication:** KPI C (Contract Renewal) is a **PAYROLL-RISK DASHBOARD**, not a renewal calendar. Its primary purpose is to surface which running contracts are approaching expiry so HR can prioritize renewals before payslip generation is blocked.
 
