@@ -155,6 +155,31 @@ This is a **real annual renewal date** driven by Egyptian labor-office procedure
 - 1 open contract has `date_end = False` — open-ended contract; flag for review.
 - 13 close contracts: minor count discrepancy vs UI (12 expired shown); likely UI filter difference. Non-blocking.
 
+### §3.5 — Contract State → Payroll Dependency (added 2026-05-29)
+
+**Contract states — live counts (Payroll → Contracts UI, 2026-05-29):**
+
+| State | Odoo key | Count | Meaning |
+|-------|----------|-------|---------|
+| Running | `open` | **136** | Active; payslip generation **ENABLED** |
+| Expired | `close` | **12** | Past `date_end`; payslip generation **DISABLED** |
+| New | `?` | **0** | Draft, not yet activated |
+| Cancelled | `?` | **0** | Voided |
+
+*Exact Odoo keys for New and Cancelled states not RPC-verified (zero records in both); inferred from Odoo standard schema.*
+
+> **RPC vs UI discrepancy:** `search_count([('state','=','close')])` returns 13; the Payroll → Contracts UI shows 12 Expired. The 1-record difference is non-blocking — likely a cancelled/archived contract visible to RPC but filtered out in the UI "Expired" view. See R4 in §6.
+
+**PAYROLL DEPENDENCY:** Odoo does NOT generate a payslip for any employee whose contract is not in "Running" state. **Contract renewal is NOT administrative housekeeping — it directly controls payroll continuity.** A contract that expires without renewal will block that employee's payslip generation until the contract is updated to Running.
+
+**Renewal mechanics (option A — in-place update):** When a contract is renewed at the labor office, the **existing record's `date_end` is updated in place.** A new contract record with a new ID is NOT created. Evidence: active employees (136) == running contracts (136) — a 1:1 count match. Record-level 1:1 mapping verified by `scripts/verify_active_running_mapping.py` (see commit log).
+
+**The 12 Expired contracts** are confirmed ex-employees (`employee.active = False`). No current payroll-blocking incidents — no active employee holds an expired contract as of 2026-05-29 (active = 136, running = 136 verified 2026-05-29).
+
+**Operational implication:** KPI C (Contract Renewal) is a **PAYROLL-RISK DASHBOARD**, not a renewal calendar. Its primary purpose is to surface which running contracts are approaching expiry so HR can prioritize renewals before payslip generation is blocked.
+
+*Sources: Khaled (business owner), Payroll → Contracts UI screenshot 2026-05-29.*
+
 ---
 
 ## 4. Business Missions (Section S2)
