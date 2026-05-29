@@ -52,8 +52,14 @@ BASELINE_TOTAL_ACTIVE     = 136
 BASELINE_TOTAL_INACTIVE   = 24
 BASELINE_DEPT_GROUPS      = 24
 BASELINE_JOB_GROUPS       = 67
-BASELINE_NULL_DEPT_COUNT  = 4
-BASELINE_NULL_JOB_COUNT   = 3
+# Active-only — corresponds to what get_headcount() returns.
+# HR_CLUSTER_DISCOVERY.md §3.2 reports 4/3 as active+inactive total.
+# See verification run 2026-05-29 for reconciliation.
+BASELINE_NULL_DEPT_COUNT  = 2
+# Active-only — corresponds to what get_headcount() returns.
+# HR_CLUSTER_DISCOVERY.md §3.2 reports 4/3 as active+inactive total.
+# See verification run 2026-05-29 for reconciliation.
+BASELINE_NULL_JOB_COUNT   = 2
 BASELINE_DATE             = "2026-05-28"
 
 NO_DEPT_DISPLAY = "(بدون إدارة)"   # (بدون إدارة)
@@ -74,7 +80,7 @@ def _log(prefix: str, msg: str) -> None:
 
 def _check(label: str, condition: bool, detail: str = "") -> bool:
     if condition:
-        _log(_PASS, f"{label}{(' — ' + detail) if detail else ''}")
+        _log(_PASS, label)
     else:
         _log(_FAIL, f"{label}{(' — ' + detail) if detail else ''}")
     return condition
@@ -324,19 +330,19 @@ def main() -> int:
 
     if failures:
         _log(_FAIL, f"Verification FAILED — {len(failures)} assertion(s): {failures}")
-
-    print()
-    _log(_PASS, "All assertions passed.")
-    print()
-    print("Next step (manual — identity-equal check against Odoo UI):")
-    print("  1. Open Odoo -> Employees (hr.employee)")
-    print("  2. Filter: Active = True")
-    print("  3. Group By: Department")
-    print(f"     Expected: {BASELINE_TOTAL_ACTIVE} active employees, {BASELINE_DEPT_GROUPS} department groups")
-    print(f"     Employees with no department: {BASELINE_NULL_DEPT_COUNT}")
-    print("  4. Group By: Job Position")
-    print(f"     Expected: {BASELINE_JOB_GROUPS} job groups, {BASELINE_NULL_JOB_COUNT} with no job")
-    print("  Fill in any discrepancies in logs/hr_kpi_a_verification.log.")
+    else:
+        print()
+        _log(_PASS, "All assertions passed.")
+        print()
+        print("Next step (manual — identity-equal check against Odoo UI):")
+        print("  1. Open Odoo -> Employees (hr.employee)")
+        print("  2. Filter: Active = True")
+        print("  3. Group By: Department")
+        print(f"     Expected: {BASELINE_TOTAL_ACTIVE} active employees, {BASELINE_DEPT_GROUPS} department groups")
+        print(f"     Employees with no department: {BASELINE_NULL_DEPT_COUNT}")
+        print("  4. Group By: Job Position")
+        print(f"     Expected: {BASELINE_JOB_GROUPS} job groups, {BASELINE_NULL_JOB_COUNT} with no job")
+        print("  Fill in any discrepancies in logs/hr_kpi_a_verification.log.")
     return 0
 
 
