@@ -1,1 +1,148 @@
-# Stub — full endpoint tests implemented in D3.
+"""
+Endpoint tests for HR KPI A — GET /api/v1/hr/kpi/headcount.
+
+Uses FastAPI TestClient with get_headcount patched — no Odoo connection.
+"""
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from backend.core.exceptions import OdooQueryError
+from backend.main import app
+
+_AUTH = ("testadmin", "testpass")
+_URL = "/api/v1/hr/kpi/headcount"
+
+_MOCK_DATA = {
+    "total_active": 136,
+    "total_inactive": 24,
+    "by_department": [
+        {"department_id": 10, "department_name": "Finance", "count": 18},
+        {"department_id": None, "department_name": "(بدون إدارة)", "count": 4},
+    ],
+    "by_job": [
+        {"job_id": 20, "job_name": "Senior Sales Executive", "count": 15},
+        {"job_id": None, "job_name": "(بدون وظيفة)", "count": 3},
+    ],
+    "as_of": "2026-05-29T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 85,
+}
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app, raise_server_exceptions=True)
+
+
+# ── Test 1 — 200 + JSON shape ─────────────────────────────────────────────────
+
+
+def test_headcount_returns_200_and_all_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.hr.get_headcount",
+        new=AsyncMock(return_value=_MOCK_DATA),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("total_active", "total_inactive", "by_department",
+                "by_job", "as_of", "cache_status", "rpc_duration_ms"):
+        assert key in body, f"Response missing key: {key!r}"
+    assert body["total_active"] == 136
+    assert body["total_inactive"] == 24
+
+
+# ── Test 2 — Cache-Control and X-Cache-Status headers ────────────────────────
+
+
+def test_response_has_cache_headers(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.hr.get_headcount",
+        new=AsyncMock(return_value=_MOCK_DATA),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 200
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+# ── Test 3 — X-Cache-Status reflects cached status ───────────────────────────
+
+
+def test_cache_status_cached_reflected_in_header(client: TestClient) -> None:
+    cached_data = {**_MOCK_DATA, "cache_status": "cached", "rpc_duration_ms": 0}
+    with patch(
+        "backend.api.v1.endpoints.hr.get_headcount",
+        new=AsyncMock(return_value=cached_data),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 200
+    assert r.headers.get("x-cache-status") == "cached"
+
+
+# ── Test 4 — OdooQueryError → 503 ────────────────────────────────────────────
+
+
+def test_odoo_query_error_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.hr.get_headcount",
+        new=AsyncMock(side_effect=OdooQueryError("connection refused")),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+# ── Test 5 — Unexpected exception → 500 ──────────────────────────────────────
+
+
+def test_unexpected_exception_returns_500(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.hr.get_headcount",
+        new=AsyncMock(side_effect=RuntimeError("unexpected")),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
+
+
+# ── Test 6 — Null department_id serialized as null (not dropped) ──────────────
+
+
+def test_null_department_id_serialized_as_null(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.hr.get_headcount",
+        new=AsyncMock(return_value=_MOCK_DATA),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 200
+    by_dept = r.json()["by_department"]
+    null_rows = [row for row in by_dept if row["department_id"] is None]
+    assert len(null_rows) == 1, "Null-dept bucket must be present in serialized response"
+    assert null_rows[0]["count"] == 4
+
+
+# ── Test 7 — Null job_id serialized as null (not dropped) ────────────────────
+
+
+def test_null_job_id_serialized_as_null(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.hr.get_headcount",
+        new=AsyncMock(return_value=_MOCK_DATA),
+    ):
+        r = client.get(_URL, auth=_AUTH)
+
+    assert r.status_code == 200
+    by_job = r.json()["by_job"]
+    null_rows = [row for row in by_job if row["job_id"] is None]
+    assert len(null_rows) == 1, "Null-job bucket must be present in serialized response"
+    assert null_rows[0]["count"] == 3
