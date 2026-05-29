@@ -68,6 +68,17 @@ All checks NON-PII: IDs, states, counts, dates only. No names, emails, wages rea
 | No job title | 3 | Minor gap |
 | No manager | 4 | Includes top-level roles |
 
+> **Active-only reconciliation (added 2026-05-29):** The figures above
+> are combined active+inactive counts. The HR Module KPI A endpoint
+> (`get_headcount()`) computes its breakdowns on active employees only.
+> The active-only equivalents are:
+> - no department (active only): **2**
+> - no job (active only): **2**
+> - no manager (active only): see §3.2 if implemented in a future KPI
+>
+> Reconciled against live verification run 2026-05-29T10:56:42Z
+> (`logs/hr_kpi_a_verification.log`, commit bdd8843).
+
 ### S3.3 — Department distribution (active employees, 24 groups)
 
 The UI described departments as "flat — all under Board / top Management." **RPC confirms this is wrong.** There are 24 real sub-departments with a genuine hierarchy. Top groups by headcount:
