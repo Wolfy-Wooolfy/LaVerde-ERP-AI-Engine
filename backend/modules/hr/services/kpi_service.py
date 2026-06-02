@@ -318,3 +318,207 @@ async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:
 
     _cache.set(cache_key, result)
     return result
+
+
+# ── KPI C — Payroll Risk Dashboard ───────────────────────────────────────────
+
+_CACHE_KEY_PREFIX_PAYROLL_RISK = "kpi:hr:payroll_risk"
+_CONTRACT_MODEL = "hr.contract"
+_BUCKET_LABELS = [
+    "active_without_contract",
+    "expired",
+    "expiring_45d",
+    "expiring_90d",
+    "expiring_135d",
+    "beyond_135d",
+    "open_ended",
+]
+
+
+def _parse_dept_rows(rows: list) -> list[dict]:
+    result = []
+    for row in rows:
+        dept_raw = row.get("department_id")
+        if isinstance(dept_raw, (list, tuple)) and dept_raw:
+            dept_id   = int(dept_raw[0])
+            dept_name = str(dept_raw[1])
+        else:
+            dept_id   = None
+            dept_name = _NO_DEPT_DISPLAY
+        result.append({
+            "department_id":   dept_id,
+            "department_name": dept_name,
+            "count":           int(row.get("__count") or 0),
+        })
+    result.sort(key=lambda r: (-r["count"], r["department_name"]))
+    return result
+
+
+async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI C — Payroll Risk Dashboard.
+
+    RPCs:
+      RPC 1 — search_read(hr.contract, [('state','=','open')],
+               fields=['id','employee_id','date_end'])
+               -> all running contracts (~153: 136 active-emp + 17 orphan)
+      RPC 2 — search_read(hr.employee, [('active','=',True)],
+               fields=['id'])
+               -> all 136 active employee IDs
+      RPC 3a — read_group(hr.contract, [('id','in',expired_ids)],
+                ['department_id'], ['department_id'], lazy=False)
+                -> only when expired bucket is non-empty
+      RPC 3b — read_group(hr.contract, [('id','in',expiring_45d_ids)],
+                ['department_id'], ['department_id'], lazy=False)
+                -> only when expiring_45d bucket is non-empty
+
+    Bucket thresholds (delta = (date_end - cairo_today).days):
+      active_without_contract : employee in active set, not in any running contract
+      expired                 : delta < 0
+      expiring_45d            : 0 <= delta <= 45
+      expiring_90d            : 46 <= delta <= 90
+      expiring_135d           : 91 <= delta <= 135
+      beyond_135d             : delta >= 136
+      open_ended              : date_end = False
+
+    Orphan contracts (running contracts whose employee is not active) are
+    counted separately in orphan_contracts_count and never touch the 7 buckets.
+
+    Sanity invariant: sum(bucket counts) == len(active_emp_ids) == total_active.
+
+    Baselines (verified 2026-05-29):
+      active_without_contract == 17  (onboarding limbo — by-design)
+      expired                 == 0   (alert if > 0)
+      open_ended              == 1
+      orphan_contracts_count  == 17  (paperwork debt from exit workflow)
+      total_active            == 136
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any Odoo RPC fails.
+    """
+    _assert_read_only()
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_PAYROLL_RISK)
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (2+ RPCs)")
+
+    _client = client if client is not None else OdooClient()
+
+    expired_dept_rows_raw:      list = []
+    expiring_45d_dept_rows_raw: list = []
+
+    t0 = time.monotonic()
+    try:
+        # RPC 1 — all running contracts (id + employee_id + date_end only; no PII)
+        contract_records = await _client.execute_kw(
+            _CONTRACT_MODEL,
+            "search_read",
+            args=[[("state", "=", "open")]],
+            kwargs={"fields": ["id", "employee_id", "date_end"]},
+        )
+
+        # RPC 2 — all active employee IDs
+        emp_records = await _client.execute_kw(
+            _MODEL,
+            "search_read",
+            args=[[("active", "=", True)]],
+            kwargs={"fields": ["id"]},
+        )
+
+        # ── Python classification (no RPCs) ───────────────────────────────
+        cairo_today = datetime.now(_CAIRO_TZ).date()
+        active_emp_ids: set[int] = {int(r["id"]) for r in emp_records}
+
+        orphan_count:     int            = 0
+        covered_emp_ids:  set[int]       = set()
+        bucket_counts:    dict[str, int] = {label: 0 for label in _BUCKET_LABELS}
+        expired_ids:      list[int]      = []
+        expiring_45d_ids: list[int]      = []
+
+        for c in contract_records:
+            emp_raw = c.get("employee_id")
+            if isinstance(emp_raw, (list, tuple)) and emp_raw:
+                emp_id = int(emp_raw[0])
+            else:
+                emp_id = int(emp_raw) if emp_raw else 0
+
+            if emp_id not in active_emp_ids:
+                orphan_count += 1
+                continue
+
+            covered_emp_ids.add(emp_id)
+            date_end_raw = c.get("date_end")
+
+            if not date_end_raw:
+                bucket_counts["open_ended"] += 1
+            else:
+                delta = (date.fromisoformat(str(date_end_raw)) - cairo_today).days
+                cid = int(c["id"])
+                if delta < 0:
+                    bucket_counts["expired"] += 1
+                    expired_ids.append(cid)
+                elif delta <= 45:
+                    bucket_counts["expiring_45d"] += 1
+                    expiring_45d_ids.append(cid)
+                elif delta <= 90:
+                    bucket_counts["expiring_90d"] += 1
+                elif delta <= 135:
+                    bucket_counts["expiring_135d"] += 1
+                else:
+                    bucket_counts["beyond_135d"] += 1
+
+        bucket_counts["active_without_contract"] = len(active_emp_ids - covered_emp_ids)
+
+        # ── Conditional department breakdown RPCs ─────────────────────────
+        if expired_ids:
+            # RPC 3a — department breakdown for expired bucket
+            expired_dept_rows_raw = await _client.execute_kw(
+                _CONTRACT_MODEL,
+                "read_group",
+                args=[[("id", "in", expired_ids)], ["department_id"], ["department_id"]],
+                kwargs={"lazy": False},
+            )
+
+        if expiring_45d_ids:
+            # RPC 3b — department breakdown for expiring_45d bucket
+            expiring_45d_dept_rows_raw = await _client.execute_kw(
+                _CONTRACT_MODEL,
+                "read_group",
+                args=[[("id", "in", expiring_45d_ids)], ["department_id"], ["department_id"]],
+                kwargs={"lazy": False},
+            )
+
+    except Exception as exc:
+        raise OdooQueryError(
+            f"get_payroll_risk_dashboard() failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"HR payroll risk dashboard: RPCs in {rpc_ms}ms | cache_key={cache_key}"
+    )
+
+    buckets      = [{"label": label, "count": bucket_counts[label]} for label in _BUCKET_LABELS]
+    total_active = sum(b["count"] for b in buckets)
+
+    result: dict = {
+        "buckets":                           buckets,
+        "department_breakdown_expired":      _parse_dept_rows(expired_dept_rows_raw),
+        "department_breakdown_expiring_45d": _parse_dept_rows(expiring_45d_dept_rows_raw),
+        "orphan_contracts_count":            orphan_count,
+        "total_active":                      total_active,
+        "reference_date":                    cairo_today.isoformat(),
+        "as_of":                             datetime.now(timezone.utc).isoformat(),
+        "cache_status":                      "fresh",
+        "rpc_duration_ms":                   rpc_ms,
+    }
+
+    _cache.set(cache_key, result)
+    return result
