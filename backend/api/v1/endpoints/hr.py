@@ -1,8 +1,9 @@
 """
 HR KPI endpoints.
 
-GET /api/v1/hr/kpi/headcount           — KPI A: Headcount
-GET /api/v1/hr/kpi/tenure-distribution — KPI B: Tenure Distribution
+GET /api/v1/hr/kpi/headcount              — KPI A: Headcount
+GET /api/v1/hr/kpi/tenure-distribution   — KPI B: Tenure Distribution
+GET /api/v1/hr/kpi/payroll-risk-dashboard — KPI C: Payroll Risk Dashboard
 """
 
 from fastapi import APIRouter, Request, Response
@@ -11,8 +12,16 @@ from loguru import logger
 
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
-from backend.modules.hr.schemas import HeadcountResponse, TenureDistributionResponse
-from backend.modules.hr.services.kpi_service import get_headcount, get_tenure_distribution
+from backend.modules.hr.schemas import (
+    HeadcountResponse,
+    PayrollRiskDashboardResponse,
+    TenureDistributionResponse,
+)
+from backend.modules.hr.services.kpi_service import (
+    get_headcount,
+    get_payroll_risk_dashboard,
+    get_tenure_distribution,
+)
 
 router = APIRouter(prefix="/hr", tags=["hr"])
 
@@ -61,6 +70,30 @@ async def tenure_distribution(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("HR KPI B tenure distribution — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/kpi/payroll-risk-dashboard",
+    summary="KPI C — Payroll Risk Dashboard",
+    response_model=PayrollRiskDashboardResponse,
+)
+@limiter.limit("60/minute")
+async def payroll_risk_dashboard(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
+    try:
+        data = await get_payroll_risk_dashboard()
+    except OdooQueryError:
+        logger.warning("HR KPI C payroll risk dashboard — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("HR KPI C payroll risk dashboard — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"
