@@ -6,12 +6,15 @@ read-only OdooClient. All methods are async. No method ever calls
 create, write, or unlink.
 
 KPI A (re-foundation 2026-06-03): get_headcount() rebuilt on Running contracts.
+KPI B (re-foundation 2026-06-03): get_tenure_distribution() rebuilt on net
+  accumulated service (sum of worked periods) for Running-contract employees.
 Employment = holding a contract in state='open'. hr.employee.active is NOT an
 employment signal. See §3.6 in HR_CLUSTER_DISCOVERY.md.
 """
 
 import time
-from datetime import date, datetime, timezone
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -28,6 +31,7 @@ _CONTRACT_MODEL = "hr.contract"
 _CAIRO_TZ       = ZoneInfo("Africa/Cairo")
 
 _CACHE_KEY_PREFIX_HEADCOUNT = "kpi:hr:headcount"
+_RUNNING_STATE = "open"
 
 _NO_DEPT_LABEL   = "بدون إدارة"
 _NO_JOB_LABEL    = "بدون وظيفة"
@@ -264,37 +268,49 @@ def _assign_band(years: int) -> str:
 
 
 async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:
-    """Return KPI B — Tenure Distribution.
+    """Return KPI B — Tenure Distribution (re-foundation 2026-06-03).
 
-    2 RPCs against hr.employee:
-      RPC 1 — search_read([('active','=',True),('first_contract_date','!=',False)],
-                          fields=['id','first_contract_date'])
-               -> records for band computation
-      RPC 2 — search_count([('active','=',True),('first_contract_date','=',False)])
-               -> missing_date_count
+    Employment: Running contract (state='open') — NOT hr.employee.active.
+    See §3.6 in HR_CLUSTER_DISCOVERY.md.
 
-    total_active = len(rpc1_records) + missing_date_count  (Python, not a 3rd RPC)
+    Tenure: net accumulated service = sum of all worked periods across ALL
+    hr.contract records for each Running-contract employee, with overlaps
+    clamped and gaps naturally excluded (§3.7 D2).
 
-    Bands (half-open, anniversary method — see _tenure_years):
-      "<1y"   : tenure_years < 1
-      "1-3y"  : 1 <= tenure_years < 3
-      "3-5y"  : 3 <= tenure_years < 5
-      "5-10y" : 5 <= tenure_years < 10
-      "10+y"  : tenure_years >= 10
+    1 RPC:
+      search_read(hr.contract, [],
+                  ['employee_id', 'state', 'date_start', 'date_end'],
+                  context={'active_test': False})
+      Returns all contracts (all states). active_test=False required: 13
+      Running contracts belong to archived employees (active=False) and would
+      be silently dropped without it, losing 13 employed people.
 
-    Reference date: today in Africa/Cairo — using UTC would place an employee
-    who started on today's Cairo date in the wrong band at 22:00+ UTC.
+    Algorithm (per Running-contract employee):
+      1. Collect ALL contract records for this employee (any state).
+      2. Per contract: start = date_start; end = date_end or cairo_today.
+         Non-Running contracts with null date_start: skip (uncomputable period).
+         Running contract with null date_start: missing_date_count, skip employee.
+      3. Sort periods by start. Merge overlaps: if next.start < prev.end, extend
+         prev.end = max(prev.end, next.end). Gaps are naturally absent from the sum.
+      4. total_days = sum((end - start).days) over merged periods.
+      5. virtual_start = cairo_today - timedelta(days=total_days).
+         _tenure_years(virtual_start, cairo_today) gives completed anniversary
+         years in the accumulated service. For a single-contract employee:
+         virtual_start == date_start (total_days == cairo_today - date_start
+         so cairo_today - total_days == date_start). The existing banding logic
+         is identical to the prior implementation for this case; returning
+         employees compute correctly with no special-casing required.
 
-    Cache key: kpi:hr:tenure:{cairo_date} (TTL 60s, date-scoped by make_key).
-
-    Baselines (discovery canonical run 2026-05-28T13:43:49Z):
-      total_active == 136
-      first_contract_date range (active): 2017-12-26 → 2025-11-17
-      No band before 2017; "10+y" count depends on run date.
+    Baselines (2026-06-03, post Dev-fix):
+      Running contracts: 115; null date_start on Running: 0; null date_end: 1.
+      All 115 employed employees hold exactly 1 contract today — the general
+      net-accumulated logic reduces to today - date_start for each, matching
+      the prior first_contract_date implementation. General logic handles future
+      returning employees with no code change.
 
     Raises:
         ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
-        OdooQueryError: if any Odoo RPC fails.
+        OdooQueryError: if the Odoo RPC fails.
     """
     _assert_read_only()
 
@@ -305,30 +321,24 @@ async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:
         logger.debug(f"Cache hit: {cache_key}")
         return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
 
-    logger.info(f"Cache miss: {cache_key} — querying Odoo (2 RPCs)")
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (1 RPC)")
 
     _client = client if client is not None else OdooClient()
 
     t0 = time.monotonic()
     try:
-        # RPC 1 — active employees with a contract date (for band computation)
-        records = await _client.execute_kw(
-            _MODEL,
+        all_contracts: list[dict] = await _client.execute_kw(
+            _CONTRACT_MODEL,
             "search_read",
-            args=[[("active", "=", True), ("first_contract_date", "!=", False)]],
-            kwargs={"fields": ["id", "first_contract_date"]},
+            args=[[]],
+            kwargs={
+                "fields": ["employee_id", "state", "date_start", "date_end"],
+                "context": {"active_test": False},
+            },
         )
-
-        # RPC 2 — active employees missing first_contract_date
-        missing_date_count = int(await _client.execute_kw(
-            _MODEL,
-            "search_count",
-            args=[[("active", "=", True), ("first_contract_date", "=", False)]],
-        ))
-
     except Exception as exc:
         raise OdooQueryError(
-            f"get_tenure_distribution() RPC on {_MODEL} failed: {exc}"
+            f"get_tenure_distribution() RPC on {_CONTRACT_MODEL} failed: {exc}"
         ) from exc
     finally:
         if client is None:
@@ -336,25 +346,84 @@ async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
-        f"HR tenure distribution: 2 RPCs on {_MODEL} in {rpc_ms}ms | cache_key={cache_key}"
+        f"HR tenure distribution: 1 RPC on {_CONTRACT_MODEL} in {rpc_ms}ms "
+        f"| cache_key={cache_key}"
     )
 
-    # Classify each record — IDs used only to count; no PII leaves this function
+    # ── Group all contracts by employee_id ────────────────────────────────────
+    contracts_by_emp: dict[int, list[dict]] = defaultdict(list)
+    for c in all_contracts:
+        emp_raw = c.get("employee_id")
+        if isinstance(emp_raw, (list, tuple)) and emp_raw:
+            eid = int(emp_raw[0])
+        elif emp_raw and emp_raw is not False:
+            eid = int(emp_raw)
+        else:
+            continue
+        contracts_by_emp[eid].append(c)
+
+    # Distinct employees with at least one Running contract — true headcount
+    running_emp_ids: set[int] = {
+        eid
+        for eid, cs in contracts_by_emp.items()
+        if any(c.get("state") == _RUNNING_STATE for c in cs)
+    }
+
+    # ── Classify each Running-contract employee ───────────────────────────────
     band_counts: dict[str, int] = {label: 0 for label in _BAND_LABELS}
-    for rec in records:
-        fcd_raw = rec.get("first_contract_date")
-        if not fcd_raw:
-            continue   # domain excludes False; guard against unexpected None
-        fcd = date.fromisoformat(str(fcd_raw))
-        band_counts[_assign_band(_tenure_years(fcd, cairo_today))] += 1
+    missing_date_count = 0
+
+    for eid in running_emp_ids:
+        periods: list[tuple[date, date]] = []
+        running_null_start = False
+
+        for c in contracts_by_emp[eid]:
+            ds_raw = c.get("date_start")
+            if not ds_raw:
+                if c.get("state") == _RUNNING_STATE:
+                    running_null_start = True
+                continue  # skip this period (non-Running with null start: uncomputable)
+            ds = date.fromisoformat(str(ds_raw))
+            de_raw = c.get("date_end")
+            de = date.fromisoformat(str(de_raw)) if de_raw else cairo_today
+            periods.append((ds, de))
+
+        if running_null_start:
+            missing_date_count += 1
+            continue
+
+        if not periods:
+            missing_date_count += 1
+            continue
+
+        periods.sort(key=lambda p: p[0])
+
+        # Merge overlapping intervals. Any period whose start falls before the
+        # last merged period's end overlaps — advance its effective start to
+        # the merged end. Gaps between non-overlapping periods are naturally
+        # absent from the sum (they occupy no merged interval).
+        merged: list[list[date]] = [list(periods[0])]
+        for (start, end) in periods[1:]:
+            if start < merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+
+        total_days = sum((end - start).days for (start, end) in merged)
+
+        # Map total worked days back to a concrete date so _tenure_years() —
+        # which expects a hire date — applies correctly to accumulated service.
+        # For a single-contract employee virtual_start == date_start exactly.
+        virtual_start = cairo_today - timedelta(days=total_days)
+        band_counts[_assign_band(_tenure_years(virtual_start, cairo_today))] += 1
 
     bands = [{"band": label, "count": band_counts[label]} for label in _BAND_LABELS]
-    total_active = sum(b["count"] for b in bands) + missing_date_count
+    total_employed = sum(b["count"] for b in bands) + missing_date_count
 
     result: dict = {
         "bands":              bands,
         "missing_date_count": missing_date_count,
-        "total_active":       total_active,
+        "total_employed":     total_employed,
         "reference_date":     cairo_today.isoformat(),
         "as_of":              datetime.now(timezone.utc).isoformat(),
         "cache_status":       "fresh",

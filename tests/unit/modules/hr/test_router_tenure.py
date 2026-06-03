@@ -24,7 +24,7 @@ _MOCK_DATA = {
         {"band": "10+y",  "count":  8},
     ],
     "missing_date_count": 3,
-    "total_active": 136,
+    "total_employed": 136,
     "reference_date": "2026-05-29",
     "as_of": "2026-05-29T10:00:00+00:00",
     "cache_status": "fresh",
@@ -49,10 +49,10 @@ def test_tenure_distribution_returns_200_and_all_keys(client: TestClient) -> Non
 
     assert r.status_code == 200
     body = r.json()
-    for key in ("bands", "missing_date_count", "total_active",
+    for key in ("bands", "missing_date_count", "total_employed",
                 "reference_date", "as_of", "cache_status", "rpc_duration_ms"):
         assert key in body, f"Response missing key: {key!r}"
-    assert body["total_active"] == 136
+    assert body["total_employed"] == 136
     assert body["missing_date_count"] == 3
 
 
@@ -145,7 +145,7 @@ def test_five_bands_present_when_some_counts_are_zero(client: TestClient) -> Non
             {"band": "10+y",  "count": 0},
         ],
         "missing_date_count": 0,
-        "total_active": 136,
+        "total_employed": 136,
     }
     with patch(
         "backend.api.v1.endpoints.hr.get_tenure_distribution",
@@ -188,7 +188,7 @@ def test_sanity_invariant_holds_in_serialized_response(client: TestClient) -> No
     assert r.status_code == 200
     body = r.json()
     band_sum = sum(b["count"] for b in body["bands"])
-    assert band_sum + body["missing_date_count"] == body["total_active"], (
+    assert band_sum + body["missing_date_count"] == body["total_employed"], (
         f"band_sum ({band_sum}) + missing ({body['missing_date_count']}) "
-        f"must == total_active ({body['total_active']})"
+        f"must == total_employed ({body['total_employed']})"
     )
