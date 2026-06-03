@@ -1,5 +1,5 @@
 """
-Live verification for HR KPI A — Headcount.
+Live verification for HR KPI A — Headcount (re-foundation 2026-06-03).
 
 Usage:
     python scripts/verify_kpi_a_headcount_live.py [--url http://localhost:8000]
@@ -8,34 +8,54 @@ Requires the FastAPI server to be running and reachable.
 Set VERIFY_USERNAME / VERIFY_PASSWORD env vars (or .env) to override
 the default admin credentials.
 
-Exits 0 always. Findings are logged to the TSV at
-logs/hr_kpi_a_verification.log and printed to stdout with
-[PASS]/[FAIL] markers. A non-empty 'error' column or any [FAIL]
-line indicates an investigation is needed.
+Exits 0 always. Findings printed with [PASS]/[FAIL]/[INFO] markers and
+appended as one TSV row to logs/hr_kpi_a_headcount_verification.log.
 
-Appends one tab-separated row to logs/hr_kpi_a_verification.log on each run.
+Employment definition (§3.6): headcount = distinct employees holding a
+contract in state='open' (Running). hr.employee.active is NOT an
+employment signal.
 
-Baselines (discovery canonical run 2026-05-28T13:43:49Z, commit logs/hr_discovery.log):
-    total_active   == 136
-    total_inactive == 24
-    null-dept bucket count == 4  (active employees with no department)
-    null-job  bucket count == 3  (active employees with no job)
-    len(by_department) == 24
-    len(by_job)        == 67
+Baselines (employment-foundation run 2026-06-03T08:22:41Z, post Dev-fix):
+    headcount              == 115   (distinct Running-contract employees)
+    incoming_count         == 0     (employees with only draft contracts)
+    active_flag_count      == 136   (hr.employee.active=True — NOT headcount)
+    active_without_running == 34    (exit-gap 23 + data-gap 11)
+
+Drift policy:
+  Baseline comparisons are [INFO] only — data may have shifted since
+  2026-06-03 as HR acts on exit-gap employees. A headcount of e.g. 113
+  is drift to report, not a failure.
+
+Structural invariants ([FAIL] regardless of drift):
+  * sum(by_department counts) == headcount
+  * sum(by_job counts)        == headcount
+  * headcount >= 0
+  * active_without_running <= active_flag_count
+  * HTTP 200, required keys, valid cache_status, rpc_ms >= 0
+
+Independent Odoo cross-check:
+  Queries hr.contract state='open' directly via OdooClient, counts
+  distinct employee_ids, compares to endpoint headcount.
+  * endpoint == direct AND both == 115   -> clean (no change)
+  * endpoint == direct AND both != 115   -> clean drift (data changed)
+  * endpoint != direct                   -> [FAIL] SERVICE BUG
 """
 
 import argparse
+import asyncio
 import io
 import os
 import sys
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
 
+from backend.shared.odoo.client import OdooClient
+
 load_dotenv(dotenv_path=".env")
 
-# Force UTF-8 stdout (Windows consoles default to cp1252)
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
@@ -45,27 +65,17 @@ DEFAULT_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 USERNAME    = os.environ.get("VERIFY_USERNAME", "admin")
 PASSWORD    = os.environ.get("VERIFY_PASSWORD", "password")
 ENDPOINT    = "/api/v1/hr/kpi/headcount"
-LOG_FILE    = "logs/hr_kpi_a_verification.log"
+LOG_FILE    = "logs/hr_kpi_a_headcount_verification.log"
+CAIRO_TZ    = ZoneInfo("Africa/Cairo")
 
-# Discovery baselines (2026-05-28T13:43:49Z)
-BASELINE_TOTAL_ACTIVE     = 136
-BASELINE_TOTAL_INACTIVE   = 24
-BASELINE_DEPT_GROUPS      = 24
-BASELINE_JOB_GROUPS       = 67
-# Active-only — corresponds to what get_headcount() returns.
-# HR_CLUSTER_DISCOVERY.md §3.2 reports 4/3 as active+inactive total.
-# See verification run 2026-05-29 for reconciliation.
-BASELINE_NULL_DEPT_COUNT  = 2
-# Active-only — corresponds to what get_headcount() returns.
-# HR_CLUSTER_DISCOVERY.md §3.2 reports 4/3 as active+inactive total.
-# See verification run 2026-05-29 for reconciliation.
-BASELINE_NULL_JOB_COUNT   = 2
-BASELINE_DATE             = "2026-05-28"
+# Baselines (2026-06-03T08:22:41Z — post Dev-fix)
+BASELINE_HEADCOUNT              = 115
+BASELINE_INCOMING_COUNT         = 0
+BASELINE_ACTIVE_FLAG_COUNT      = 136
+BASELINE_ACTIVE_WITHOUT_RUNNING = 34
 
-NO_DEPT_DISPLAY = "(بدون إدارة)"   # (بدون إدارة)
-NO_JOB_DISPLAY  = "(بدون وظيفة)"   # (بدون وظيفة)
-
-_SEP = "═" * 63
+_SEP  = "═" * 72
+_SEP2 = "─" * 72
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,14 +96,24 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
     return condition
 
 
+def _drift(label: str, value: int, baseline: int) -> None:
+    delta = value - baseline
+    if delta == 0:
+        _log(_INFO, f"{label}: {value}  (= baseline {baseline})")
+    else:
+        _log(_INFO, f"{label}: {value}  (Delta {delta:+d} vs baseline {baseline})")
+
+
 def _append_log_row(
     run_at: str,
-    total_active: int | str,
-    total_inactive: int | str,
-    dept_groups: int | str,
-    job_groups: int | str,
-    null_dept_count: int | str,
-    null_job_count: int | str,
+    headcount: int | str,
+    incoming_count: int | str,
+    active_flag_count: int | str,
+    active_without_running: int | str,
+    dept_sum: int | str,
+    job_sum: int | str,
+    direct_odoo_count: int | str,
+    endpoint_matches_odoo: str,
     cache_status: str,
     rpc_ms: int | str,
     error: str = "",
@@ -103,15 +123,36 @@ def _append_log_row(
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         if not log_exists:
             f.write(
-                "run_at\ttotal_active\ttotal_inactive\tdept_groups\t"
-                "job_groups\tnull_dept_count\tnull_job_count\t"
-                "cache_status\trpc_duration_ms\terror\n"
+                "run_at\theadcount\tincoming_count\tactive_flag_count\t"
+                "active_without_running\tdept_sum\tjob_sum\tdirect_odoo_count\t"
+                "endpoint_matches_odoo\tcache_status\trpc_duration_ms\terror\n"
             )
         f.write(
-            f"{run_at}\t{total_active}\t{total_inactive}\t{dept_groups}\t"
-            f"{job_groups}\t{null_dept_count}\t{null_job_count}\t"
-            f"{cache_status}\t{rpc_ms}\t{error}\n"
+            f"{run_at}\t{headcount}\t{incoming_count}\t{active_flag_count}\t"
+            f"{active_without_running}\t{dept_sum}\t{job_sum}\t{direct_odoo_count}\t"
+            f"{endpoint_matches_odoo}\t{cache_status}\t{rpc_ms}\t{error}\n"
         )
+
+
+# ── Odoo cross-check ──────────────────────────────────────────────────────────
+
+async def _direct_odoo_headcount() -> int:
+    """Query hr.contract state='open' directly; return distinct employee_id count."""
+    async with OdooClient() as client:
+        records = await client.execute_kw(
+            "hr.contract",
+            "search_read",
+            args=[[("state", "=", "open")]],
+            kwargs={"fields": ["employee_id"]},
+        )
+    seen: set[int] = set()
+    for c in records:
+        emp_raw = c.get("employee_id")
+        if isinstance(emp_raw, (list, tuple)) and emp_raw:
+            seen.add(int(emp_raw[0]))
+        elif emp_raw and emp_raw is not False:
+            seen.add(int(emp_raw))
+    return len(seen)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -122,11 +163,24 @@ def main() -> int:
     args = parser.parse_args()
     base_url: str = args.url.rstrip("/")
 
-    url    = f"{base_url}{ENDPOINT}"
-    run_at = datetime.now(timezone.utc).isoformat()
+    url         = f"{base_url}{ENDPOINT}"
+    run_at      = datetime.now(timezone.utc).isoformat()
+    cairo_today = datetime.now(CAIRO_TZ).date().isoformat()
+
+    print(_SEP)
+    print("KPI A (HR) — Headcount Live Verification")
+    print(f"Employment definition : distinct employees with state='open' contract")
+    print(f"Run timestamp         : {run_at}")
+    print(f"Cairo today           : {cairo_today}")
+    print(f"Baselines (2026-06-03): headcount={BASELINE_HEADCOUNT}, "
+          f"active_flag={BASELINE_ACTIVE_FLAG_COUNT}, "
+          f"active_without_running={BASELINE_ACTIVE_WITHOUT_RUNNING}")
+    print(_SEP)
+    print()
 
     _log(_INFO, f"Target: GET {url}")
     _log(_INFO, f"Auth user: {USERNAME}")
+    print()
 
     failures: list[str] = []
 
@@ -137,144 +191,120 @@ def main() -> int:
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", error=msg)
+        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", error=msg)
         return 0
 
     # ── Step 2: Status code ───────────────────────────────────────────────────
     ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
     if not ok:
         _log(_INFO, f"Response body: {r.text[:500]}")
-        _append_log_row(run_at, "", "", "", "", "", "", "", "",
+        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
                         error=f"HTTP {r.status_code}")
         return 0
 
     body: dict = r.json()
-    _log(_INFO, f"Response body (truncated): {str(body)[:600]}")
 
     # ── Step 3: Required keys ─────────────────────────────────────────────────
     required_keys = (
-        "total_active", "total_inactive", "by_department",
-        "by_job", "as_of", "cache_status", "rpc_duration_ms",
+        "headcount", "by_department", "by_job",
+        "incoming_count", "active_flag_count", "active_without_running",
+        "reference_date", "as_of", "cache_status", "rpc_duration_ms",
     )
     for k in required_keys:
         if not _check(f"key '{k}' present", k in body):
             failures.append(f"missing_key_{k}")
 
     if failures:
-        _append_log_row(run_at, "", "", "", "", "", "", "", "",
+        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
                         error=f"missing keys: {failures}")
         return 0
 
     # ── Step 4: Extract values ────────────────────────────────────────────────
-    total_active:   int  = int(body["total_active"])
-    total_inactive: int  = int(body["total_inactive"])
-    by_department:  list = body["by_department"]
-    by_job:         list = body["by_job"]
-    cache_status:   str  = body["cache_status"]
-    rpc_ms:         int  = int(body["rpc_duration_ms"])
+    headcount:              int  = int(body["headcount"])
+    incoming_count:         int  = int(body["incoming_count"])
+    active_flag_count:      int  = int(body["active_flag_count"])
+    active_without_running: int  = int(body["active_without_running"])
+    by_department:          list = body["by_department"]
+    by_job:                 list = body["by_job"]
+    reference_date:         str  = body["reference_date"]
+    cache_status:           str  = body["cache_status"]
+    rpc_ms:                 int  = int(body["rpc_duration_ms"])
 
+    dept_sum    = sum(row["count"] for row in by_department)
+    job_sum     = sum(row["count"] for row in by_job)
     dept_groups = len(by_department)
     job_groups  = len(by_job)
 
-    null_dept_rows = [r for r in by_department if r.get("department_id") is None]
-    null_job_rows  = [r for r in by_job        if r.get("job_id")        is None]
-    null_dept_count = null_dept_rows[0]["count"] if null_dept_rows else 0
-    null_job_count  = null_job_rows[0]["count"]  if null_job_rows  else 0
-
-    dept_sum = sum(r["count"] for r in by_department)
-    job_sum  = sum(r["count"] for r in by_job)
-
     # ── Step 5: Structured summary ────────────────────────────────────────────
+    print(_SEP)
+    print("ENDPOINT RESPONSE SUMMARY")
+    print(_SEP2)
+    print(f"  headcount              : {headcount:>6}   (baseline {BASELINE_HEADCOUNT})")
+    print(f"  incoming_count         : {incoming_count:>6}   (baseline {BASELINE_INCOMING_COUNT})")
+    print(f"  active_flag_count      : {active_flag_count:>6}   (baseline {BASELINE_ACTIVE_FLAG_COUNT})")
+    print(f"  active_without_running : {active_without_running:>6}   (baseline {BASELINE_ACTIVE_WITHOUT_RUNNING})")
+    print(f"  sum(by_department)     : {dept_sum:>6}   (must == headcount {headcount})")
+    print(f"  sum(by_job)            : {job_sum:>6}   (must == headcount {headcount})")
+    print(f"  len(by_department)     : {dept_groups:>6}")
+    print(f"  len(by_job)            : {job_groups:>6}")
+    print(f"  reference_date         : {reference_date}   (cairo today: {cairo_today})")
+    print(f"  cache_status           : {cache_status}")
+    print(f"  rpc_duration_ms        : {rpc_ms} ms")
+    print(f"  as_of                  : {body.get('as_of')}")
+    print(_SEP)
     print()
-    print(_SEP)
-    print("KPI A (HR) — Headcount Verification")
-    print(f"Run timestamp          : {run_at}")
-    print(_SEP)
-    print(f"total_active           : {total_active:>10}   (baseline {BASELINE_TOTAL_ACTIVE})")
-    print(f"total_inactive         : {total_inactive:>10}   (baseline {BASELINE_TOTAL_INACTIVE})")
-    print(f"len(by_department)     : {dept_groups:>10}   (baseline {BASELINE_DEPT_GROUPS})")
-    print(f"len(by_job)            : {job_groups:>10}   (baseline {BASELINE_JOB_GROUPS})")
-    print(f"null-dept bucket count : {null_dept_count:>10}   (baseline {BASELINE_NULL_DEPT_COUNT})")
-    print(f"null-job  bucket count : {null_job_count:>10}   (baseline {BASELINE_NULL_JOB_COUNT})")
-    print(f"sum(by_department)     : {dept_sum:>10}   (must == total_active)")
-    print(f"sum(by_job)            : {job_sum:>10}   (must == total_active)")
-    print(f"cache_status           : {cache_status:>10}")
-    print(f"rpc_duration_ms        : {rpc_ms:>7} ms")
-    print(f"as_of                  : {body.get('as_of')}")
-    print(_SEP)
+
+    # ── Step 6: Drift reporting (INFO only) ───────────────────────────────────
+    print("DRIFT vs 2026-06-03 BASELINES  [INFO only — not structural]:")
+    _drift("headcount             ", headcount,              BASELINE_HEADCOUNT)
+    _drift("incoming_count        ", incoming_count,         BASELINE_INCOMING_COUNT)
+    _drift("active_flag_count     ", active_flag_count,      BASELINE_ACTIVE_FLAG_COUNT)
+    _drift("active_without_running", active_without_running, BASELINE_ACTIVE_WITHOUT_RUNNING)
     print()
 
-    # ── Step 6: Baseline assertions ───────────────────────────────────────────
-    if not _check(
-        f"total_active == {BASELINE_TOTAL_ACTIVE}",
-        total_active == BASELINE_TOTAL_ACTIVE,
-        f"got {total_active}",
-    ):
-        failures.append("total_active_mismatch")
+    # ── Step 7: Structural integrity (hard FAIL) ──────────────────────────────
+    print("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]:")
+
+    if not _check("headcount >= 0", headcount >= 0, f"got {headcount}"):
+        failures.append("negative_headcount")
+
+    if not _check("incoming_count >= 0", incoming_count >= 0, f"got {incoming_count}"):
+        failures.append("negative_incoming_count")
+
+    if not _check("active_flag_count >= 0", active_flag_count >= 0, f"got {active_flag_count}"):
+        failures.append("negative_active_flag_count")
+
+    if not _check("active_without_running >= 0",
+                  active_without_running >= 0, f"got {active_without_running}"):
+        failures.append("negative_active_without_running")
 
     if not _check(
-        f"total_inactive == {BASELINE_TOTAL_INACTIVE}",
-        total_inactive == BASELINE_TOTAL_INACTIVE,
-        f"got {total_inactive}",
+        "active_without_running <= active_flag_count",
+        active_without_running <= active_flag_count,
+        f"{active_without_running} > {active_flag_count}",
     ):
-        failures.append("total_inactive_mismatch")
+        failures.append("active_without_running_exceeds_active_flag")
 
     if not _check(
-        f"null-dept bucket count == {BASELINE_NULL_DEPT_COUNT}",
-        null_dept_count == BASELINE_NULL_DEPT_COUNT,
-        f"got {null_dept_count} — bucket label must be {NO_DEPT_DISPLAY!r}",
-    ):
-        failures.append("null_dept_count_mismatch")
-
-    if not _check(
-        f"null-job bucket count == {BASELINE_NULL_JOB_COUNT}",
-        null_job_count == BASELINE_NULL_JOB_COUNT,
-        f"got {null_job_count} — bucket label must be {NO_JOB_DISPLAY!r}",
-    ):
-        failures.append("null_job_count_mismatch")
-
-    # ── Step 7: Integrity checks ──────────────────────────────────────────────
-    if not _check(
-        "sum(by_department counts) == total_active",
-        dept_sum == total_active,
-        f"{dept_sum} != {total_active}",
+        "sum(by_department counts) == headcount",
+        dept_sum == headcount,
+        f"{dept_sum} != {headcount}",
     ):
         failures.append("dept_sum_mismatch")
 
     if not _check(
-        "sum(by_job counts) == total_active",
-        job_sum == total_active,
-        f"{job_sum} != {total_active}",
+        "sum(by_job counts) == headcount",
+        job_sum == headcount,
+        f"{job_sum} != {headcount}",
     ):
         failures.append("job_sum_mismatch")
 
     if not _check(
-        "by_department is non-empty",
-        dept_groups > 0,
-        f"got {dept_groups} groups",
+        "reference_date == Cairo today",
+        reference_date == cairo_today,
+        f"got {reference_date!r}, expected {cairo_today!r}",
     ):
-        failures.append("dept_empty")
-
-    if not _check(
-        "by_job is non-empty",
-        job_groups > 0,
-        f"got {job_groups} groups",
-    ):
-        failures.append("job_empty")
-
-    if not _check(
-        "null-dept bucket department_id == null",
-        (not null_dept_rows) or null_dept_rows[0].get("department_id") is None,
-        "department_id must serialize as JSON null",
-    ):
-        failures.append("null_dept_id_not_null")
-
-    if not _check(
-        "null-job bucket job_id == null",
-        (not null_job_rows) or null_job_rows[0].get("job_id") is None,
-        "job_id must serialize as JSON null",
-    ):
-        failures.append("null_job_id_not_null")
+        failures.append("reference_date_mismatch")
 
     if not _check(
         "cache_status in {fresh, cached}",
@@ -283,66 +313,101 @@ def main() -> int:
     ):
         failures.append("bad_cache_status")
 
-    if not _check(
-        "rpc_duration_ms >= 0",
-        rpc_ms >= 0,
-        f"got {rpc_ms}",
-    ):
+    if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
         failures.append("negative_rpc_ms")
 
+    print()
+
     # ── Step 8: Response headers ──────────────────────────────────────────────
+    print("HTTP HEADERS:")
     cc  = r.headers.get("cache-control", "")
     xcs = r.headers.get("x-cache-status", "")
-    _check("Cache-Control: private",    "private"    in cc,  f"header: {cc!r}")
-    _check("Cache-Control: max-age=60", "max-age=60" in cc,  f"header: {cc!r}")
-    _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
+    _check("Cache-Control: private",        "private"    in cc,  f"header: {cc!r}")
+    _check("Cache-Control: max-age=60",     "max-age=60" in cc,  f"header: {cc!r}")
+    _check("X-Cache-Status header present", bool(xcs),           f"got {xcs!r}")
+    print()
 
     # ── Step 9: Second request — cache hit ───────────────────────────────────
+    print("CACHE HIT CHECK:")
     _log(_INFO, "Issuing second request to verify cache hit ...")
-    with httpx.Client(timeout=30) as http:
-        r2 = http.get(url, auth=(USERNAME, PASSWORD))
-    body2: dict = r2.json()
-    if not _check(
-        "second call cache_status == 'cached'",
-        body2.get("cache_status") == "cached",
-        f"got {body2.get('cache_status')!r}",
-    ):
-        failures.append("cache_not_hit_on_second_call")
-    if not _check(
-        "second call rpc_duration_ms == 0",
-        int(body2.get("rpc_duration_ms", -1)) == 0,
-        f"got {body2.get('rpc_duration_ms')}",
-    ):
-        failures.append("cache_rpc_ms_nonzero")
+    try:
+        with httpx.Client(timeout=30) as http:
+            r2 = http.get(url, auth=(USERNAME, PASSWORD))
+        body2: dict = r2.json()
+        if not _check(
+            "second call cache_status == 'cached'",
+            body2.get("cache_status") == "cached",
+            f"got {body2.get('cache_status')!r}",
+        ):
+            failures.append("cache_not_hit_on_second_call")
+        if not _check(
+            "second call rpc_duration_ms == 0",
+            int(body2.get("rpc_duration_ms", -1)) == 0,
+            f"got {body2.get('rpc_duration_ms')}",
+        ):
+            failures.append("cache_rpc_ms_nonzero")
+    except Exception as exc:
+        _log(_FAIL, f"Second request failed: {exc}")
+        failures.append("second_request_failed")
+    print()
+
+    # ── Step 10: Independent Odoo cross-check ─────────────────────────────────
+    print("INDEPENDENT ODOO CROSS-CHECK:")
+    _log(_INFO, "Querying hr.contract state='open' directly via OdooClient ...")
+    direct_count: int | str = "error"
+    endpoint_matches_odoo   = "error"
+    try:
+        direct_count = asyncio.run(_direct_odoo_headcount())
+        _log(_INFO, f"Direct Odoo count (distinct Running-contract employees) : {direct_count}")
+        _log(_INFO, f"Endpoint headcount                                       : {headcount}")
+
+        if headcount == direct_count:
+            _log(_PASS, f"endpoint headcount == direct Odoo count ({headcount})")
+            if headcount == BASELINE_HEADCOUNT:
+                _log(_INFO, f"Both match baseline {BASELINE_HEADCOUNT} — no drift.")
+            else:
+                _log(_INFO,
+                     f"Both differ from baseline {BASELINE_HEADCOUNT} "
+                     f"(Delta {headcount - BASELINE_HEADCOUNT:+d}) — clean drift (data changed, not a bug).")
+            endpoint_matches_odoo = "MATCH"
+        else:
+            _log(_FAIL,
+                 f"endpoint headcount ({headcount}) != direct Odoo count ({direct_count}) "
+                 "— SERVICE BUG: endpoint logic diverges from a fresh Odoo query")
+            failures.append(f"endpoint_odoo_mismatch:{headcount}/{direct_count}")
+            endpoint_matches_odoo = f"MISMATCH:{headcount}/{direct_count}"
+
+    except Exception as exc:
+        _log(_FAIL, f"Direct Odoo query failed — cross-check skipped: {exc}")
+        failures.append("direct_odoo_query_failed")
+        endpoint_matches_odoo = f"error:{type(exc).__name__}"
+    print()
 
     # ── Result ────────────────────────────────────────────────────────────────
     _append_log_row(
         run_at=run_at,
-        total_active=total_active,
-        total_inactive=total_inactive,
-        dept_groups=dept_groups,
-        job_groups=job_groups,
-        null_dept_count=null_dept_count,
-        null_job_count=null_job_count,
+        headcount=headcount,
+        incoming_count=incoming_count,
+        active_flag_count=active_flag_count,
+        active_without_running=active_without_running,
+        dept_sum=dept_sum,
+        job_sum=job_sum,
+        direct_odoo_count=direct_count,
+        endpoint_matches_odoo=endpoint_matches_odoo,
         cache_status=cache_status,
         rpc_ms=rpc_ms,
     )
 
+    print(_SEP)
     if failures:
-        _log(_FAIL, f"Verification FAILED — {len(failures)} assertion(s): {failures}")
+        _log(_FAIL,
+             f"Verification complete — {len(failures)} structural issue(s): {failures}")
     else:
-        print()
-        _log(_PASS, "All assertions passed.")
-        print()
-        print("Next step (manual — identity-equal check against Odoo UI):")
-        print("  1. Open Odoo -> Employees (hr.employee)")
-        print("  2. Filter: Active = True")
-        print("  3. Group By: Department")
-        print(f"     Expected: {BASELINE_TOTAL_ACTIVE} active employees, {BASELINE_DEPT_GROUPS} department groups")
-        print(f"     Employees with no department: {BASELINE_NULL_DEPT_COUNT}")
-        print("  4. Group By: Job Position")
-        print(f"     Expected: {BASELINE_JOB_GROUPS} job groups, {BASELINE_NULL_JOB_COUNT} with no job")
-        print("  Fill in any discrepancies in logs/hr_kpi_a_verification.log.")
+        _log(_PASS,
+             "All structural checks passed. "
+             "Review [INFO] drift lines above if headcount != 115.")
+    print(_SEP)
+
     return 0
 
 
