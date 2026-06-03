@@ -22,10 +22,13 @@ class JobHeadcountRow(BaseModel):
 
 
 class HeadcountResponse(BaseModel):
-    total_active: int
-    total_inactive: int
+    headcount: int                          # distinct Running-contract employees (true headcount)
     by_department: list[DepartmentHeadcountRow]
     by_job: list[JobHeadcountRow]
+    incoming_count: int                     # distinct employees with draft contract (not in headcount)
+    active_flag_count: int                  # hr.employee.active=True count — NOT headcount; divergence indicator only
+    active_without_running: int             # active=True employees with no Running contract (data-quality signal)
+    reference_date: str                     # Cairo TZ ISO date YYYY-MM-DD
     as_of: str                              # ISO 8601 UTC datetime of the query
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int                    # 0 when served from cache

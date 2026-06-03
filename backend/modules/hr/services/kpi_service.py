@@ -5,7 +5,9 @@ Data source: hr.employee, hr.contract, hr.department, hr.job via the shared
 read-only OdooClient. All methods are async. No method ever calls
 create, write, or unlink.
 
-M5-S1 scope: get_headcount() (KPI A).
+KPI A (re-foundation 2026-06-03): get_headcount() rebuilt on Running contracts.
+Employment = holding a contract in state='open'. hr.employee.active is NOT an
+employment signal. See §3.6 in HR_CLUSTER_DISCOVERY.md.
 """
 
 import time
@@ -21,13 +23,14 @@ from backend.modules.hr.services import cache as _cache
 
 _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
 
-_MODEL = "hr.employee"
+_MODEL          = "hr.employee"
+_CONTRACT_MODEL = "hr.contract"
+_CAIRO_TZ       = ZoneInfo("Africa/Cairo")
+
 _CACHE_KEY_PREFIX_HEADCOUNT = "kpi:hr:headcount"
 
-_NO_DEPT_LABEL = "بدون إدارة"   # بدون إدارة  (wrapped in parens below)
-_NO_JOB_LABEL  = "بدون وظيفة"   # بدون وظيفة  (wrapped in parens below)
-
-# Display strings shown in the response
+_NO_DEPT_LABEL   = "بدون إدارة"
+_NO_JOB_LABEL    = "بدون وظيفة"
 _NO_DEPT_DISPLAY = f"({_NO_DEPT_LABEL})"
 _NO_JOB_DISPLAY  = f"({_NO_JOB_LABEL})"
 
@@ -43,81 +46,85 @@ def _assert_read_only() -> None:
 
 
 async def get_headcount(client: Optional[OdooClient] = None) -> dict:
-    """Return KPI A — Headcount.
+    """Return KPI A — Headcount (re-foundation 2026-06-03).
 
-    4 RPCs against hr.employee:
-      RPC 1 — search_count([('active','=',True)])  -> total_active
-      RPC 2 — search_count([('active','=',False)]) -> total_inactive
-      RPC 3 — read_group([('active','=',True)], ['department_id'],
-                         ['department_id'], lazy=False)
-               -> by_department (active only; null bucket included)
-      RPC 4 — read_group([('active','=',True)], ['job_id'],
-                         ['job_id'], lazy=False)
-               -> by_job (active only; null bucket included)
+    Employment definition: an employee is employed at La Verde IFF they hold
+    a contract in state='open' (Running). hr.employee.active is an archive/UI
+    flag — NOT an employment signal. See §3.6 in HR_CLUSTER_DISCOVERY.md.
 
-    Null-department employees appear as a single "(بدون إدارة)" bucket
-    with department_id=None. Same rule for job. This ensures the breakdown
-    sums equal total_active and matches the Odoo UI count.
+    3 RPCs:
+      RPC 1 — search_read(hr.contract, [('state','=','open')],
+                          fields=['employee_id','department_id','job_id'])
+               → Running contracts; headcount + all breakdown logic derives here.
+      RPC 2 — search_read(hr.contract, [('state','=','draft')],
+                          fields=['employee_id'])
+               → incoming_count (New/draft bucket; separate from headcount).
+      RPC 3 — search_read(hr.employee, [('active','=',True)], fields=['id'])
+               → active_flag_count + active_without_running (search_read used
+                 instead of search_count because the ID set is needed for both
+                 metrics — one RPC covers both).
 
-    Sorting: count DESC, then name ASC for stable ordering on equal counts.
+    Distinct-employee counting: a per-employee dict (keyed by employee_id) is
+    built before grouping, guaranteeing sum(by_department) == headcount ==
+    sum(by_job) by construction. Overwrite-on-duplicate handles the edge case
+    of two Running contracts on the same employee_id without crashing.
 
-    Baselines (discovery canonical run 2026-05-28T13:43:49Z):
-      total_active   == 136
-      total_inactive == 24
-      len(by_department) == 24  (includes null-dept bucket, discovery S3.3)
-      len(by_job)        == 67  (includes null-job bucket, discovery S3.4)
+    Baselines (live run 2026-06-03T08:22:41Z — post Dev-fix):
+      headcount              == 115  (distinct Running-contract employees)
+      incoming_count         == 0
+      active_flag_count      == 136  (divergence indicator: NOT headcount)
+      active_without_running == 34   (exit-gap 23 + data-gap 11)
+      sum(by_department)     == 115
+      sum(by_job)            == 115
 
     Raises:
         ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
-        OdooQueryError: if any of the 4 Odoo RPCs fails.
+        OdooQueryError: if any of the 3 Odoo RPCs fails.
     """
     _assert_read_only()
 
+    cairo_today = datetime.now(_CAIRO_TZ).date()
     cache_key = _cache.make_key(_CACHE_KEY_PREFIX_HEADCOUNT)
     cached = _cache.get(cache_key)
     if cached is not None:
         logger.debug(f"Cache hit: {cache_key}")
         return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
 
-    logger.info(f"Cache miss: {cache_key} — querying Odoo (4 RPCs)")
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (3 RPCs)")
 
     _client = client if client is not None else OdooClient()
 
     t0 = time.monotonic()
     try:
-        # RPC 1 — total active
-        total_active = int(await _client.execute_kw(
-            _MODEL,
-            "search_count",
-            args=[[("active", "=", True)]],
-        ))
-
-        # RPC 2 — total inactive
-        total_inactive = int(await _client.execute_kw(
-            _MODEL,
-            "search_count",
-            args=[[("active", "=", False)]],
-        ))
-
-        # RPC 3 — department breakdown (active only)
-        dept_rows = await _client.execute_kw(
-            _MODEL,
-            "read_group",
-            args=[[("active", "=", True)], ["department_id"], ["department_id"]],
-            kwargs={"lazy": False},
+        # RPC 1 — all Running contracts (employee_id + dept + job only; no PII)
+        running_contracts = await _client.execute_kw(
+            _CONTRACT_MODEL,
+            "search_read",
+            args=[[("state", "=", "open")]],
+            kwargs={"fields": ["employee_id", "department_id", "job_id"]},
         )
 
-        # RPC 4 — job breakdown (active only)
-        job_rows = await _client.execute_kw(
+        # RPC 2 — draft (New/incoming) contracts
+        draft_contracts = await _client.execute_kw(
+            _CONTRACT_MODEL,
+            "search_read",
+            args=[[("state", "=", "draft")]],
+            kwargs={"fields": ["employee_id"]},
+        )
+
+        # RPC 3 — active employee IDs (search_read instead of search_count:
+        #         the ID set is needed for both active_flag_count and
+        #         active_without_running — one RPC covers both metrics)
+        active_emp_records = await _client.execute_kw(
             _MODEL,
-            "read_group",
-            args=[[("active", "=", True)], ["job_id"], ["job_id"]],
-            kwargs={"lazy": False},
+            "search_read",
+            args=[[("active", "=", True)]],
+            kwargs={"fields": ["id"]},
         )
 
     except Exception as exc:
         raise OdooQueryError(
-            f"get_headcount() RPC on {_MODEL} failed: {exc}"
+            f"get_headcount() RPC failed: {exc}"
         ) from exc
     finally:
         if client is None:
@@ -125,54 +132,93 @@ async def get_headcount(client: Optional[OdooClient] = None) -> dict:
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
-        f"HR headcount: 4 RPCs on {_MODEL} in {rpc_ms}ms | cache_key={cache_key}"
+        f"HR headcount: 3 RPCs in {rpc_ms}ms | cache_key={cache_key}"
     )
 
-    # Parse department breakdown — null dept_id → null bucket
-    by_department = []
-    for row in dept_rows:
-        dept_raw = row.get("department_id")
-        if isinstance(dept_raw, (list, tuple)) and dept_raw:
-            dept_id   = int(dept_raw[0])
-            dept_name = str(dept_raw[1])
-        else:
-            dept_id   = None
-            dept_name = _NO_DEPT_DISPLAY
-        by_department.append({
-            "department_id":   dept_id,
-            "department_name": dept_name,
-            "count":           int(row.get("__count") or 0),
-        })
+    # ── Build per-employee dicts ───────────────────────────────────────────────
+    # One entry per distinct employee_id; overwrite on duplicate (correct
+    # by the no-dup-running structural invariant; safe if violated).
 
-    # Sort: count DESC, then department_name ASC for stable tie-breaking
+    emp_dept: dict[int, tuple[int | None, str]] = {}
+    emp_job:  dict[int, tuple[int | None, str]] = {}
+
+    for c in running_contracts:
+        emp_raw = c.get("employee_id")
+        if isinstance(emp_raw, (list, tuple)) and emp_raw:
+            eid = int(emp_raw[0])
+        elif emp_raw and emp_raw is not False:
+            eid = int(emp_raw)
+        else:
+            continue
+
+        dept_raw = c.get("department_id")
+        if isinstance(dept_raw, (list, tuple)) and len(dept_raw) >= 2:
+            dept_id, dept_name = int(dept_raw[0]), str(dept_raw[1])
+        else:
+            dept_id, dept_name = None, _NO_DEPT_DISPLAY
+
+        job_raw = c.get("job_id")
+        if isinstance(job_raw, (list, tuple)) and len(job_raw) >= 2:
+            job_id, job_name = int(job_raw[0]), str(job_raw[1])
+        else:
+            job_id, job_name = None, _NO_JOB_DISPLAY
+
+        emp_dept[eid] = (dept_id, dept_name)
+        emp_job[eid]  = (job_id,  job_name)
+
+    headcount = len(emp_dept)
+
+    # ── by_department (count distinct employees per dept) ─────────────────────
+    dept_counter: dict[tuple[int | None, str], int] = {}
+    for dept_id, dept_name in emp_dept.values():
+        key = (dept_id, dept_name)
+        dept_counter[key] = dept_counter.get(key, 0) + 1
+
+    by_department = [
+        {"department_id": did, "department_name": dname, "count": cnt}
+        for (did, dname), cnt in dept_counter.items()
+    ]
     by_department.sort(key=lambda r: (-r["count"], r["department_name"]))
 
-    # Parse job breakdown — null job_id → null bucket
-    by_job = []
-    for row in job_rows:
-        job_raw = row.get("job_id")
-        if isinstance(job_raw, (list, tuple)) and job_raw:
-            job_id   = int(job_raw[0])
-            job_name = str(job_raw[1])
-        else:
-            job_id   = None
-            job_name = _NO_JOB_DISPLAY
-        by_job.append({
-            "job_id":   job_id,
-            "job_name": job_name,
-            "count":    int(row.get("__count") or 0),
-        })
+    # ── by_job (count distinct employees per job) ─────────────────────────────
+    job_counter: dict[tuple[int | None, str], int] = {}
+    for job_id, job_name in emp_job.values():
+        key = (job_id, job_name)
+        job_counter[key] = job_counter.get(key, 0) + 1
 
+    by_job = [
+        {"job_id": jid, "job_name": jname, "count": cnt}
+        for (jid, jname), cnt in job_counter.items()
+    ]
     by_job.sort(key=lambda r: (-r["count"], r["job_name"]))
 
+    # ── incoming_count (distinct employees with draft contracts) ──────────────
+    incoming_emp_ids: set[int] = set()
+    for c in draft_contracts:
+        emp_raw = c.get("employee_id")
+        if isinstance(emp_raw, (list, tuple)) and emp_raw:
+            incoming_emp_ids.add(int(emp_raw[0]))
+        elif emp_raw and emp_raw is not False:
+            incoming_emp_ids.add(int(emp_raw))
+    incoming_count = len(incoming_emp_ids)
+
+    # ── active flag metadata ──────────────────────────────────────────────────
+    running_emp_ids: set[int] = set(emp_dept.keys())
+    active_emp_ids:  set[int] = {int(r["id"]) for r in active_emp_records}
+    active_flag_count       = len(active_emp_ids)
+    active_without_running  = len(active_emp_ids - running_emp_ids)
+
     result: dict = {
-        "total_active":    total_active,
-        "total_inactive":  total_inactive,
-        "by_department":   by_department,
-        "by_job":          by_job,
-        "as_of":           datetime.now(timezone.utc).isoformat(),
-        "cache_status":    "fresh",
-        "rpc_duration_ms": rpc_ms,
+        "headcount":              headcount,
+        "by_department":          by_department,
+        "by_job":                 by_job,
+        "incoming_count":         incoming_count,
+        "active_flag_count":      active_flag_count,
+        "active_without_running": active_without_running,
+        "reference_date":         cairo_today.isoformat(),
+        "as_of":                  datetime.now(timezone.utc).isoformat(),
+        "cache_status":           "fresh",
+        "rpc_duration_ms":        rpc_ms,
     }
 
     _cache.set(cache_key, result)
@@ -181,7 +227,6 @@ async def get_headcount(client: Optional[OdooClient] = None) -> dict:
 
 # ── KPI B — Tenure Distribution ───────────────────────────────────────────────
 
-_CAIRO_TZ = ZoneInfo("Africa/Cairo")
 _CACHE_KEY_PREFIX_TENURE = "kpi:hr:tenure"
 _BAND_LABELS = ["<1y", "1-3y", "3-5y", "5-10y", "10+y"]
 
@@ -323,7 +368,6 @@ async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:
 # ── KPI C — Payroll Risk Dashboard ───────────────────────────────────────────
 
 _CACHE_KEY_PREFIX_PAYROLL_RISK = "kpi:hr:payroll_risk"
-_CONTRACT_MODEL = "hr.contract"
 _BUCKET_LABELS = [
     "active_without_contract",
     "expired",

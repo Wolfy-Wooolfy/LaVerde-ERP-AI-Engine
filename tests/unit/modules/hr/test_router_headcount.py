@@ -16,8 +16,7 @@ _AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/hr/kpi/headcount"
 
 _MOCK_DATA = {
-    "total_active": 136,
-    "total_inactive": 24,
+    "headcount": 115,
     "by_department": [
         {"department_id": 10, "department_name": "Finance", "count": 18},
         {"department_id": None, "department_name": "(بدون إدارة)", "count": 4},
@@ -26,7 +25,11 @@ _MOCK_DATA = {
         {"job_id": 20, "job_name": "Senior Sales Executive", "count": 15},
         {"job_id": None, "job_name": "(بدون وظيفة)", "count": 3},
     ],
-    "as_of": "2026-05-29T10:00:00+00:00",
+    "incoming_count": 0,
+    "active_flag_count": 136,
+    "active_without_running": 34,
+    "reference_date": "2026-06-03",
+    "as_of": "2026-06-03T08:22:41+00:00",
     "cache_status": "fresh",
     "rpc_duration_ms": 85,
 }
@@ -49,11 +52,14 @@ def test_headcount_returns_200_and_all_keys(client: TestClient) -> None:
 
     assert r.status_code == 200
     body = r.json()
-    for key in ("total_active", "total_inactive", "by_department",
-                "by_job", "as_of", "cache_status", "rpc_duration_ms"):
+    for key in ("headcount", "by_department", "by_job",
+                "incoming_count", "active_flag_count", "active_without_running",
+                "reference_date", "as_of", "cache_status", "rpc_duration_ms"):
         assert key in body, f"Response missing key: {key!r}"
-    assert body["total_active"] == 136
-    assert body["total_inactive"] == 24
+    assert body["headcount"] == 115
+    assert body["active_flag_count"] == 136
+    assert body["active_without_running"] == 34
+    assert body["incoming_count"] == 0
 
 
 # ── Test 2 — Cache-Control and X-Cache-Status headers ────────────────────────
