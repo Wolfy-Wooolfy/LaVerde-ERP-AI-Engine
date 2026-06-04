@@ -87,8 +87,8 @@ EXPECTED_BUCKET_LABELS = [
     "open_ended",
 ]
 
-# Baselines — set to None until first live run establishes values.
-BASELINE_TOTAL_EMPLOYED: int | None = None
+# Baselines — established 2026-06-04T08:34:18Z (first re-foundation run).
+BASELINE_TOTAL_EMPLOYED: int | None = 115
 
 _SEP  = "═" * 72
 _SEP2 = "─" * 72
