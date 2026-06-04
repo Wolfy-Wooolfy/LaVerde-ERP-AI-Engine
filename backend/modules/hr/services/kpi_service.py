@@ -438,7 +438,6 @@ async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:
 
 _CACHE_KEY_PREFIX_PAYROLL_RISK = "kpi:hr:payroll_risk"
 _BUCKET_LABELS = [
-    "active_without_contract",
     "expired",
     "expiring_45d",
     "expiring_90d",
@@ -468,42 +467,68 @@ def _parse_dept_rows(rows: list) -> list[dict]:
 
 
 async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dict:
-    """Return KPI C — Payroll Risk Dashboard.
+    """Return KPI C — Payroll Risk Dashboard (re-foundation 2026-06-04).
+
+    Employment: Running contract (state='open') — NOT hr.employee.active.
+    See §3.6 in HR_CLUSTER_DISCOVERY.md.
 
     RPCs:
       RPC 1 — search_read(hr.contract, [('state','=','open')],
                fields=['id','employee_id','date_end'])
-               -> all running contracts (~153: 136 active-emp + 17 orphan)
+               → 115 Running contracts. active_test is inert on hr.contract
+                 (Item 0, discover_payroll_risk_shape.py 2026-06-04); no flag
+                 added — all 115 returned regardless of employee archive flag.
       RPC 2 — search_read(hr.employee, [('active','=',True)],
                fields=['id'])
-               -> all 136 active employee IDs
-      RPC 3a — read_group(hr.contract, [('id','in',expired_ids)],
-                ['department_id'], ['department_id'], lazy=False)
-                -> only when expired bucket is non-empty
-      RPC 3b — read_group(hr.contract, [('id','in',expiring_45d_ids)],
-                ['department_id'], ['department_id'], lazy=False)
-                -> only when expiring_45d bucket is non-empty
+               → 136 active employee IDs; used for metadata only, NOT as an
+                 employment gate or bucket filter.
+      RPC 3 — (conditional: only when awc_emp_ids is non-empty)
+               search_read(hr.contract,
+                 [('employee_id','in',list(awc_emp_ids))],
+                 fields=['employee_id','state'])
+               → all contracts (any state) for active-but-no-running employees;
+                 used to classify exit_gap / incoming / data_gap metadata.
+      RPC 4a — read_group for expired dept breakdown (conditional)
+      RPC 4b — read_group for expiring_45d dept breakdown (conditional)
 
-    Bucket thresholds (delta = (date_end - cairo_today).days):
-      active_without_contract : employee in active set, not in any running contract
-      expired                 : delta < 0
-      expiring_45d            : 0 <= delta <= 45
-      expiring_90d            : 46 <= delta <= 90
-      expiring_135d           : 91 <= delta <= 135
-      beyond_135d             : delta >= 136
-      open_ended              : date_end = False
+    Bucket thresholds (delta = (date_end − cairo_today).days):
+      expired       : delta < 0
+      expiring_45d  : 0 <= delta <= 45
+      expiring_90d  : 46 <= delta <= 90
+      expiring_135d : 91 <= delta <= 135
+      beyond_135d   : delta >= 136
+      open_ended    : date_end = False/null
 
-    Orphan contracts (running contracts whose employee is not active) are
-    counted separately in orphan_contracts_count and never touch the 7 buckets.
+    All 115 Running-contract employees are bucketed regardless of the
+    hr.employee.active flag. The 13 archived-running employees (§3.6 Issue 1)
+    are employed — their archive flag is stale data. They are counted in
+    archived_with_running_count as a data-quality signal only.
 
-    Sanity invariant: sum(bucket counts) == len(active_emp_ids) == total_active.
+    active=True employees with no Running contract are NOT employed and are
+    excluded from all buckets. They surface in active_flag_no_running_*
+    metadata fields (data-quality signals).
 
-    Baselines (verified 2026-05-29):
-      active_without_contract == 17  (onboarding limbo — by-design)
-      expired                 == 0   (alert if > 0)
-      open_ended              == 1
-      orphan_contracts_count  == 17  (paperwork debt from exit workflow)
-      total_active            == 136
+    Sanity invariant (by construction):
+      sum(6 bucket counts) == total_employed == len(running_emp_ids)
+      total_employed must equal KPI A headcount (both count distinct
+      Running-contract employees).
+
+    Distinct-employee discipline: running_emp_ids is built inside the loop;
+    `if emp_id in running_emp_ids: continue` before bucket assignment ensures
+    each employee is counted exactly once. Handles the zero-today-but-possible
+    case of two Running contracts on the same employee_id without crashing.
+
+    Department breakdown reads department_id from hr.contract (the contract is
+    the source of truth for the employed population, consistent with KPI A).
+
+    Baselines (discover_payroll_risk_shape.py 2026-06-04):
+      total_employed               == 115
+      archived_with_running_count  == 13
+      active_flag_no_running_count == 34  (exit_gap=23, incoming=0, data_gap=11)
+      expiring_45d                 ≈ 113  (101 active + 12 archived-running)
+      expiring_135d                == 1   (2026-09-08 outlier)
+      open_ended                   == 1   (archived-running emp 2960, null date_end)
+      expired                      == 0   (alert if > 0 — auto-flip holds post-fix)
 
     Raises:
         ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
@@ -526,7 +551,8 @@ async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dic
 
     t0 = time.monotonic()
     try:
-        # RPC 1 — all running contracts (id + employee_id + date_end only; no PII)
+        # RPC 1 — all Running contracts (id + employee_id + date_end; no PII)
+        # active_test is inert on hr.contract (Item 0, 2026-06-04) — no flag added
         contract_records = await _client.execute_kw(
             _CONTRACT_MODEL,
             "search_read",
@@ -534,23 +560,22 @@ async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dic
             kwargs={"fields": ["id", "employee_id", "date_end"]},
         )
 
-        # RPC 2 — all active employee IDs
-        emp_records = await _client.execute_kw(
+        # RPC 2 — active employee IDs (for metadata only; NOT an employment gate)
+        active_emp_records = await _client.execute_kw(
             _MODEL,
             "search_read",
             args=[[("active", "=", True)]],
             kwargs={"fields": ["id"]},
         )
 
-        # ── Python classification (no RPCs) ───────────────────────────────
         cairo_today = datetime.now(_CAIRO_TZ).date()
-        active_emp_ids: set[int] = {int(r["id"]) for r in emp_records}
+        active_emp_ids: set[int] = {int(r["id"]) for r in active_emp_records}
 
-        orphan_count:     int            = 0
-        covered_emp_ids:  set[int]       = set()
-        bucket_counts:    dict[str, int] = {label: 0 for label in _BUCKET_LABELS}
-        expired_ids:      list[int]      = []
-        expiring_45d_ids: list[int]      = []
+        running_emp_ids:          set[int]       = set()
+        archived_running_emp_ids: set[int]       = set()
+        bucket_counts:            dict[str, int] = {label: 0 for label in _BUCKET_LABELS}
+        expired_ids:              list[int]      = []
+        expiring_45d_ids:         list[int]      = []
 
         for c in contract_records:
             emp_raw = c.get("employee_id")
@@ -558,19 +583,25 @@ async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dic
                 emp_id = int(emp_raw[0])
             else:
                 emp_id = int(emp_raw) if emp_raw else 0
-
-            if emp_id not in active_emp_ids:
-                orphan_count += 1
+            if not emp_id:
                 continue
 
-            covered_emp_ids.add(emp_id)
+            # Track archive-flag status for metadata (does NOT gate bucketing)
+            if emp_id not in active_emp_ids:
+                archived_running_emp_ids.add(emp_id)
+
+            # Distinct-employee guard: bucket each employee exactly once
+            if emp_id in running_emp_ids:
+                continue
+            running_emp_ids.add(emp_id)
+
+            cid          = int(c["id"])
             date_end_raw = c.get("date_end")
 
             if not date_end_raw:
                 bucket_counts["open_ended"] += 1
             else:
                 delta = (date.fromisoformat(str(date_end_raw)) - cairo_today).days
-                cid = int(c["id"])
                 if delta < 0:
                     bucket_counts["expired"] += 1
                     expired_ids.append(cid)
@@ -584,11 +615,46 @@ async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dic
                 else:
                     bucket_counts["beyond_135d"] += 1
 
-        bucket_counts["active_without_contract"] = len(active_emp_ids - covered_emp_ids)
+        # ── active_flag_no_running metadata ──────────────────────────────────
+        awc_emp_ids                  = active_emp_ids - running_emp_ids
+        active_flag_no_running_count = len(awc_emp_ids)
+        exit_gap                     = 0
+        incoming                     = 0
+        data_gap                     = 0
 
-        # ── Conditional department breakdown RPCs ─────────────────────────
+        if awc_emp_ids:
+            # RPC 3 — all contracts (any state) for active-but-no-running employees
+            awc_contract_records = await _client.execute_kw(
+                _CONTRACT_MODEL,
+                "search_read",
+                args=[[("employee_id", "in", list(awc_emp_ids))]],
+                kwargs={"fields": ["employee_id", "state"]},
+            )
+            awc_states_by_emp: dict[int, set[str]] = defaultdict(set)
+            for c in awc_contract_records:
+                emp_raw = c.get("employee_id")
+                if isinstance(emp_raw, (list, tuple)) and emp_raw:
+                    eid = int(emp_raw[0])
+                elif emp_raw and emp_raw is not False:
+                    eid = int(emp_raw)
+                else:
+                    continue
+                s = c.get("state")
+                if s:
+                    awc_states_by_emp[eid].add(s)
+
+            for eid in awc_emp_ids:
+                states = awc_states_by_emp.get(eid, set())
+                if not states:
+                    data_gap += 1
+                elif "draft" in states:
+                    incoming += 1       # new hire pending activation
+                else:
+                    exit_gap += 1       # only close/cancel — departed, unarchived
+
+        # ── Conditional department breakdown RPCs ─────────────────────────────
         if expired_ids:
-            # RPC 3a — department breakdown for expired bucket
+            # RPC 4a — department breakdown for expired bucket
             expired_dept_rows_raw = await _client.execute_kw(
                 _CONTRACT_MODEL,
                 "read_group",
@@ -597,7 +663,7 @@ async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dic
             )
 
         if expiring_45d_ids:
-            # RPC 3b — department breakdown for expiring_45d bucket
+            # RPC 4b — department breakdown for expiring_45d bucket
             expiring_45d_dept_rows_raw = await _client.execute_kw(
                 _CONTRACT_MODEL,
                 "read_group",
@@ -618,15 +684,19 @@ async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dic
         f"HR payroll risk dashboard: RPCs in {rpc_ms}ms | cache_key={cache_key}"
     )
 
-    buckets      = [{"label": label, "count": bucket_counts[label]} for label in _BUCKET_LABELS]
-    total_active = sum(b["count"] for b in buckets)
+    buckets        = [{"label": label, "count": bucket_counts[label]} for label in _BUCKET_LABELS]
+    total_employed = sum(b["count"] for b in buckets)   # == len(running_emp_ids) by construction
 
     result: dict = {
         "buckets":                           buckets,
         "department_breakdown_expired":      _parse_dept_rows(expired_dept_rows_raw),
         "department_breakdown_expiring_45d": _parse_dept_rows(expiring_45d_dept_rows_raw),
-        "orphan_contracts_count":            orphan_count,
-        "total_active":                      total_active,
+        "archived_with_running_count":       len(archived_running_emp_ids),
+        "active_flag_no_running_count":      active_flag_no_running_count,
+        "active_flag_no_running_exit_gap":   exit_gap,
+        "active_flag_no_running_incoming":   incoming,
+        "active_flag_no_running_data_gap":   data_gap,
+        "total_employed":                    total_employed,
         "reference_date":                    cairo_today.isoformat(),
         "as_of":                             datetime.now(timezone.utc).isoformat(),
         "cache_status":                      "fresh",
