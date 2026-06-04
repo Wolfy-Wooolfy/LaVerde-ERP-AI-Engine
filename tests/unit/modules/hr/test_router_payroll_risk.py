@@ -17,29 +17,31 @@ _URL = "/api/v1/hr/kpi/payroll-risk-dashboard"
 
 _MOCK_DATA = {
     "buckets": [
-        {"label": "active_without_contract", "count": 17},
-        {"label": "expired",                 "count":  0},
-        {"label": "expiring_45d",            "count": 114},
-        {"label": "expiring_90d",            "count":  0},
-        {"label": "expiring_135d",           "count":  0},
-        {"label": "beyond_135d",             "count":  4},
-        {"label": "open_ended",              "count":  1},
+        {"label": "expired",       "count":   0},
+        {"label": "expiring_45d",  "count": 114},
+        {"label": "expiring_90d",  "count":   0},
+        {"label": "expiring_135d", "count":   0},
+        {"label": "beyond_135d",   "count":   0},
+        {"label": "open_ended",    "count":   1},
     ],
     "department_breakdown_expired":      [],
     "department_breakdown_expiring_45d": [
         {"department_id": 5, "department_name": "Finance", "count": 18},
         {"department_id": 6, "department_name": "Sales",   "count": 96},
     ],
-    "orphan_contracts_count": 17,
-    "total_active": 136,
-    "reference_date": "2026-05-29",
-    "as_of": "2026-05-29T10:00:00+00:00",
+    "archived_with_running_count":    13,
+    "active_flag_no_running_count":   34,
+    "active_flag_no_running_exit_gap":   23,
+    "active_flag_no_running_incoming":    0,
+    "active_flag_no_running_data_gap":   11,
+    "total_employed": 115,
+    "reference_date": "2026-06-04",
+    "as_of": "2026-06-04T10:00:00+00:00",
     "cache_status": "fresh",
     "rpc_duration_ms": 112,
 }
 
 _BUCKET_LABELS = [
-    "active_without_contract",
     "expired",
     "expiring_45d",
     "expiring_90d",
@@ -67,19 +69,31 @@ def test_payroll_risk_dashboard_returns_200_and_all_keys(client: TestClient) -> 
     assert r.status_code == 200
     body = r.json()
     for key in (
-        "buckets", "department_breakdown_expired", "department_breakdown_expiring_45d",
-        "orphan_contracts_count", "total_active", "reference_date",
-        "as_of", "cache_status", "rpc_duration_ms",
+        "buckets",
+        "department_breakdown_expired",
+        "department_breakdown_expiring_45d",
+        "archived_with_running_count",
+        "active_flag_no_running_count",
+        "active_flag_no_running_exit_gap",
+        "active_flag_no_running_incoming",
+        "active_flag_no_running_data_gap",
+        "total_employed",
+        "reference_date",
+        "as_of",
+        "cache_status",
+        "rpc_duration_ms",
     ):
         assert key in body, f"Response missing key: {key!r}"
-    assert body["total_active"] == 136
-    assert body["orphan_contracts_count"] == 17
+    assert body["total_employed"] == 115
+    assert body["archived_with_running_count"] == 13
+    assert "orphan_contracts_count" not in body
+    assert "total_active" not in body
 
 
-# ── Test 2 — 7 buckets always present in fixed order ─────────────────────────
+# ── Test 2 — 6 buckets always present in fixed order ─────────────────────────
 
 
-def test_seven_buckets_present_in_fixed_order(client: TestClient) -> None:
+def test_six_buckets_present_in_fixed_order(client: TestClient) -> None:
     with patch(
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
@@ -88,11 +102,12 @@ def test_seven_buckets_present_in_fixed_order(client: TestClient) -> None:
 
     assert r.status_code == 200
     buckets = r.json()["buckets"]
-    assert len(buckets) == 7
+    assert len(buckets) == 6
     for i, label in enumerate(_BUCKET_LABELS):
         assert buckets[i]["label"] == label, (
             f"Bucket #{i} must be {label!r}, got {buckets[i]['label']!r}"
         )
+    assert not any(b["label"] == "active_without_contract" for b in buckets)
 
 
 # ── Test 3 — Department breakdown fields present ──────────────────────────────
@@ -113,10 +128,10 @@ def test_department_breakdown_fields_present(client: TestClient) -> None:
     assert isinstance(body["department_breakdown_expiring_45d"], list)
 
 
-# ── Test 4 — orphan_contracts_count present and non-negative ─────────────────
+# ── Test 4 — archived_with_running_count present and non-negative ─────────────
 
 
-def test_orphan_contracts_count_present_and_non_negative(client: TestClient) -> None:
+def test_archived_with_running_count_present_and_non_negative(client: TestClient) -> None:
     with patch(
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
@@ -125,8 +140,8 @@ def test_orphan_contracts_count_present_and_non_negative(client: TestClient) -> 
 
     assert r.status_code == 200
     body = r.json()
-    assert "orphan_contracts_count" in body
-    assert body["orphan_contracts_count"] >= 0
+    assert "archived_with_running_count" in body
+    assert body["archived_with_running_count"] >= 0
 
 
 # ── Test 5 — Sanity invariant in serialized response ─────────────────────────
@@ -142,8 +157,8 @@ def test_sanity_invariant_holds_in_serialized_response(client: TestClient) -> No
     assert r.status_code == 200
     body = r.json()
     bucket_sum = sum(b["count"] for b in body["buckets"])
-    assert bucket_sum == body["total_active"], (
-        f"sum(buckets) ({bucket_sum}) must == total_active ({body['total_active']})"
+    assert bucket_sum == body["total_employed"], (
+        f"sum(buckets) ({bucket_sum}) must == total_employed ({body['total_employed']})"
     )
 
 
