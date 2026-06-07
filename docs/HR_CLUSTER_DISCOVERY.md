@@ -391,6 +391,108 @@ The AI Engine is a **read-only intelligence layer**: it observes Odoo reality an
 
 ---
 
+### §3.8 — Wage, Insurance, and Asset Shape (HR Frontend Pre-Design, 2026-06-04)
+
+> **Status:** Wage findings confirmed and scoped. Insurance and asset locations discovered; population counts deferred.
+> **Script:** `scripts/discover_employee_profile_shape.py` — commit 412e3c5.
+> **Evidence:** `logs/employee_profile_shape_discovery.log` (TSV, gitignored); `logs/profile_discovery_run.txt` (full stdout, gitignored). Hard structural check: **PASS — 115 Running-contract employees / 115 employee records returned**, reconciling with KPI A/B/C baseline (2026-06-03).
+> **Privacy:** No individual wage values or PII recorded in this section. Aggregate conclusions, field semantics, and population counts only.
+
+#### W1 — Wage Field: Location, Label, and Monthly Interpretation
+
+`wage` is a field on `hr.contract`, Odoo label **"Wage"**. Standard Odoo treats this as a monthly figure. The live magnitude band distribution (2026-06-04) cross-confirms this: the overwhelming majority of Running-contract wages concentrate in the 5k–30k EGP range, consistent with monthly Egyptian salaries and inconsistent with annual figures. No individual values are recorded here.
+
+**Population:** 115/115 Running contracts have `wage` populated. 114 of those have `wage > 0`; one contract holds `wage = 0`, reflecting in-progress data entry being completed by the business — not a data defect. Treated as 0 in any aggregation. No special handling required.
+
+#### W2 — Department-Level Aggregation: Confirmed Feasible
+
+`SUM(wage) GROUP BY department_id` over the 115 Running contracts is feasible without any join to `hr.employee`. All **21 of 21** departments that hold at least one Running contract also hold at least one populated wage. Department-level payroll cost can be computed entirely from `hr.contract` records.
+
+#### W3 — DECISION: Board-Facing Scope — Department Aggregates Only
+
+**The Board-facing cost figure is the department-level `SUM(wage)` aggregate only. Individual wages are never exposed to the Board dashboard.**
+
+Individual wage access is gated to a higher-permission context (Accounting / payroll role) and is explicitly out of scope for Phase 1. Any wage endpoint built now returns department-level totals only — never per-employee figures.
+
+#### W4 — DECISION: `wage` Field Alone for Phase 1
+
+For the current build, the department cost figure uses **`wage` alone**. The Egyptian localisation allowance fields (`l10n_eg_housing_allowance`, `l10n_eg_transportation_allowance`, `l10n_eg_other_allowances`) exist on `hr.contract` and are populated, as are `basic_salary` and `allowances`. These components are available for a future total-compensation view but are out of scope for Phase 1.
+
+#### W5 — NOTE: comp_monetary Classifier Over-Capture
+
+The discovery script's heuristic classifies every numeric field on `hr.contract` as `comp_monetary`. This over-captures non-compensation fields — message and attachment counters (`message_attachment_count`, `message_needaction_counter`, `payslips_count`), scheduling fields (`hours_per_week`, `work_time_rate`, `full_time_required_hours`), and system integers (`id`, `contracts_count`, `probation_period`).
+
+Genuine compensation fields, confirmed by Odoo label inspection:
+
+| Field | Odoo Label | Type |
+|---|---|---|
+| `wage` | Wage | monetary |
+| `basic_salary` | Basic Salary | float |
+| `allowances` | Allowances | float |
+| `contract_wage` | Contract Wage | monetary |
+| `hourly_wage` | Hourly Wage | monetary |
+| `variable_salary` | Variable Salary | float |
+| `l10n_eg_housing_allowance` | Egypt Housing Allowance | monetary |
+| `l10n_eg_transportation_allowance` | Egypt Transportation Allowance | monetary |
+| `l10n_eg_other_allowances` | Egypt Other Allowances | monetary |
+| `l10n_eg_total_eos_benefit` | Total End of Service Benefit | integer |
+
+**Rule: Do NOT blindly `SUM` the full `comp_monetary` bucket. Use the confirmed field list above.**
+
+#### W6 — INSURANCE: Discovered on hr.contract, Population Deferred
+
+Insurance fields were expected on `hr.employee` — none were found there. All insurance data lives on **`hr.contract`**.
+
+Medical insurance fields on `hr.contract`:
+
+| Field | Odoo Label | Type | Note |
+|---|---|---|---|
+| `mi_exist` | Has Medical Insurance | boolean | safe for aggregation |
+| `mi_amount` | Medical Insurance Amount | float | safe for aggregation |
+| `mi_no` | Medical Insurance No | char | **PII — count only** |
+| `mi_date` | Medical Insurance Date | date | — |
+| `medical_insurance_end_date` | Medical Insurance End Date | date | — |
+| `family_insurance` | Family Medical Insurance | boolean | individual-vs-family flag |
+| `family_medical_ids` | Family Medical | one2many → `family.medical` | enrolled dependants |
+
+Social insurance fields on `hr.contract`:
+
+| Field | Odoo Label | Type | Note |
+|---|---|---|---|
+| `sin_exist` | Has Social Insurance | boolean | safe for aggregation |
+| `sin_amount` | Social Insurance Amount | float | safe for aggregation |
+| `sin_no` | Social Insurance No | char | **PII — count only** |
+| `sin_date` | Social Insurance Date | date | — |
+| `sin_end_date` | Social Insurance End Date | date | — |
+| `basic_social_insurance` | Basic Social Insurance | monetary | safe |
+| `l10n_eg_social_insurance_reference` | Social Insurance Reference Amount | monetary | safe |
+| `insurance_salary` | Insurance Salary | float | safe |
+
+Other / general insurance fields on `hr.contract`:
+
+| Field | Odoo Label | Type | Note |
+|---|---|---|---|
+| `insurance_id` | Labour office | many2one → `insurance` | labour-office / registration reference |
+| `insurance_state` | Insurance State | char | state of the insurance record |
+
+Individual-vs-family hypothesis (unverified): `mi_exist` (any medical coverage) + `family_insurance` (boolean family-tier flag) + `family_medical_ids` one2many (enrolled dependants). **Population counts not yet measured — follow-up discovery required before any insurance KPI is built.** `mi_no` and `sin_no` are PII (insurance ID numbers); any insurance reporting uses only the boolean, amount, and date fields — never the number fields.
+
+#### W7 — ASSETS: Equipment Module Not Installed, Custom Models Identified
+
+`maintenance.equipment` is **NOT INSTALLED** in this Odoo instance. No standard equipment-to-employee link is available.
+
+In-kind assets are likely tracked via custom contract models visible in the `hr.contract` schema: `hr_allowance_ids → hr.allowance`, `hr_allowance_line_ids → hr.allowance.line`, and `other_alw_ids → hr.alw.line`. The `hr.employee.allowance_count` field (Odoo label "# Assets", integer) suggests an asset count is derivable from one of these models. Additionally, `hr.employee` has a `vehicle` field (char, label "Company Vehicle") for direct vehicle assignment.
+
+**UNVERIFIED — field population and the exact model behind `allowance_count` not yet measured.** Follow-up discovery deferred.
+
+#### W8 — METHODOLOGICAL LEARNING: Exhaustive Schema Enumeration Validated
+
+This discovery replaced the prior practice of specifying a candidate field list before reading. `fields_get` was called on both `hr.contract` (118 fields) and `hr.employee` (231 fields) and the complete inventory was classified and printed. This is what surfaced all insurance data in the unexpected location (`hr.contract`, not `hr.employee`) — a pre-guessed candidate list on `hr.employee` would have produced a clean but wrong result.
+
+**Standing rule for all future discovery:** every new data area begins with a full `fields_get` schema dump on every candidate model before any `search_read` is planned.
+
+---
+
 ## 4. Business Missions (Section S2)
 
 `mission.request` (Mission Request) **EXISTS** as a real model (state=base, 49 fields). Current count = 0 — no missions submitted yet.
