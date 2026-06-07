@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "components/_hr_dept_panel.html" import hr_dept_panel with context %}
 
 {% block title %}HR Overview — LaVerde ERP AI Engine{% endblock %}
 {% block page_title %}HR Overview{% endblock %}
@@ -163,12 +164,18 @@
               {% endif %}
             </div>
 
-            {# Drill chevron — deferred to F2; visually disabled #}
-            <div title="Department drill-down available in F2" class="w-5 shrink-0 text-neutral-300 dark:text-neutral-600 cursor-not-allowed select-none">
+            {# Drill chevron — F2: enabled for named departments #}
+            <button type="button"
+                    onclick="window.hrDeptPanel.open({{ row.department_id }}, this)"
+                    title="View {{ leaf }} staff"
+                    class="w-5 shrink-0 text-neutral-400 dark:text-neutral-500
+                           hover:text-primary-600 dark:hover:text-primary-400
+                           focus-visible:ring-2 focus-visible:ring-primary-500 rounded
+                           transition-colors">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
-            </div>
+            </button>
 
           </div>
         {% endfor %}
@@ -373,10 +380,16 @@
   <footer class="pt-4 pb-2 border-t border-neutral-200 dark:border-neutral-700">
     <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
       Every figure live from Odoo &middot; verified against source
-      &middot; Department drill-down available in the next release (F2)
+      &middot; Click any named department row to drill down
       &middot; Individual wages never shown
     </p>
   </footer>
 
 </div>
+{% endblock %}
+
+{% block portal %}{{ hr_dept_panel() }}{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/hr_drilldown.js"></script>
 {% endblock %}

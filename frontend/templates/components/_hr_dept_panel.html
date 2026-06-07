@@ -1,0 +1,180 @@
+{# _hr_dept_panel.html — HR department staff drill-down panel (F2).
+   Usage: {% from "components/_hr_dept_panel.html" import hr_dept_panel with context %}
+          {{ hr_dept_panel() }}
+   Controller: window.hrDeptPanel.open(deptId, triggerEl) / .close()
+   IDs: hr-dd-backdrop, hr-dd-panel, hr-dd-title, hr-dd-subtitle,
+        hr-dd-close-btn, hr-dd-loading-sentinel, hr-dd-summary,
+        hr-dd-stat-headcount, hr-dd-stat-total-cost,
+        hr-dd-stat-pct-payroll, hr-dd-stat-avg-head,
+        hr-dd-list-body, hr-dd-error-msg
+   READ-ONLY: no POST or Odoo mutation.
+   Auth: endpoint requires Basic auth; browser carries credentials via same-origin fetch.
+#}
+
+{% macro hr_dept_panel() %}
+
+{# ── Backdrop ─────────────────────────────────────────────────────────────── #}
+<div id="hr-dd-backdrop"
+     class="fixed inset-0 z-40 bg-black/50 hidden"
+     aria-hidden="true">
+</div>
+
+{# ── Panel shell ──────────────────────────────────────────────────────────── #}
+<aside id="hr-dd-panel"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="hr-dd-title"
+       class="fixed inset-y-0 end-0 z-50
+              w-full lg:w-[440px]
+              bg-white dark:bg-neutral-900
+              border-s border-neutral-200 dark:border-neutral-800
+              shadow-2xl
+              transition-transform duration-300 ease-in-out"
+       hidden
+       tabindex="-1">
+
+  <div class="flex flex-col h-full">
+
+    {# ── Header ───────────────────────────────────────────────────────────── #}
+    <header class="px-5 py-4 shrink-0
+                   border-b border-neutral-200 dark:border-neutral-700">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <h2 id="hr-dd-title"
+              class="text-base font-semibold
+                     text-neutral-900 dark:text-neutral-100
+                     truncate">
+            —
+          </h2>
+          <p id="hr-dd-subtitle"
+             class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 hidden">
+          </p>
+        </div>
+        <button id="hr-dd-close-btn"
+                type="button"
+                class="shrink-0 p-1.5 rounded-lg
+                       text-neutral-500 dark:text-neutral-400
+                       hover:bg-neutral-100 dark:hover:bg-neutral-800
+                       focus-visible:ring-2 focus-visible:ring-primary-500
+                       transition-colors"
+                aria-label="Close panel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    {# ── Scrollable body ──────────────────────────────────────────────────── #}
+    <div class="flex-1 overflow-y-auto min-h-0">
+
+      {# Loading skeleton — shown by JS on open, hidden after data arrives #}
+      <div id="hr-dd-loading-sentinel" class="px-5 py-6 space-y-4 hidden">
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="mt-6 grid grid-cols-2 gap-3">
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+          <div class="h-16 rounded-xl animate-pulse bg-neutral-200 dark:bg-neutral-700"></div>
+        </div>
+        <div class="mt-4 h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-2/3"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="mt-4 h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-5/6"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+      </div>
+
+      {# Summary section — hidden until JS populates it on first response #}
+      <div id="hr-dd-summary" class="hidden">
+
+        {# Four department-level stat tiles — aggregate only, no individual wage #}
+        <section class="px-5 py-4
+                        border-b border-neutral-100 dark:border-neutral-800">
+          <p class="text-[10px] font-semibold uppercase tracking-wide
+                    text-neutral-400 dark:text-neutral-500 mb-3">
+            Department Summary
+          </p>
+          <div class="grid grid-cols-2 gap-2.5">
+
+            {# Headcount #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-neutral-100 dark:bg-neutral-800
+                        border border-neutral-200 dark:border-neutral-700">
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">Headcount</p>
+              <p id="hr-dd-stat-headcount"
+                 class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100">
+                —
+              </p>
+            </div>
+
+            {# Total Cost — null if k-anon suppressed #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-neutral-100 dark:bg-neutral-800
+                        border border-neutral-200 dark:border-neutral-700">
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">Total Cost (EGP/mo)</p>
+              <p id="hr-dd-stat-total-cost"
+                 class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100 break-all">
+                —
+              </p>
+            </div>
+
+            {# % of Total Payroll — null if total_wage null #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-neutral-100 dark:bg-neutral-800
+                        border border-neutral-200 dark:border-neutral-700">
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">% of Total Payroll</p>
+              <p id="hr-dd-stat-pct-payroll"
+                 class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100">
+                —
+              </p>
+            </div>
+
+            {# Avg / Head — null if total_wage null #}
+            <div class="rounded-xl px-3 py-2.5
+                        bg-neutral-100 dark:bg-neutral-800
+                        border border-neutral-200 dark:border-neutral-700">
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">Avg / Head (EGP/mo)</p>
+              <p id="hr-dd-stat-avg-head"
+                 class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100 break-all">
+                —
+              </p>
+            </div>
+
+          </div>
+        </section>
+
+        {# Staff list section header #}
+        <div class="px-5 py-2
+                    border-b border-neutral-100 dark:border-neutral-800">
+          <p class="text-[10px] font-semibold uppercase tracking-wide
+                    text-neutral-400 dark:text-neutral-500">
+            Staff · Running Contracts
+          </p>
+        </div>
+
+      </div>{# /#hr-dd-summary #}
+
+      {# Staff rows — appended by JS; no pagination (full list in one payload) #}
+      <ul id="hr-dd-list-body"
+          class="divide-y divide-neutral-100 dark:divide-neutral-800"
+          aria-live="polite">
+      </ul>
+
+      {# Error state — message set by JS; no empty state (endpoint 404s on empty) #}
+      <p id="hr-dd-error-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-danger-600 dark:text-danger-400">
+      </p>
+
+    </div>{# /.scrollable body #}
+
+  </div>
+
+</aside>
+
+{% endmacro %}
