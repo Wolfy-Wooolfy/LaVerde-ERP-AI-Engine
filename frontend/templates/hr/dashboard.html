@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+
+{% block title %}HR Overview — LaVerde ERP AI Engine{% endblock %}
+{% block page_title %}HR Overview{% endblock %}
+
+{% block content %}
+<div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
+
+  {# ── 1. HEADER ──────────────────────────────────────────────────────────── #}
+  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-2.5 mb-1">
+        <span class="live-dot bg-primary-500" style="--pulse-color: rgba(99, 102, 241, 0.6);"></span>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
+          La Verde &mdash; HR Overview
+        </h1>
+      </div>
+      <p class="text-sm text-neutral-500 dark:text-neutral-400">
+        As of {{ headcount.reference_date }}
+        &middot; Employment = Running contracts (state=open)
+        &middot; {{ headcount.cache_status }}
+      </p>
+    </div>
+    <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono sm:text-right sm:pt-1 shrink-0">
+      {{ headcount.rpc_duration_ms + tenure.rpc_duration_ms + payroll_risk.rpc_duration_ms + dept_cost.rpc_duration_ms }} ms &middot; 4 live RPCs
+    </div>
+  </div>
+
+  {# ── 2. NEEDS-ATTENTION STRIP ───────────────────────────────────────────── #}
+  {# Only renders when at least one count > 0. All lookups pre-computed in Python. #}
+  {% if attn_expired > 0 or attn_expiring_45d > 0 or headcount.incoming_count > 0 %}
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider shrink-0">Needs attention</span>
+
+    {% if attn_expired > 0 %}
+    <span class="badge badge-danger">
+      <svg class="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+      </svg>
+      {{ attn_expired }} expired contract{{ "s" if attn_expired != 1 else "" }}
+    </span>
+    {% endif %}
+
+    {% if attn_expiring_45d > 0 %}
+    <span class="badge badge-warning">
+      <svg class="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+      </svg>
+      {{ attn_expiring_45d }} expiring within 45 days
+    </span>
+    {% endif %}
+
+    {% if headcount.incoming_count > 0 %}
+    <span class="badge badge-neutral">
+      <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/>
+      </svg>
+      {{ headcount.incoming_count }} incoming (draft)
+    </span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── 3. KPI STAT CARDS ─────────────────────────────────────────────────── #}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+    <div class="kpi-card">
+      <p class="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Employees</p>
+      <p class="mt-2 text-3xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 kpi-headline">
+        {{ headcount.headcount }}
+      </p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">Running contracts &middot; {{ headcount.reference_date }}</p>
+    </div>
+
+    <div class="kpi-card">
+      <p class="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Monthly Payroll</p>
+      <p class="mt-2 text-2xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 kpi-headline">
+        {{ "{:,.0f}".format(dept_cost.grand_total_wage) }}
+      </p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ dept_cost.currency }} &middot; {{ dept_cost.basis }} &middot; aggregate wage only</p>
+    </div>
+
+    <div class="kpi-card">
+      <p class="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Departments</p>
+      <p class="mt-2 text-3xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 kpi-headline">
+        {{ dept_count }}
+      </p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">Named departments with active staff</p>
+    </div>
+
+    <div class="kpi-card">
+      <p class="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Avg / Employee</p>
+      <p class="mt-2 text-2xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 kpi-headline">
+        {{ "{:,.0f}".format(avg_per_emp) }}
+      </p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">EGP monthly &middot; aggregate wage only</p>
+    </div>
+
+  </div>
+
+  {# ── 4 + 5. DEPARTMENT COST PANEL + TENURE PANEL (2/3 + 1/3) ───────────── #}
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+    {# ── 4. Department Cost Panel ── #}
+    <div class="xl:col-span-2 bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card">
+
+      <div class="px-6 pt-5 pb-4 border-b border-neutral-100 dark:border-neutral-700">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Department Payroll Cost</h2>
+            {# One-line insight: largest NAMED department. Uses named_dept_rows[0] — never Other pool. #}
+            {% if named_dept_rows | length > 0 and named_dept_rows[0].total_wage is not none %}
+              {% set top_pct = ((named_dept_rows[0].total_wage / dept_cost.grand_total_wage) * 100) | round(1) %}
+              {% set top_leaf = named_dept_rows[0].department_name.split('/')[-1].strip() %}
+              <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                <span class="font-medium text-neutral-700 dark:text-neutral-300">{{ top_leaf }}</span>
+                is the largest single department at {{ top_pct }}% of total payroll.
+              </p>
+            {% endif %}
+          </div>
+          <span class="text-xs text-neutral-400 dark:text-neutral-500 font-mono shrink-0 pt-0.5">EGP &middot; monthly</span>
+        </div>
+      </div>
+
+      <div class="px-6 py-4 space-y-2.5">
+        {# Named rows first, wage DESC (already sorted). Other pool appended last. #}
+        {# Bars scale to max_dept_wage = max of named rows; Other bar capped at 100%. #}
+
+        {% for row in named_dept_rows %}
+          {% set leaf = row.department_name.split('/')[-1].strip() %}
+
+          <div class="flex items-center gap-3">
+
+            {# Department name + headcount #}
+            <div class="w-48 shrink-0 flex items-center gap-1.5 min-w-0">
+              <span class="text-sm text-neutral-700 dark:text-neutral-300 truncate" title="{{ leaf }}">{{ leaf }}</span>
+              <span class="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">({{ row.running_contract_count }})</span>
+            </div>
+
+            {# Horizontal bar — null guard #}
+            <div class="flex-1 min-w-0">
+              {% if row.total_wage is not none %}
+                {% set bar_w = ((row.total_wage / max_dept_wage) * 100) | round | int %}
+                <div class="h-5 bg-neutral-100 dark:bg-neutral-700 rounded overflow-hidden">
+                  <div class="h-full rounded bg-primary-500 dark:bg-primary-600"
+                       style="width: {{ bar_w }}%;"></div>
+                </div>
+              {% else %}
+                <div class="h-5 bg-neutral-100 dark:bg-neutral-700 rounded flex items-center px-2.5">
+                  <span class="text-xs text-neutral-400 dark:text-neutral-500 italic">pooled to protect individual pay</span>
+                </div>
+              {% endif %}
+            </div>
+
+            {# EGP amount + share-of-total — null guard #}
+            <div class="w-40 shrink-0 text-right">
+              {% if row.total_wage is not none %}
+                {% set share = ((row.total_wage / dept_cost.grand_total_wage) * 100) | round(1) %}
+                <span class="text-sm font-mono tabular-nums text-neutral-800 dark:text-neutral-200">{{ "{:,.0f}".format(row.total_wage) }}</span>
+                <span class="text-xs text-neutral-400 dark:text-neutral-500 ml-1">{{ share }}%</span>
+              {% else %}
+                <span class="text-sm font-mono text-neutral-400 dark:text-neutral-500">&mdash;</span>
+              {% endif %}
+            </div>
+
+            {# Drill chevron — deferred to F2; visually disabled #}
+            <div title="Department drill-down available in F2" class="w-5 shrink-0 text-neutral-300 dark:text-neutral-600 cursor-not-allowed select-none">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </div>
+
+          </div>
+        {% endfor %}
+
+        {# Other pool — always last; muted + lock icon; bar capped at 100% of named-max #}
+        {% if other_row %}
+          <div class="flex items-center gap-3 opacity-60">
+
+            <div class="w-48 shrink-0 flex items-center gap-1.5 min-w-0">
+              <svg class="w-3.5 h-3.5 shrink-0 text-neutral-400 dark:text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+              </svg>
+              <span class="text-sm text-neutral-700 dark:text-neutral-300 truncate" title="Other (small departments)">Other (small departments)</span>
+              <span class="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">({{ other_row.running_contract_count }})</span>
+            </div>
+
+            <div class="flex-1 min-w-0">
+              {% if other_row.total_wage is not none %}
+                {% set bar_w_raw = ((other_row.total_wage / max_dept_wage) * 100) | round | int %}
+                {% set bar_w = bar_w_raw if bar_w_raw <= 100 else 100 %}
+                <div class="h-5 bg-neutral-100 dark:bg-neutral-700 rounded overflow-hidden">
+                  <div class="h-full rounded bg-neutral-300 dark:bg-neutral-500"
+                       style="width: {{ bar_w }}%;"></div>
+                </div>
+              {% else %}
+                <div class="h-5 bg-neutral-100 dark:bg-neutral-700 rounded flex items-center px-2.5">
+                  <span class="text-xs text-neutral-400 dark:text-neutral-500 italic">pooled to protect individual pay</span>
+                </div>
+              {% endif %}
+            </div>
+
+            <div class="w-40 shrink-0 text-right">
+              {% if other_row.total_wage is not none %}
+                {% set share = ((other_row.total_wage / dept_cost.grand_total_wage) * 100) | round(1) %}
+                <span class="text-sm font-mono tabular-nums text-neutral-800 dark:text-neutral-200">{{ "{:,.0f}".format(other_row.total_wage) }}</span>
+                <span class="text-xs text-neutral-400 dark:text-neutral-500 ml-1">{{ share }}%</span>
+              {% else %}
+                <span class="text-sm font-mono text-neutral-400 dark:text-neutral-500">&mdash;</span>
+              {% endif %}
+            </div>
+
+            <div title="Department drill-down available in F2" class="w-5 shrink-0 text-neutral-300 dark:text-neutral-600 cursor-not-allowed select-none">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </div>
+
+          </div>
+        {% endif %}
+      </div>
+
+      {# Reconciliation caption (Guardrail C): dept count + Other grouping note + grand total #}
+      <div class="px-6 pb-5 pt-2 border-t border-neutral-100 dark:border-neutral-700">
+        <p class="text-xs text-neutral-400 dark:text-neutral-500">
+          {{ named_dept_rows | length }} department{{ "s" if named_dept_rows | length != 1 else "" }} shown individually
+          {%- if other_row -%}
+          ; smaller departments grouped into &ldquo;Other&rdquo; to protect individual pay
+          {%- endif -%}.
+          Grand total: <span class="font-mono">{{ "{:,.0f}".format(dept_cost.grand_total_wage) }}</span> EGP/month.
+        </p>
+      </div>
+
+    </div>
+
+    {# ── 5. Tenure Distribution Panel ── #}
+    <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card">
+
+      <div class="px-6 pt-5 pb-4 border-b border-neutral-100 dark:border-neutral-700">
+        <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Tenure Distribution</h2>
+        <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+          {{ tenure.total_employed }} employed &middot; net accumulated service
+        </p>
+      </div>
+
+      <div class="px-6 py-4 space-y-3">
+        {# Bars scale to max_band_count (tallest band = 100%). Passed from Python — no Jinja2 namespace needed. #}
+        {# Bands arrive in _BAND_LABELS order: "<1y","1-3y","3-5y","5-10y","10+y" #}
+        {% for band in tenure.bands %}
+          {% set bar_w = ((band.count / max_band_count) * 100) | round | int %}
+          <div class="flex items-center gap-3">
+            <span class="w-10 shrink-0 text-xs font-mono text-neutral-600 dark:text-neutral-400 text-right">{{ band.band }}</span>
+            <div class="flex-1 min-w-0">
+              <div class="h-5 bg-neutral-100 dark:bg-neutral-700 rounded overflow-hidden">
+                <div class="h-full rounded bg-primary-500 dark:bg-primary-600"
+                     style="width: {{ bar_w }}%;"></div>
+              </div>
+            </div>
+            <span class="w-6 shrink-0 text-xs font-mono tabular-nums text-neutral-700 dark:text-neutral-300 text-right">{{ band.count }}</span>
+          </div>
+        {% endfor %}
+
+        {% if tenure.missing_date_count > 0 %}
+        <p class="text-xs text-neutral-400 dark:text-neutral-500 pt-2 border-t border-neutral-100 dark:border-neutral-700">
+          {{ tenure.missing_date_count }} employee{{ "s" if tenure.missing_date_count != 1 else "" }} excluded &mdash; null contract start date.
+        </p>
+        {% endif %}
+      </div>
+
+    </div>
+
+  </div>
+
+  {# ── 6 + 7. CONTRACT STATUS PANEL + ATTENDANCE CARD (2/3 + 1/3) ─────────── #}
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+    {# ── 6. Contract Status Panel ── #}
+    {# Bucket labels bound to exact _BUCKET_LABELS strings; explicit urgent-first order; #}
+    {# fallback else branch handles any unexpected future label without crashing. #}
+    <div class="xl:col-span-2 bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card">
+
+      <div class="px-6 pt-5 pb-4 border-b border-neutral-100 dark:border-neutral-700">
+        <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Contract Status</h2>
+        <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+          {{ payroll_risk.total_employed }} Running-contract employees &middot; {{ payroll_risk.reference_date }}
+        </p>
+      </div>
+
+      <div class="px-6 py-4 space-y-3">
+        {% set total_for_bars = payroll_risk.total_employed if payroll_risk.total_employed > 0 else 1 %}
+
+        {# Iterate explicit urgent-first order. Count lookup safe: all 6 keys always present from service. #}
+        {% for label in ["expired", "expiring_45d", "expiring_90d", "expiring_135d", "beyond_135d", "open_ended"] %}
+          {% set count = buckets_by_label[label] if label in buckets_by_label else 0 %}
+          {% set bar_w = ((count / total_for_bars) * 100) | round | int %}
+
+          {# Color map uses project tokens only (warning-300/400/500, danger-600, success-500, primary-400). #}
+          {# warning-300 = #fcd34d (defined); lightest amber for ~4.5 months out (guardrail B). #}
+          {# Else branch = neutral fallback for any unrecognized label (guardrail A). #}
+          {% if label == "expired" %}
+            {% set bar_cls = "bg-danger-600" %}
+            {% set txt_cls = "text-danger-700 dark:text-danger-400" %}
+            {% set lbl = "Expired" %}
+          {% elif label == "expiring_45d" %}
+            {% set bar_cls = "bg-warning-500" %}
+            {% set txt_cls = "text-warning-700 dark:text-warning-400" %}
+            {% set lbl = "Expiring ≤ 45 d" %}
+          {% elif label == "expiring_90d" %}
+            {% set bar_cls = "bg-warning-400" %}
+            {% set txt_cls = "text-warning-600 dark:text-warning-400" %}
+            {% set lbl = "Expiring 46–90 d" %}
+          {% elif label == "expiring_135d" %}
+            {% set bar_cls = "bg-warning-300" %}
+            {% set txt_cls = "text-warning-700 dark:text-warning-500" %}
+            {% set lbl = "Expiring 91–135 d" %}
+          {% elif label == "beyond_135d" %}
+            {% set bar_cls = "bg-success-500" %}
+            {% set txt_cls = "text-success-700 dark:text-success-400" %}
+            {% set lbl = "Beyond 135 d" %}
+          {% elif label == "open_ended" %}
+            {% set bar_cls = "bg-primary-400" %}
+            {% set txt_cls = "text-primary-700 dark:text-primary-300" %}
+            {% set lbl = "Open-ended" %}
+          {% else %}
+            {% set bar_cls = "bg-neutral-400" %}
+            {% set txt_cls = "text-neutral-600 dark:text-neutral-400" %}
+            {% set lbl = label %}
+          {% endif %}
+
+          <div class="flex items-center gap-3">
+            <span class="w-32 shrink-0 text-xs font-medium {{ txt_cls }} truncate">{{ lbl }}</span>
+            <div class="flex-1 min-w-0">
+              <div class="h-5 bg-neutral-100 dark:bg-neutral-700 rounded overflow-hidden">
+                {% if count > 0 %}
+                <div class="h-full rounded {{ bar_cls }}" style="width: {{ bar_w }}%;"></div>
+                {% endif %}
+              </div>
+            </div>
+            <span class="w-8 shrink-0 text-xs font-mono tabular-nums text-neutral-700 dark:text-neutral-300 text-right">{{ count }}</span>
+          </div>
+        {% endfor %}
+      </div>
+
+      {# Data-quality note: archived-running employees are employed; counted above. #}
+      {% if payroll_risk.archived_with_running_count > 0 %}
+      <div class="px-6 pb-5 pt-2 border-t border-neutral-100 dark:border-neutral-700">
+        <p class="text-xs text-neutral-400 dark:text-neutral-500">
+          Data note: {{ payroll_risk.archived_with_running_count }} employee{{ "s" if payroll_risk.archived_with_running_count != 1 else "" }}
+          archived in Odoo&rsquo;s UI but holding a Running contract &mdash; they are employed and included in the buckets above.
+          Employment is derived from contract state, not the Odoo archive flag.
+        </p>
+      </div>
+      {% endif %}
+
+    </div>
+
+    {# ── 7. Attendance & Leave — explicitly labelled "awaiting data" (no fabricated numbers) ── #}
+    <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card flex flex-col items-center justify-center p-8 text-center" style="min-height: 240px;">
+      <svg class="w-10 h-10 text-neutral-300 dark:text-neutral-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-neutral-500 dark:text-neutral-400">Attendance &amp; Leave</h2>
+      <p class="mt-2 text-xs text-neutral-400 dark:text-neutral-500 max-w-[220px]">
+        Attendance and leave data not yet connected to the HR service layer.
+        This panel will show absence trends and leave balances once the integration is live.
+      </p>
+      <span class="mt-4 badge badge-neutral">Awaiting data</span>
+    </div>
+
+  </div>
+
+  {# ── 8. FOOTER ──────────────────────────────────────────────────────────── #}
+  <footer class="pt-4 pb-2 border-t border-neutral-200 dark:border-neutral-700">
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      Every figure live from Odoo &middot; verified against source
+      &middot; Department drill-down available in the next release (F2)
+      &middot; Individual wages never shown
+    </p>
+  </footer>
+
+</div>
+{% endblock %}

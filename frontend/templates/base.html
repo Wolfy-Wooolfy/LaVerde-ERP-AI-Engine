@@ -156,17 +156,18 @@
         </span>
       </div>
 
-      <!-- HR — Coming Soon -->
-      <div class="sidebar-link opacity-40 cursor-not-allowed select-none"
-           title="{{ _t('Coming soon') }}">
+      <!-- HR — Active -->
+      <a href="/hr/dashboard"
+        class="sidebar-link {% if page == 'hr_dashboard' %}active{% endif %}"
+        title="HR Overview">
         <svg class="sidebar-link-icon shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
         <span x-show="!sidebarCollapsed" class="truncate flex items-center gap-2">
           HR
-          <span class="text-[10px] bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-600 px-1.5 py-0.5 rounded font-medium">Soon</span>
+          <span class="text-[10px] bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-1.5 py-0.5 rounded font-medium">✓</span>
         </span>
-      </div>
+      </a>
 
       <!-- Contracts — Coming Soon -->
       <div class="sidebar-link opacity-40 cursor-not-allowed select-none"
@@ -309,6 +310,10 @@
       <a href="/customer-accounts/dashboard" class="sidebar-link {% if page == 'customer_accounts_dashboard' %}active{% endif %}">
         <svg class="sidebar-link-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         {{ _t("Customer Accounts") }}
+      </a>
+      <a href="/hr/dashboard" class="sidebar-link {% if page == 'hr_dashboard' %}active{% endif %}">
+        <svg class="sidebar-link-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        HR
       </a>
     </nav>
     <div class="p-3 border-t border-neutral-100 dark:border-neutral-800 text-sm text-neutral-500">

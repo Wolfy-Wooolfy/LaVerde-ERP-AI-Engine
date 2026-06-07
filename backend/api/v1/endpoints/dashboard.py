@@ -1,5 +1,7 @@
 """HTML dashboard views — Jinja2 server-side rendered pages."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -8,6 +10,12 @@ from backend.api.deps import get_crm_service, get_current_user
 from backend.core.config import settings
 from backend.core.i18n import detect_lang, load_translations, make_translator
 from backend.modules.crm.service import CrmService
+from backend.modules.hr.services.kpi_service import (
+    get_department_cost,
+    get_headcount,
+    get_payroll_risk_dashboard,
+    get_tenure_distribution,
+)
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="frontend/templates")
@@ -77,6 +85,57 @@ async def customer_accounts_dashboard(
     ctx = _base_ctx(request, user)
     ctx["page"] = "customer_accounts_dashboard"
     return templates.TemplateResponse(request, "customer_accounts/dashboard.html", ctx)
+
+
+@router.get("/hr/dashboard", response_class=HTMLResponse, summary="HR overview dashboard (HTML)")
+async def hr_dashboard(
+    request: Request,
+    user: str = Depends(get_current_user),
+) -> HTMLResponse:
+    headcount, tenure, payroll_risk, dept_cost = await asyncio.gather(
+        get_headcount(),
+        get_tenure_distribution(),
+        get_payroll_risk_dashboard(),
+        get_department_cost(),
+    )
+    dept_count = len([d for d in headcount["by_department"] if d["department_id"] is not None])
+    avg_per_emp = (
+        round(dept_cost["grand_total_wage"] / headcount["headcount"])
+        if headcount["headcount"]
+        else 0
+    )
+    buckets_by_label = {b["label"]: b["count"] for b in payroll_risk["buckets"]}
+    named_dept_rows = [
+        r for r in dept_cost["rows"]
+        if r["department_name"] != "Other (small departments)"
+    ]
+    other_row = next(
+        (r for r in dept_cost["rows"] if r["department_name"] == "Other (small departments)"),
+        None,
+    )
+    max_dept_wage = max(
+        (r["total_wage"] for r in named_dept_rows if r["total_wage"] is not None),
+        default=1,
+    )
+    max_band_count = max((b["count"] for b in tenure["bands"]), default=1)
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page":              "hr_dashboard",
+        "headcount":         headcount,
+        "tenure":            tenure,
+        "payroll_risk":      payroll_risk,
+        "dept_cost":         dept_cost,
+        "dept_count":        dept_count,
+        "avg_per_emp":       avg_per_emp,
+        "buckets_by_label":  buckets_by_label,
+        "named_dept_rows":   named_dept_rows,
+        "other_row":         other_row,
+        "max_dept_wage":     max_dept_wage,
+        "max_band_count":    max_band_count,
+        "attn_expired":      buckets_by_label.get("expired", 0),
+        "attn_expiring_45d": buckets_by_label.get("expiring_45d", 0),
+    })
+    return templates.TemplateResponse(request, "hr/dashboard.html", ctx)
 
 
 @router.get(
