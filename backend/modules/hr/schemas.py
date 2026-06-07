@@ -102,3 +102,30 @@ class DepartmentCostResponse(BaseModel):
     as_of: str                               # ISO 8601 UTC datetime of the query
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int                     # 0 when served from cache
+
+
+# ── F2 — Department Staff Drill-Down ─────────────────────────────────────────
+
+
+class StaffMemberRow(BaseModel):
+    employee_id:    int
+    employee_name:  str
+    job_title:      str          # "—" if no job (null job_id)
+    date_start:     str | None   # ISO date YYYY-MM-DD, or null if not set
+    tenure_years:   float | None # (today - date_start).days / 365.25; null if no date_start
+    contract_state: Literal["open"]  # always "open" — filter guarantees this
+
+
+class DepartmentStaffResponse(BaseModel):
+    department_id:         int
+    department_name:       str
+    headcount:             int          # == len(staff); reconciles with KPI A by_department
+    total_wage:            float | None # dept SUM(wage) from KPI D; null only if k-anon suppressed
+    pct_of_total_payroll:  float | None # total_wage / grand_total_wage * 100; null if total_wage null
+    avg_cost_per_head:     float | None # total_wage / headcount; null if total_wage null
+    staff:                 list[StaffMemberRow]
+    currency:              Literal["EGP"]
+    basis:                 Literal["monthly"]
+    reference_date:        str  # Cairo TZ ISO date YYYY-MM-DD
+    as_of:                 str  # ISO 8601 UTC datetime
+    rpc_duration_ms:       int  # staff RPC only; dept_cost is typically cached (0 ms)
