@@ -80,3 +80,25 @@ class PayrollRiskDashboardResponse(BaseModel):
     as_of: str                                     # ISO 8601 UTC datetime of the query
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int                           # 0 when served from cache
+
+
+# ── KPI D — Department Payroll Cost ──────────────────────────────────────────
+
+
+class DepartmentCostRow(BaseModel):
+    department_id: int | None
+    department_name: str
+    running_contract_count: int
+    total_wage: float | None   # null iff suppressed: "Other" pool count < 3
+
+
+class DepartmentCostResponse(BaseModel):
+    rows: list[DepartmentCostRow]
+    grand_total_wage: float                  # SUM over all open contracts; always present
+    total_running_contracts: int             # distinct Running-contract employees; == KPI A headcount
+    currency: Literal["EGP"]
+    basis: Literal["monthly"]
+    reference_date: str                      # Cairo TZ ISO date YYYY-MM-DD
+    as_of: str                               # ISO 8601 UTC datetime of the query
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int                     # 0 when served from cache

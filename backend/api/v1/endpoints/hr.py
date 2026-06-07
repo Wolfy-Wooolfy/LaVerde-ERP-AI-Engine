@@ -4,6 +4,7 @@ HR KPI endpoints.
 GET /api/v1/hr/kpi/headcount              — KPI A: Headcount
 GET /api/v1/hr/kpi/tenure-distribution   — KPI B: Tenure Distribution
 GET /api/v1/hr/kpi/payroll-risk-dashboard — KPI C: Payroll Risk Dashboard
+GET /api/v1/hr/kpi/department-cost        — KPI D: Department Payroll Cost
 """
 
 from fastapi import APIRouter, Request, Response
@@ -13,11 +14,13 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.hr.schemas import (
+    DepartmentCostResponse,
     HeadcountResponse,
     PayrollRiskDashboardResponse,
     TenureDistributionResponse,
 )
 from backend.modules.hr.services.kpi_service import (
+    get_department_cost,
     get_headcount,
     get_payroll_risk_dashboard,
     get_tenure_distribution,
@@ -94,6 +97,30 @@ async def payroll_risk_dashboard(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("HR KPI C payroll risk dashboard — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/kpi/department-cost",
+    summary="KPI D — Department Payroll Cost",
+    response_model=DepartmentCostResponse,
+)
+@limiter.limit("60/minute")
+async def department_cost(
+    request: Request,
+    response: Response,
+) -> dict | JSONResponse:
+    try:
+        data = await get_department_cost()
+    except OdooQueryError:
+        logger.warning("HR KPI D department cost — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("HR KPI D department cost — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"

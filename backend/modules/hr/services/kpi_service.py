@@ -705,3 +705,162 @@ async def get_payroll_risk_dashboard(client: Optional[OdooClient] = None) -> dic
 
     _cache.set(cache_key, result)
     return result
+
+
+# ── KPI D — Department Payroll Cost ──────────────────────────────────────────
+
+_CACHE_KEY_PREFIX_DEPT_COST = "kpi:hr:department_cost"
+_DEPT_COST_K_ANON_MIN = 3
+_OTHER_DEPT_LABEL = "Other (small departments)"
+
+
+async def get_department_cost(client: Optional[OdooClient] = None) -> dict:
+    """Return KPI D — Department Payroll Cost (2026-06-07).
+
+    Employment: Running contract (state='open') — NOT hr.employee.active.
+    See §3.6 in HR_CLUSTER_DISCOVERY.md.
+
+    1 RPC:
+      search_read(hr.contract, [('state','=','open')],
+                  fields=['department_id', 'wage', 'employee_id'])
+      active_test omitted: all open contracts carry active=True (Item 0,
+      discover_payroll_risk_shape.py 2026-06-04); the context flag filters
+      hr.contract.active only — it never inspects employee.active.
+      Omitting keeps the population provably identical to KPI A/C.
+
+    Aggregation:
+      SUM(wage) over all open contracts grouped by department_id.
+      running_contract_count per department = distinct employee_id count
+      (apples-to-apples with KPI A headcount; surfaces multi-contract
+      anomalies without crashing). Contracts without employee_id skipped.
+      wage=0 contributor: counts as 1 employee, adds 0 to SUM (§3.8 W1).
+      grand_total_wage = SUM(wage) over all open contracts.
+      total_running_contracts = distinct employee_ids (== KPI A headcount).
+
+    k-anonymity (§3.8 W3), threshold = _DEPT_COST_K_ANON_MIN = 3:
+      Departments whose distinct employee count < 3 are POOLED into
+      "Other (small departments)" (summed wage + union of employee sets).
+      If the combined pool count < 3: total_wage for the Other row is
+      returned as null (suppressed). grand_total_wage is always returned
+      (115 employees >= 3 — safe by construction).
+
+    Baseline (2026-06-03 post-fix): 115 Running contracts, 21 departments.
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if the Odoo RPC fails.
+    """
+    _assert_read_only()
+
+    cairo_today = datetime.now(_CAIRO_TZ).date()
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_DEPT_COST)
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (1 RPC)")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # active_test omitted: all open contracts carry active=True (Item 0,
+        # 2026-06-04); flag filters hr.contract.active only, never employee.active.
+        # Population is provably identical to KPI A/C.
+        contracts = await _client.execute_kw(
+            _CONTRACT_MODEL,
+            "search_read",
+            args=[[("state", "=", "open")]],
+            kwargs={"fields": ["department_id", "wage", "employee_id"]},
+        )
+    except Exception as exc:
+        raise OdooQueryError(
+            f"get_department_cost() RPC on {_CONTRACT_MODEL} failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(
+        f"HR department cost: 1 RPC on {_CONTRACT_MODEL} in {rpc_ms}ms "
+        f"| cache_key={cache_key}"
+    )
+
+    # ── Aggregate SUM(wage) and distinct employee set per department ──────────
+    dept_wages:   dict[tuple, float]    = defaultdict(float)
+    dept_emp_ids: dict[tuple, set[int]] = defaultdict(set)
+    grand_total_wage: float             = 0.0
+    all_emp_ids:  set[int]              = set()
+
+    for c in contracts:
+        emp_raw = c.get("employee_id")
+        if isinstance(emp_raw, (list, tuple)) and emp_raw:
+            emp_id = int(emp_raw[0])
+        elif emp_raw and emp_raw is not False:
+            emp_id = int(emp_raw)
+        else:
+            continue  # skip orphaned contracts (no employee_id)
+
+        dept_raw = c.get("department_id")
+        if isinstance(dept_raw, (list, tuple)) and len(dept_raw) >= 2:
+            dept_key: tuple = (int(dept_raw[0]), str(dept_raw[1]))
+        else:
+            dept_key = (None, _NO_DEPT_DISPLAY)
+
+        wage = float(c.get("wage") or 0)
+
+        dept_wages[dept_key]   += wage
+        grand_total_wage       += wage
+        dept_emp_ids[dept_key].add(emp_id)
+        all_emp_ids.add(emp_id)
+
+    total_running_contracts = len(all_emp_ids)
+
+    # ── k-anonymity pooling ───────────────────────────────────────────────────
+    normal_rows:    list[dict] = []
+    pooled_wage:    float      = 0.0
+    pooled_emp_ids: set[int]   = set()
+
+    for (dept_id, dept_name), emp_ids in dept_emp_ids.items():
+        if len(emp_ids) >= _DEPT_COST_K_ANON_MIN:
+            normal_rows.append({
+                "department_id":          dept_id,
+                "department_name":        dept_name,
+                "running_contract_count": len(emp_ids),
+                "total_wage":             dept_wages[(dept_id, dept_name)],
+            })
+        else:
+            pooled_wage    += dept_wages[(dept_id, dept_name)]
+            pooled_emp_ids |= emp_ids
+
+    pooled_count = len(pooled_emp_ids)
+    if pooled_count > 0:
+        other_wage: float | None = (
+            pooled_wage if pooled_count >= _DEPT_COST_K_ANON_MIN else None
+        )
+        normal_rows.append({
+            "department_id":          None,
+            "department_name":        _OTHER_DEPT_LABEL,
+            "running_contract_count": pooled_count,
+            "total_wage":             other_wage,
+        })
+
+    # Highest wage first; suppressed Other (total_wage=None) treated as 0 → sorts last
+    normal_rows.sort(key=lambda r: (-(r["total_wage"] or 0.0), r["department_name"]))
+
+    result: dict = {
+        "rows":                    normal_rows,
+        "grand_total_wage":        grand_total_wage,
+        "total_running_contracts": total_running_contracts,
+        "currency":                "EGP",
+        "basis":                   "monthly",
+        "reference_date":          cairo_today.isoformat(),
+        "as_of":                   datetime.now(timezone.utc).isoformat(),
+        "cache_status":            "fresh",
+        "rpc_duration_ms":         rpc_ms,
+    }
+
+    _cache.set(cache_key, result)
+    return result
