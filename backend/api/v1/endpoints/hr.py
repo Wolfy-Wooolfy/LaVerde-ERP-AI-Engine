@@ -6,6 +6,7 @@ GET /api/v1/hr/kpi/tenure-distribution   — KPI B: Tenure Distribution
 GET /api/v1/hr/kpi/payroll-risk-dashboard — KPI C: Payroll Risk Dashboard
 GET /api/v1/hr/kpi/department-cost        — KPI D: Department Payroll Cost
 GET /api/v1/hr/department/{department_id} — F2:    Department staff drill-down
+GET /api/v1/hr/employee/{employee_id}     — F3:    Employee profile drill-down
 """
 
 import asyncio
@@ -22,11 +23,13 @@ from backend.core.limiter import limiter
 from backend.modules.hr.schemas import (
     DepartmentCostResponse,
     DepartmentStaffResponse,
+    EmployeeProfileResponse,
     HeadcountResponse,
     PayrollRiskDashboardResponse,
     TenureDistributionResponse,
 )
 from backend.modules.hr.services.dept_staff_service import get_department_staff
+from backend.modules.hr.services.employee_profile_service import get_employee_profile
 from backend.modules.hr.services.kpi_service import (
     get_department_cost,
     get_headcount,
@@ -239,3 +242,75 @@ async def department_staff(
 
     response.headers["Cache-Control"] = "private, no-store"
     return result
+
+
+@router.get(
+    "/employee/{employee_id}",
+    summary="F3 — Employee profile drill-down",
+    response_model=EmployeeProfileResponse,
+)
+@limiter.limit("60/minute")
+async def employee_profile(
+    request: Request,
+    response: Response,
+    employee_id: int,
+    _user: str = Depends(get_current_user),
+) -> dict | JSONResponse:
+    """Return a board-appropriate profile for one current employee.
+
+    Auth: HTTPBasic required — response contains employee name (PII).
+    Cache-Control: private, no-store.
+
+    Returns 400 if employee_id <= 0.
+    Returns 404 if employee_id has no Running contract (not a current employee)
+      or doesn't exist in hr.employee.
+    Returns 503 on Odoo connectivity failure.
+    """
+    if employee_id <= 0:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "invalid_employee_id",
+                    "message": "employee_id must be a positive integer.",
+                }
+            },
+        )
+
+    try:
+        profile = await get_employee_profile(employee_id)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "invalid_employee_id", "message": str(exc)}},
+        )
+    except OdooQueryError:
+        logger.warning(
+            f"HR F3 employee profile — Odoo query failed (employee_id={employee_id})",
+            exc_info=True,
+        )
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error(
+            f"HR F3 employee profile — unexpected error (employee_id={employee_id})",
+            exc_info=True,
+        )
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    if profile is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "code": "employee_not_found",
+                    "message": (
+                        f"No Running-contract employee found for "
+                        f"employee_id={employee_id}. "
+                        "The employee may not exist or hold no active Running contract."
+                    ),
+                }
+            },
+        )
+
+    response.headers["Cache-Control"] = "private, no-store"
+    return profile

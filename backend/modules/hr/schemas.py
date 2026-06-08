@@ -129,3 +129,22 @@ class DepartmentStaffResponse(BaseModel):
     reference_date:        str  # Cairo TZ ISO date YYYY-MM-DD
     as_of:                 str  # ISO 8601 UTC datetime
     rpc_duration_ms:       int  # staff RPC only; dept_cost is typically cached (0 ms)
+
+
+# ── F3 — Employee Profile Drill-Down ─────────────────────────────────────────
+
+
+class EmployeeProfileResponse(BaseModel):
+    employee_id:      int
+    name:             str                    # trimmed; always present
+    job_title:        str | None             # from contract job_id; "—" if no job
+    department_name:  str | None             # from contract department_id display name
+    manager_name:     str | None             # from hr.employee parent_id (trimmed); null if no manager
+    hire_date:        str | None             # open contract date_start; ISO yyyy-mm-dd
+    tenure_years:     float | None           # (today − date_start).days / 365.25; null if no date_start
+    contract_status:  Literal["Running"]     # always "Running" — filter guarantees state='open'
+    contract_end:     str | None             # open contract date_end ISO; null when is_open_ended
+    is_open_ended:    bool                   # True when date_end is False/null
+    location:         str | None             # work_location_id display name; null if empty
+    as_of:            str                    # ISO 8601 UTC datetime of the query
+    rpc_duration_ms:  int
