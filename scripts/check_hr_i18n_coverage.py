@@ -12,6 +12,13 @@ coverage markers below. The checker is intentionally permissive for
 false-positive avoidance; its job is to catch NEW bare strings added
 after the initial i18n pass, not to be an AST parser.
 
+Out-of-scope: backend-emitted data values (e.g. band.band from kpi_service.py).
+The checker skips lines containing {{ because dynamic expressions cannot be
+statically validated. The architectural fix for this blind spot is that the
+backend emits stable machine keys (never display strings), and the template
+calls _t("key_prefix_" + value) so the _t( token is visible to this checker.
+See D-HR-I18N-11 in docs/HR_IMPLEMENTATION_DECISIONS.md.
+
 Usage:
   python scripts/check_hr_i18n_coverage.py
 """

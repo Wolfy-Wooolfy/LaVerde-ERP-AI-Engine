@@ -52,3 +52,11 @@ Arabic pluralization rules are complex (singular/dual/plural-3-10/plural-11+). T
 ### D-HR-I18N-10: F1 reference_date format — no localization gap
 
 `headcount.reference_date` is `YYYY-MM-DD` (ISO format, numeric digits only). No English month name appears; the string reads the same in both EN and AR. The month-names localization (12-entry `HR_STRINGS.months` array) applies only to F3's `_fmtDate()` function, which formats ISO dates as "30 Jun 2026" → "30 يونيو 2026".
+
+### D-HR-I18N-11: Backend-emitted data strings — static checker blind spot resolved by architecture
+
+The static i18n checker (`scripts/check_hr_i18n_coverage.py`) skips any template line containing `{{` on the grounds that dynamic expressions cannot be statically validated. This created a blind spot: `kpi_service.py` was emitting display strings (`"<1y"`, `"1-3y"`, etc.) as the `band.band` payload, and the template rendered them raw via `{{ band.band }}` — invisible to the checker.
+
+Fix: backend emits stable machine keys (`"lt1y"`, `"y1_3"`, `"y3_5"`, `"y5_10"`, `"y10plus"`) as `band.band`. The template calls `_t("hr_tenure_" + band.band)`, which the checker CAN see (the `_t(` token is present). Translations for all five keys added to `en.json` and `ar.json`.
+
+Rule: backend data values that flow into user-visible template text must be machine keys, never display strings. Display strings belong only in translation files.

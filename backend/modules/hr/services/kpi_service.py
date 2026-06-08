@@ -232,7 +232,7 @@ async def get_headcount(client: Optional[OdooClient] = None) -> dict:
 # ── KPI B — Tenure Distribution ───────────────────────────────────────────────
 
 _CACHE_KEY_PREFIX_TENURE = "kpi:hr:tenure"
-_BAND_LABELS = ["<1y", "1-3y", "3-5y", "5-10y", "10+y"]
+_BAND_LABELS = ["lt1y", "y1_3", "y3_5", "y5_10", "y10plus"]
 
 
 def _tenure_years(fcd: date, today: date) -> int:
@@ -257,14 +257,14 @@ def _tenure_years(fcd: date, today: date) -> int:
 
 def _assign_band(years: int) -> str:
     if years < 1:
-        return "<1y"
+        return "lt1y"
     if years < 3:
-        return "1-3y"
+        return "y1_3"
     if years < 5:
-        return "3-5y"
+        return "y3_5"
     if years < 10:
-        return "5-10y"
-    return "10+y"
+        return "y5_10"
+    return "y10plus"
 
 
 async def get_tenure_distribution(client: Optional[OdooClient] = None) -> dict:

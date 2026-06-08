@@ -129,7 +129,7 @@ async def test_five_bands_always_present_in_fixed_order(mock_client):
 async def test_band_boundary_exactly_1y_lands_in_1_3y(monkeypatch):
     _freeze_ref_date(monkeypatch)
     # date_start = 2025-05-29; total_days = 365; virtual_start = 2025-05-29
-    # _tenure_years(2025-05-29, 2026-05-29) = 1 → "1-3y" (anniversary reached)
+    # _tenure_years(2025-05-29, 2026-05-29) = 1 → "y1_3" (anniversary reached)
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2025-05-29", "date_end": False}
@@ -137,14 +137,14 @@ async def test_band_boundary_exactly_1y_lands_in_1_3y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["1-3y"] == 1
-    assert bands["<1y"] == 0
+    assert bands["y1_3"] == 1
+    assert bands["lt1y"] == 0
 
 
 async def test_band_boundary_exactly_3y_lands_in_3_5y(monkeypatch):
     _freeze_ref_date(monkeypatch)
     # date_start = 2023-05-29; virtual_start = 2023-05-29
-    # _tenure_years = 3 → "3-5y"
+    # _tenure_years = 3 → "y3_5"
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2023-05-29", "date_end": False}
@@ -152,14 +152,14 @@ async def test_band_boundary_exactly_3y_lands_in_3_5y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["3-5y"] == 1
-    assert bands["1-3y"] == 0
+    assert bands["y3_5"] == 1
+    assert bands["y1_3"] == 0
 
 
 async def test_band_boundary_exactly_5y_lands_in_5_10y(monkeypatch):
     _freeze_ref_date(monkeypatch)
     # date_start = 2021-05-29; virtual_start = 2021-05-29
-    # _tenure_years = 5 → "5-10y"
+    # _tenure_years = 5 → "y5_10"
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2021-05-29", "date_end": False}
@@ -167,14 +167,14 @@ async def test_band_boundary_exactly_5y_lands_in_5_10y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["5-10y"] == 1
-    assert bands["3-5y"] == 0
+    assert bands["y5_10"] == 1
+    assert bands["y3_5"] == 0
 
 
 async def test_band_boundary_exactly_10y_lands_in_10_plus_y(monkeypatch):
     _freeze_ref_date(monkeypatch)
     # date_start = 2016-05-29; virtual_start = 2016-05-29
-    # _tenure_years = 10 → "10+y"
+    # _tenure_years = 10 → "y10plus"
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2016-05-29", "date_end": False}
@@ -182,8 +182,8 @@ async def test_band_boundary_exactly_10y_lands_in_10_plus_y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["10+y"] == 1
-    assert bands["5-10y"] == 0
+    assert bands["y10plus"] == 1
+    assert bands["y5_10"] == 0
 
 
 # ── Tests 7–10 — Just-before-boundary: employee stays in the lower band ────────
@@ -193,7 +193,7 @@ async def test_band_just_before_1y_lands_in_lt_1y(monkeypatch):
     _freeze_ref_date(monkeypatch)
     # date_start = 2025-05-30: one day after the anniversary date
     # total_days = 364; virtual_start = 2025-05-30
-    # _tenure_years: (5,29) < (5,30) → years=0 → "<1y"
+    # _tenure_years: (5,29) < (5,30) → years=0 → "lt1y"
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2025-05-30", "date_end": False}
@@ -201,13 +201,13 @@ async def test_band_just_before_1y_lands_in_lt_1y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["<1y"] == 1
-    assert bands["1-3y"] == 0
+    assert bands["lt1y"] == 1
+    assert bands["y1_3"] == 0
 
 
 async def test_band_just_before_3y_lands_in_1_3y(monkeypatch):
     _freeze_ref_date(monkeypatch)
-    # date_start = 2023-05-30; _tenure_years: (5,29) < (5,30) → years=2 → "1-3y"
+    # date_start = 2023-05-30; _tenure_years: (5,29) < (5,30) → years=2 → "y1_3"
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2023-05-30", "date_end": False}
@@ -215,13 +215,13 @@ async def test_band_just_before_3y_lands_in_1_3y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["1-3y"] == 1
-    assert bands["3-5y"] == 0
+    assert bands["y1_3"] == 1
+    assert bands["y3_5"] == 0
 
 
 async def test_band_just_before_5y_lands_in_3_5y(monkeypatch):
     _freeze_ref_date(monkeypatch)
-    # date_start = 2021-05-30; _tenure_years: (5,29) < (5,30) → years=4 → "3-5y"
+    # date_start = 2021-05-30; _tenure_years: (5,29) < (5,30) → years=4 → "y3_5"
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2021-05-30", "date_end": False}
@@ -229,13 +229,13 @@ async def test_band_just_before_5y_lands_in_3_5y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["3-5y"] == 1
-    assert bands["5-10y"] == 0
+    assert bands["y3_5"] == 1
+    assert bands["y5_10"] == 0
 
 
 async def test_band_just_before_10y_lands_in_5_10y(monkeypatch):
     _freeze_ref_date(monkeypatch)
-    # date_start = 2016-05-30; _tenure_years: (5,29) < (5,30) → years=9 → "5-10y"
+    # date_start = 2016-05-30; _tenure_years: (5,29) < (5,30) → years=9 → "y5_10"
     client = _make_client([
         {"id": 1, "employee_id": [1, "E1"], "state": "open",
          "date_start": "2016-05-30", "date_end": False}
@@ -243,8 +243,8 @@ async def test_band_just_before_10y_lands_in_5_10y(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["5-10y"] == 1
-    assert bands["10+y"] == 0
+    assert bands["y5_10"] == 1
+    assert bands["y10plus"] == 0
 
 
 # ── Test 11 — GENERAL LOGIC: gap between two contracts excluded ───────────────
@@ -256,11 +256,11 @@ async def test_band_just_before_10y_lands_in_5_10y(monkeypatch):
 #   Period A: (2021-12-31 − 2019-01-01).days = 1095 days
 #   Period B: (2026-05-29 − 2025-01-01).days = 514 days
 #   Total: 1609 days → virtual_start ≈ 2022-01-02
-#   _tenure_years(~2022-01-02, 2026-05-29) = 4 → "3-5y"
+#   _tenure_years(~2022-01-02, 2026-05-29) = 4 → "y3_5"
 #
 # Cross-checks proving the general logic is correct:
-#   Naive (first→today): 7.4y → "5-10y"  ← gap included (WRONG)
-#   Current contract only: 1.4y → "1-3y"  ← prior service ignored (WRONG)
+#   Naive (first→today): 7.4y → "y5_10"  ← gap included (WRONG)
+#   Current contract only: 1.4y → "y1_3"  ← prior service ignored (WRONG)
 
 
 async def test_two_contracts_with_gap_gap_excluded_from_tenure(monkeypatch):
@@ -274,14 +274,14 @@ async def test_two_contracts_with_gap_gap_excluded_from_tenure(monkeypatch):
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["3-5y"] == 1, (
-        "net-accumulated service (1609d ≈ 4.4y) must land in '3-5y'"
+    assert bands["y3_5"] == 1, (
+        "net-accumulated service (1609d ≈ 4.4y) must land in 'y3_5'"
     )
-    assert bands["5-10y"] == 0, (
-        "naive first→today (7.4y) would give '5-10y' — gap must be excluded from tenure"
+    assert bands["y5_10"] == 0, (
+        "naive first→today (7.4y) would give 'y5_10' — gap must be excluded from tenure"
     )
-    assert bands["1-3y"] == 0, (
-        "current-contract-only (1.4y) would give '1-3y' — prior service must count"
+    assert bands["y1_3"] == 0, (
+        "current-contract-only (1.4y) would give 'y1_3' — prior service must count"
     )
     assert result["total_employed"] == 1
     assert result["missing_date_count"] == 0
@@ -296,10 +296,10 @@ async def test_two_contracts_with_gap_gap_excluded_from_tenure(monkeypatch):
 # Clamped:
 #   merged = [(2024-01-01, 2026-05-29)]  ← max(2026-01-01, 2026-05-29)
 #   total_days = 880 → virtual_start = 2024-01-01
-#   _tenure_years(2024-01-01, 2026-05-29) = 2 → "1-3y"
+#   _tenure_years(2024-01-01, 2026-05-29) = 2 → "y1_3"
 #
 # Naive (unclamped): 731 + 880 = 1611 days → virtual_start ≈ 2021-12-31
-#   _tenure_years(~2021-12-31, 2026-05-29) = 4 → "3-5y"  ← WRONG (double-count)
+#   _tenure_years(~2021-12-31, 2026-05-29) = 4 → "y3_5"  ← WRONG (double-count)
 
 
 async def test_two_overlapping_contracts_overlap_clamped_not_double_counted(monkeypatch):
@@ -313,11 +313,11 @@ async def test_two_overlapping_contracts_overlap_clamped_not_double_counted(monk
     result = await get_tenure_distribution(client=client)
 
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["1-3y"] == 1, (
-        "clamped merged period (2024-01-01→2026-05-29 = 880d ≈ 2.4y) must be in '1-3y'"
+    assert bands["y1_3"] == 1, (
+        "clamped merged period (2024-01-01→2026-05-29 = 880d ≈ 2.4y) must be in 'y1_3'"
     )
-    assert bands["3-5y"] == 0, (
-        "naive double-count (1611d ≈ 4.4y) would give '3-5y' — overlap must be clamped"
+    assert bands["y3_5"] == 0, (
+        "naive double-count (1611d ≈ 4.4y) would give 'y3_5' — overlap must be clamped"
     )
     assert result["total_employed"] == 1
     assert result["missing_date_count"] == 0
@@ -330,7 +330,7 @@ async def test_open_ended_running_contract_uses_today_as_endpoint(monkeypatch):
     _freeze_ref_date(monkeypatch)
     # date_end=False → endpoint = cairo_today = 2026-05-29 (not a missing date)
     # date_start = 2024-01-01: total_days = 880; virtual_start = 2024-01-01
-    # _tenure_years = 2 → "1-3y"
+    # _tenure_years = 2 → "y1_3"
     client = _make_client([
         {"id": 30, "employee_id": [301, "E301"], "state": "open",
          "date_start": "2024-01-01", "date_end": False}
@@ -342,7 +342,7 @@ async def test_open_ended_running_contract_uses_today_as_endpoint(monkeypatch):
     )
     assert result["total_employed"] == 1
     bands = {b["band"]: b["count"] for b in result["bands"]}
-    assert bands["1-3y"] == 1
+    assert bands["y1_3"] == 1
 
 
 # ── Test 14 — Null date_start on Running contract → missing_date_count ────────

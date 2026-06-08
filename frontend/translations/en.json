@@ -349,5 +349,11 @@
   "hr_month_nov": "Nov",
   "hr_month_dec": "Dec",
 
-  "hr_back_to_staff": "Back to staff list"
+  "hr_back_to_staff": "Back to staff list",
+
+  "hr_tenure_lt1y":   "< 1 yr",
+  "hr_tenure_y1_3":   "1–3 yrs",
+  "hr_tenure_y3_5":   "3–5 yrs",
+  "hr_tenure_y5_10":  "5–10 yrs",
+  "hr_tenure_y10plus": "10+ yrs"
 }

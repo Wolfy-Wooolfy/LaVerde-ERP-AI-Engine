@@ -349,5 +349,11 @@
   "hr_month_nov": "نوفمبر",
   "hr_month_dec": "ديسمبر",
 
-  "hr_back_to_staff": "العودة إلى قائمة الموظفين"
+  "hr_back_to_staff": "العودة إلى قائمة الموظفين",
+
+  "hr_tenure_lt1y":   "أقل من سنة",
+  "hr_tenure_y1_3":   "1-3 سنوات",
+  "hr_tenure_y3_5":   "3-5 سنوات",
+  "hr_tenure_y5_10":  "5-10 سنوات",
+  "hr_tenure_y10plus": "10 سنوات فأكثر"
 }

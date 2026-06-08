@@ -253,11 +253,11 @@
 
       <div class="px-6 py-4 space-y-3">
         {# Bars scale to max_band_count (tallest band = 100%). Passed from Python — no Jinja2 namespace needed. #}
-        {# Bands arrive in _BAND_LABELS order: "<1y","1-3y","3-5y","5-10y","10+y" #}
+        {# Bands arrive in _BAND_LABELS order: "lt1y","y1_3","y3_5","y5_10","y10plus" — machine keys; template calls _t("hr_tenure_" + band.band) #}
         {% for band in tenure.bands %}
           {% set bar_w = ((band.count / max_band_count) * 100) | round | int %}
           <div class="flex items-center gap-3">
-            <span class="w-10 shrink-0 text-xs font-mono text-neutral-600 dark:text-neutral-400 text-right">{{ band.band }}</span>
+            <span class="shrink-0 whitespace-nowrap text-xs font-mono text-neutral-600 dark:text-neutral-400 text-right rtl:text-left">{{ _t("hr_tenure_" + band.band) }}</span>
             <div class="flex-1 min-w-0">
               <div class="h-5 bg-neutral-100 dark:bg-neutral-700 rounded overflow-hidden">
                 <div class="h-full rounded bg-primary-500 dark:bg-primary-600"

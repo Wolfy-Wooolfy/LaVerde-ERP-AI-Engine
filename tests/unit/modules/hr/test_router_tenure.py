@@ -17,11 +17,11 @@ _URL = "/api/v1/hr/kpi/tenure-distribution"
 
 _MOCK_DATA = {
     "bands": [
-        {"band": "<1y",   "count": 12},
-        {"band": "1-3y",  "count": 45},
-        {"band": "3-5y",  "count": 38},
-        {"band": "5-10y", "count": 30},
-        {"band": "10+y",  "count":  8},
+        {"band": "lt1y",   "count": 12},
+        {"band": "y1_3",   "count": 45},
+        {"band": "y3_5",   "count": 38},
+        {"band": "y5_10",  "count": 30},
+        {"band": "y10plus","count":  8},
     ],
     "missing_date_count": 3,
     "total_employed": 136,
@@ -128,7 +128,7 @@ def test_five_bands_present_in_serialized_response(client: TestClient) -> None:
     bands = r.json()["bands"]
     assert len(bands) == 5
     band_labels = [b["band"] for b in bands]
-    assert band_labels == ["<1y", "1-3y", "3-5y", "5-10y", "10+y"]
+    assert band_labels == ["lt1y", "y1_3", "y3_5", "y5_10", "y10plus"]
 
 
 # ── Test 7 — 5 bands present even when some counts are zero ──────────────────
@@ -138,11 +138,11 @@ def test_five_bands_present_when_some_counts_are_zero(client: TestClient) -> Non
     sparse_data = {
         **_MOCK_DATA,
         "bands": [
-            {"band": "<1y",   "count": 0},
-            {"band": "1-3y",  "count": 0},
-            {"band": "3-5y",  "count": 0},
-            {"band": "5-10y", "count": 136},
-            {"band": "10+y",  "count": 0},
+            {"band": "lt1y",   "count": 0},
+            {"band": "y1_3",   "count": 0},
+            {"band": "y3_5",   "count": 0},
+            {"band": "y5_10",  "count": 136},
+            {"band": "y10plus","count": 0},
         ],
         "missing_date_count": 0,
         "total_employed": 136,
