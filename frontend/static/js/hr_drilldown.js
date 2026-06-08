@@ -10,9 +10,19 @@
  *           The /hr/dashboard page is behind the same Basic-auth realm, so the
  *           browser has the credentials cached and a same-origin fetch carries them.
  *           A 401 is surfaced as a readable, recoverable error state.
+ *
+ * i18n: all user-facing strings read from window.HR_STRINGS (injected server-side
+ *       by hr/dashboard.html). English fallbacks keep the panel functional if the
+ *       object is absent (e.g., when loaded standalone in tests).
  */
 (function () {
   'use strict';
+
+  // ── i18n helper ────────────────────────────────────────────────────────────
+  var S = window.HR_STRINGS || {};
+  function _s(key, fallback) {
+    return (S[key] != null) ? S[key] : fallback;
+  }
 
   // ── State ──────────────────────────────────────────────────────────────────
   var _state = {
@@ -118,19 +128,19 @@
         _state.isLoading = false;
 
         if (resp.status === 401) {
-          _showError('Session expired — please refresh the page.');
+          _showError(_s('err_session', 'Session expired — please refresh the page.'));
           return null;
         }
         if (resp.status === 404) {
-          _showError('No active staff found for this department.');
+          _showError(_s('err_no_staff', 'No active staff found for this department.'));
           return null;
         }
         if (resp.status === 503) {
-          _showError('HR service unavailable — try again shortly.');
+          _showError(_s('err_service', 'HR service unavailable — try again shortly.'));
           return null;
         }
         if (!resp.ok) {
-          _showError('Error loading department (HTTP ' + resp.status + ').');
+          _showError(_s('err_load_dept', 'Error loading department (HTTP ') + resp.status + ').');
           return null;
         }
 
@@ -145,7 +155,7 @@
       })
       .catch(function () {
         _state.isLoading = false;
-        _showError('Network error — check your connection and try again.');
+        _showError(_s('err_network', 'Network error — check your connection and try again.'));
       });
   }
 
@@ -154,7 +164,7 @@
     // Header: leaf name (drop parent path segments, same transform as F1)
     var leaf = data.department_name.split('/').pop().trim();
     _title.textContent = leaf;
-    _subtitle.textContent = data.headcount + ' staff · Running contracts';
+    _subtitle.textContent = data.headcount + _s('staff_subtitle', ' staff · Running contracts');
     _subtitle.classList.remove('hidden');
 
     // Stat tiles — null-guard each: render '—' if value is null
@@ -182,14 +192,14 @@
 
     // tenure_years is null when date_start is null (backend computes it)
     var tenureStr = (member.tenure_years != null)
-      ? member.tenure_years.toFixed(1) + ' yrs · since hire'
-      : '— · no start date';
+      ? member.tenure_years.toFixed(1) + _s('yrs_since_hire', ' yrs · since hire')
+      : _s('no_start_date', '— · no start date');
 
     // Full-row button: keyboard-accessible (Enter/Space); opens employee profile on click.
     var btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'w-full px-5 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-primary-500 rounded';
-    btn.setAttribute('aria-label', 'View profile for ' + member.employee_name);
+    btn.setAttribute('aria-label', _s('view_profile_for', 'View profile for ') + member.employee_name);
 
     // No per-employee wage: only name, job, tenure, and Running state badge.
     btn.innerHTML = ''
@@ -206,7 +216,7 @@
           + '</p>'
         + '</div>'
         + '<div class="shrink-0 pt-0.5">'
-          + '<span class="badge badge-success">Running</span>'
+          + '<span class="badge badge-success">' + _esc(_s('running', 'Running')) + '</span>'
         + '</div>'
       + '</div>';
 
@@ -225,14 +235,14 @@
     _errorMsg.innerHTML = _esc(msg)
       + ' <button type="button"'
       + ' class="underline ms-1 focus-visible:ring-2 focus-visible:ring-danger-500"'
-      + ' data-hr-dd-retry="1">Try again</button>';
+      + ' data-hr-dd-retry="1">' + _esc(_s('try_again', 'Try again')) + '</button>';
     _errorMsg.classList.remove('hidden');
   }
 
   // ── Number formatters ──────────────────────────────────────────────────────
   function _fmtEGP(val) {
     if (val == null) return '—';
-    return Math.round(val).toLocaleString('en-EG') + ' EGP';
+    return Math.round(val).toLocaleString('en-EG') + ' ' + _s('egp', 'EGP');
   }
 
   function _fmtPct(val) {

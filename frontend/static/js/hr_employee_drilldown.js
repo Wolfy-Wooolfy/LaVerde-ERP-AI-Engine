@@ -14,9 +14,19 @@
  * Z-layer: backdrop z-[55] (over dept panel z-50), panel z-[60].
  * Focus:   does NOT touch #app inert — hrDeptPanel owns it.
  *          Own focus-trap (Tab cycle within this panel) isolates keyboard focus.
+ *
+ * i18n: all user-facing strings read from window.HR_STRINGS (injected server-side
+ *       by hr/dashboard.html). English fallbacks keep the panel functional if the
+ *       object is absent (e.g., when loaded standalone in tests).
  */
 (function () {
   'use strict';
+
+  // ── i18n helper ────────────────────────────────────────────────────────────
+  var S = window.HR_STRINGS || {};
+  function _s(key, fallback) {
+    return (S[key] != null) ? S[key] : fallback;
+  }
 
   // ── State ──────────────────────────────────────────────────────────────────
   var _state = {
@@ -116,19 +126,19 @@
         _state.isLoading = false;
 
         if (resp.status === 401) {
-          _showError('Session expired — please refresh the page.');
+          _showError(_s('err_session', 'Session expired — please refresh the page.'));
           return null;
         }
         if (resp.status === 404) {
-          _showError('Employee profile not found.');
+          _showError(_s('err_profile_not_found', 'Employee profile not found.'));
           return null;
         }
         if (resp.status === 503) {
-          _showError('HR service unavailable — try again shortly.');
+          _showError(_s('err_service', 'HR service unavailable — try again shortly.'));
           return null;
         }
         if (!resp.ok) {
-          _showError('Error loading employee (HTTP ' + resp.status + ').');
+          _showError(_s('err_load_employee', 'Error loading employee (HTTP ') + resp.status + ').');
           return null;
         }
 
@@ -142,7 +152,7 @@
       })
       .catch(function () {
         _state.isLoading = false;
-        _showError('Network error — check your connection and try again.');
+        _showError(_s('err_network', 'Network error — check your connection and try again.'));
       });
   }
 
@@ -169,27 +179,27 @@
 
     // Reports to — omit row entirely if null
     if (data.manager_name != null) {
-      rows += _detailRow('Reports to', _esc(data.manager_name));
+      rows += _detailRow(_s('reports_to', 'Reports to'), _esc(data.manager_name));
     }
 
     // Hired — omit row if hire_date null; guard tenure_years before toFixed
     if (data.hire_date != null) {
       var tenurePart = (data.tenure_years != null)
-        ? ' &middot; ' + data.tenure_years.toFixed(1) + ' yrs'
+        ? ' &middot; ' + data.tenure_years.toFixed(1) + _s('yrs_since_hire', ' yrs · since hire')
         : '';
-      rows += _detailRow('Hired', _esc(_fmtDate(data.hire_date)) + tenurePart);
+      rows += _detailRow(_s('hired', 'Hired'), _esc(_fmtDate(data.hire_date)) + tenurePart);
     }
 
     // Contract — neutral framing; always shown (contract_status always "Running").
-    // is_open_ended → "Open-ended"; otherwise "Through {date}". No countdown, no urgency.
+    // is_open_ended → localized "Open-ended"; otherwise "Through {date}". No countdown, no urgency.
     var contractVal = data.is_open_ended
-      ? 'Open-ended'
-      : 'Through ' + _esc(_fmtDate(data.contract_end));
-    rows += _detailRow('Contract', contractVal);
+      ? _esc(_s('open_ended', 'Open-ended'))
+      : _esc(_s('through', 'Through ')) + _esc(_fmtDate(data.contract_end));
+    rows += _detailRow(_s('contract', 'Contract'), contractVal);
 
     // Location — omit row entirely if null
     if (data.location != null) {
-      rows += _detailRow('Location', _esc(data.location));
+      rows += _detailRow(_s('location', 'Location'), _esc(data.location));
     }
 
     _detailRows.innerHTML = rows;
@@ -219,18 +229,20 @@
     _errorMsg.innerHTML = _esc(msg)
       + ' <button type="button"'
       + ' class="underline ms-1 focus-visible:ring-2 focus-visible:ring-danger-500"'
-      + ' data-hr-pf-retry="1">Try again</button>';
+      + ' data-hr-pf-retry="1">' + _esc(_s('try_again', 'Try again')) + '</button>';
     _errorMsg.classList.remove('hidden');
   }
 
   // ── Date formatter — manual parse; no Date constructor to avoid TZ shift ──
-  // ISO "YYYY-MM-DD" → "30 Jun 2026"
+  // ISO "YYYY-MM-DD" → locale-aware "30 Jun 2026" (EN) / "30 يونيو 2026" (AR)
   function _fmtDate(iso) {
     if (!iso) return '—';
-    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var months = (S.months && S.months.length === 12)
+      ? S.months
+      : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     var parts = iso.split('-');
-    return parseInt(parts[2], 10) + ' ' + MONTHS[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+    return parseInt(parts[2], 10) + ' ' + months[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
   }
 
   // ── Escape HTML to prevent XSS in server-supplied strings ─────────────────
