@@ -57,7 +57,7 @@
                        hover:bg-neutral-100 dark:hover:bg-neutral-800
                        focus-visible:ring-2 focus-visible:ring-primary-500
                        transition-colors"
-                aria-label="Close panel">
+                aria-label="{{ _t('Close') }}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="2.5"
                stroke-linecap="round" stroke-linejoin="round"
@@ -86,7 +86,7 @@
         {# Running badge strip — always shown; contract_status always "Running" #}
         <section class="px-5 py-4
                         border-b border-neutral-100 dark:border-neutral-800">
-          <span class="badge badge-success">Running</span>
+          <span class="badge badge-success">{{ _t("Running") }}</span>
         </section>
 
         {# Detail rows — JS writes innerHTML; null rows omitted in JS #}

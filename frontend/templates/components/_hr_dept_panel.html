@@ -57,7 +57,7 @@
                        hover:bg-neutral-100 dark:hover:bg-neutral-800
                        focus-visible:ring-2 focus-visible:ring-primary-500
                        transition-colors"
-                aria-label="Close panel">
+                aria-label="{{ _t('Close') }}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="2.5"
                stroke-linecap="round" stroke-linejoin="round"
@@ -97,7 +97,7 @@
                         border-b border-neutral-100 dark:border-neutral-800">
           <p class="text-[10px] font-semibold uppercase tracking-wide
                     text-neutral-400 dark:text-neutral-500 mb-3">
-            Department Summary
+            {{ _t("Department Summary") }}
           </p>
           <div class="grid grid-cols-2 gap-2.5">
 
@@ -105,7 +105,7 @@
             <div class="rounded-xl px-3 py-2.5
                         bg-neutral-100 dark:bg-neutral-800
                         border border-neutral-200 dark:border-neutral-700">
-              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">Headcount</p>
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">{{ _t("Headcount") }}</p>
               <p id="hr-dd-stat-headcount"
                  class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100">
                 —
@@ -116,7 +116,7 @@
             <div class="rounded-xl px-3 py-2.5
                         bg-neutral-100 dark:bg-neutral-800
                         border border-neutral-200 dark:border-neutral-700">
-              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">Total Cost (EGP/mo)</p>
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">{{ _t("hr_total_cost_egp_mo") }}</p>
               <p id="hr-dd-stat-total-cost"
                  class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100 break-all">
                 —
@@ -127,7 +127,7 @@
             <div class="rounded-xl px-3 py-2.5
                         bg-neutral-100 dark:bg-neutral-800
                         border border-neutral-200 dark:border-neutral-700">
-              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">% of Total Payroll</p>
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">{{ _t("hr_pct_of_payroll") }}</p>
               <p id="hr-dd-stat-pct-payroll"
                  class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100">
                 —
@@ -138,7 +138,7 @@
             <div class="rounded-xl px-3 py-2.5
                         bg-neutral-100 dark:bg-neutral-800
                         border border-neutral-200 dark:border-neutral-700">
-              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">Avg / Head (EGP/mo)</p>
+              <p class="text-[10px] text-neutral-500 dark:text-neutral-400 mb-1">{{ _t("hr_avg_per_head") }}</p>
               <p id="hr-dd-stat-avg-head"
                  class="text-sm font-bold tabular text-neutral-900 dark:text-neutral-100 break-all">
                 —
@@ -153,7 +153,7 @@
                     border-b border-neutral-100 dark:border-neutral-800">
           <p class="text-[10px] font-semibold uppercase tracking-wide
                     text-neutral-400 dark:text-neutral-500">
-            Staff · Running Contracts
+            {{ _t("hr_staff_running_contracts") }}
           </p>
         </div>
 
