@@ -1,70 +1,68 @@
 /**
- * hr_drilldown.js — HR department staff drill-down panel controller (F2).
+ * hr_employee_drilldown.js — HR employee profile slide-over controller (F3).
  *
- * Public API: window.hrDeptPanel.open(deptId, triggerEl)
- *             window.hrDeptPanel.close()
+ * Public API: window.hrEmployeePanel.open(employeeId, triggerEl)
+ *             window.hrEmployeePanel.close()
  *
  * READ-ONLY: never POSTs or modifies Odoo data.
- * Endpoint: GET /api/v1/hr/department/{department_id}
+ * Endpoint: GET /api/v1/hr/employee/{employee_id}
  *           Requires HTTP Basic auth — MUST use credentials: 'same-origin'.
  *           The /hr/dashboard page is behind the same Basic-auth realm, so the
  *           browser has the credentials cached and a same-origin fetch carries them.
  *           A 401 is surfaced as a readable, recoverable error state.
+ *
+ * Z-layer: backdrop z-[55] (over dept panel z-50), panel z-[60].
+ * Focus:   does NOT touch #app inert — hrDeptPanel owns it.
+ *          Own focus-trap (Tab cycle within this panel) isolates keyboard focus.
  */
 (function () {
   'use strict';
 
   // ── State ──────────────────────────────────────────────────────────────────
   var _state = {
-    deptId:    null,
-    isLoading: false,
-    triggerEl: null,
+    employeeId: null,
+    isLoading:  false,
+    triggerEl:  null,
   };
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
   var _panel, _backdrop, _title, _subtitle, _closeBtn,
-      _loadingSentinel, _summary,
-      _statHeadcount, _statTotalCost, _statPctPayroll, _statAvgHead,
-      _listBody, _errorMsg;
+      _loadingSentinel, _content, _detailRows, _errorMsg;
 
   function _initRefs() {
-    _panel           = document.getElementById('hr-dd-panel');
-    _backdrop        = document.getElementById('hr-dd-backdrop');
-    _title           = document.getElementById('hr-dd-title');
-    _subtitle        = document.getElementById('hr-dd-subtitle');
-    _closeBtn        = document.getElementById('hr-dd-close-btn');
-    _loadingSentinel = document.getElementById('hr-dd-loading-sentinel');
-    _summary         = document.getElementById('hr-dd-summary');
-    _statHeadcount   = document.getElementById('hr-dd-stat-headcount');
-    _statTotalCost   = document.getElementById('hr-dd-stat-total-cost');
-    _statPctPayroll  = document.getElementById('hr-dd-stat-pct-payroll');
-    _statAvgHead     = document.getElementById('hr-dd-stat-avg-head');
-    _listBody        = document.getElementById('hr-dd-list-body');
-    _errorMsg        = document.getElementById('hr-dd-error-msg');
+    _panel           = document.getElementById('hr-pf-panel');
+    _backdrop        = document.getElementById('hr-pf-backdrop');
+    _title           = document.getElementById('hr-pf-title');
+    _subtitle        = document.getElementById('hr-pf-subtitle');
+    _closeBtn        = document.getElementById('hr-pf-close-btn');
+    _loadingSentinel = document.getElementById('hr-pf-loading-sentinel');
+    _content         = document.getElementById('hr-pf-content');
+    _detailRows      = document.getElementById('hr-pf-detail-rows');
+    _errorMsg        = document.getElementById('hr-pf-error-msg');
     return !!_panel;
   }
 
   // ── Panel open ─────────────────────────────────────────────────────────────
-  function open(deptId, triggerEl) {
+  function open(employeeId, triggerEl) {
     if (!_panel && !_initRefs()) {
-      console.warn('[hrDeptPanel] panel DOM not ready');
+      console.warn('[hrEmployeePanel] panel DOM not ready');
       return;
     }
 
-    _state.deptId    = deptId;
-    _state.isLoading = false;
-    _state.triggerEl = triggerEl || document.activeElement;
+    _state.employeeId = employeeId;
+    _state.isLoading  = false;
+    _state.triggerEl  = triggerEl || document.activeElement;
 
     // Reset panel content
     _title.textContent = '—';
     _subtitle.textContent = '';
     _subtitle.classList.add('hidden');
-    _summary.classList.add('hidden');
-    _listBody.innerHTML = '';
+    _content.classList.add('hidden');
+    _detailRows.innerHTML = '';
     _hide(_errorMsg);
     _loadingSentinel.classList.remove('hidden');
 
-    // Animate panel in (RTL-aware — mirrors ca_drilldown.js exactly)
+    // Animate panel in (RTL-aware — mirrors hr_drilldown.js exactly)
     _backdrop.classList.remove('hidden');
     _panel.removeAttribute('hidden');
     var rtl = document.documentElement.dir === 'rtl';
@@ -75,7 +73,7 @@
         _panel.classList.add('translate-x-0');
       });
     });
-    _setMainInert(true);
+    // Do NOT touch #app inert — hrDeptPanel owns it and must keep it while open underneath.
     _panel.focus();
 
     _fetch();
@@ -96,24 +94,24 @@
     }
     _panel.addEventListener('transitionend', _onEnd);
 
-    _setMainInert(false);
+    // Do NOT touch #app inert — hrDeptPanel owns it.
     if (_state.triggerEl && _state.triggerEl.focus) {
       _state.triggerEl.focus();
     }
-    _state.deptId    = null;
-    _state.triggerEl = null;
+    _state.employeeId = null;
+    _state.triggerEl  = null;
   }
 
   // ── Authenticated fetch ────────────────────────────────────────────────────
   function _fetch() {
-    if (_state.isLoading || !_state.deptId) return;
+    if (_state.isLoading || !_state.employeeId) return;
     _state.isLoading = true;
 
     // credentials: 'same-origin' is explicit and required.
     // This endpoint uses HTTP Basic auth (Depends(get_current_user)).
     // The /hr/dashboard page is behind the same realm, so the browser has
     // cached Basic credentials for this origin and will include them here.
-    fetch('/api/v1/hr/department/' + _state.deptId, { credentials: 'same-origin' })
+    fetch('/api/v1/hr/employee/' + _state.employeeId, { credentials: 'same-origin' })
       .then(function (resp) {
         _state.isLoading = false;
 
@@ -122,7 +120,7 @@
           return null;
         }
         if (resp.status === 404) {
-          _showError('No active staff found for this department.');
+          _showError('Employee profile not found.');
           return null;
         }
         if (resp.status === 503) {
@@ -130,7 +128,7 @@
           return null;
         }
         if (!resp.ok) {
-          _showError('Error loading department (HTTP ' + resp.status + ').');
+          _showError('Error loading employee (HTTP ' + resp.status + ').');
           return null;
         }
 
@@ -138,9 +136,8 @@
       })
       .then(function (data) {
         if (!data) return;
-        // Stale-response guard: user may have opened a different dept while
-        // this request was in flight; discard if dept no longer matches.
-        if (data.department_id !== _state.deptId) return;
+        // Stale-response guard: discard if employee changed while request was in flight.
+        if (data.employee_id !== _state.employeeId) return;
         _render(data);
       })
       .catch(function () {
@@ -149,95 +146,91 @@
       });
   }
 
-  // ── Render department data ─────────────────────────────────────────────────
+  // ── Render employee profile ────────────────────────────────────────────────
   function _render(data) {
-    // Header: leaf name (drop parent path segments, same transform as F1)
-    var leaf = data.department_name.split('/').pop().trim();
-    _title.textContent = leaf;
-    _subtitle.textContent = data.headcount + ' staff · Running contracts';
-    _subtitle.classList.remove('hidden');
+    // textContent assignments: raw values are safe (textContent is not HTML-parsed).
+    // Never pass through _esc here — that would double-escape (& → &amp;).
+    _title.textContent = data.name;
 
-    // Stat tiles — null-guard each: render '—' if value is null
-    _statHeadcount.textContent  = data.headcount;
-    _statTotalCost.textContent  = _fmtEGP(data.total_wage);
-    _statPctPayroll.textContent = _fmtPct(data.pct_of_total_payroll);
-    _statAvgHead.textContent    = _fmtEGP(data.avg_cost_per_head);
-
-    // Staff rows
-    var staff = data.staff || [];
-    var frag  = document.createDocumentFragment();
-    for (var i = 0; i < staff.length; i++) {
-      frag.appendChild(_makeRow(staff[i]));
+    // Subtitle: "{job_title} · {dept leaf}" — guard department_name before split.
+    var jobTitle = data.job_title || '';
+    var leaf = data.department_name ? data.department_name.split('/').pop().trim() : '';
+    var subtitleParts = [];
+    if (jobTitle) subtitleParts.push(jobTitle);
+    if (leaf)     subtitleParts.push(leaf);
+    var subtitleText = subtitleParts.join(' · ');
+    if (subtitleText) {
+      _subtitle.textContent = subtitleText;
+      _subtitle.classList.remove('hidden');
     }
-    _listBody.appendChild(frag);
 
-    // Show summary, hide loading
+    // Detail rows: _esc all server-supplied strings before innerHTML insertion.
+    var rows = '';
+
+    // Reports to — omit row entirely if null
+    if (data.manager_name != null) {
+      rows += _detailRow('Reports to', _esc(data.manager_name));
+    }
+
+    // Hired — omit row if hire_date null; guard tenure_years before toFixed
+    if (data.hire_date != null) {
+      var tenurePart = (data.tenure_years != null)
+        ? ' &middot; ' + data.tenure_years.toFixed(1) + ' yrs'
+        : '';
+      rows += _detailRow('Hired', _esc(_fmtDate(data.hire_date)) + tenurePart);
+    }
+
+    // Contract — neutral framing; always shown (contract_status always "Running").
+    // is_open_ended → "Open-ended"; otherwise "Through {date}". No countdown, no urgency.
+    var contractVal = data.is_open_ended
+      ? 'Open-ended'
+      : 'Through ' + _esc(_fmtDate(data.contract_end));
+    rows += _detailRow('Contract', contractVal);
+
+    // Location — omit row entirely if null
+    if (data.location != null) {
+      rows += _detailRow('Location', _esc(data.location));
+    }
+
+    _detailRows.innerHTML = rows;
+
+    // Show content, hide loading
     _loadingSentinel.classList.add('hidden');
-    _summary.classList.remove('hidden');
+    _content.classList.remove('hidden');
   }
 
-  // ── Build one staff row ────────────────────────────────────────────────────
-  function _makeRow(member) {
-    var li = document.createElement('li');
-
-    // tenure_years is null when date_start is null (backend computes it)
-    var tenureStr = (member.tenure_years != null)
-      ? member.tenure_years.toFixed(1) + ' yrs · since hire'
-      : '— · no start date';
-
-    // Full-row button: keyboard-accessible (Enter/Space); opens employee profile on click.
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'w-full px-5 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-primary-500 rounded';
-    btn.setAttribute('aria-label', 'View profile for ' + member.employee_name);
-
-    // No per-employee wage: only name, job, tenure, and Running state badge.
-    btn.innerHTML = ''
-      + '<div class="flex items-start justify-between gap-3">'
-        + '<div class="min-w-0 flex-1">'
-          + '<p class="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">'
-            + _esc(member.employee_name)
-          + '</p>'
-          + '<p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">'
-            + _esc(member.job_title)
-          + '</p>'
-          + '<p class="text-xs font-mono text-neutral-400 dark:text-neutral-500 mt-0.5">'
-            + _esc(tenureStr)
-          + '</p>'
-        + '</div>'
-        + '<div class="shrink-0 pt-0.5">'
-          + '<span class="badge badge-success">Running</span>'
-        + '</div>'
+  // ── Build one detail row (label + value HTML) ──────────────────────────────
+  function _detailRow(label, valueHtml) {
+    return '<div>'
+      + '<p class="text-[10px] font-semibold uppercase tracking-wide'
+      + ' text-neutral-400 dark:text-neutral-500">'
+      + _esc(label)
+      + '</p>'
+      + '<p class="text-sm text-neutral-900 dark:text-neutral-100 mt-0.5">'
+      + valueHtml
+      + '</p>'
       + '</div>';
-
-    btn.addEventListener('click', function () {
-      window.hrEmployeePanel.open(member.employee_id, btn);
-    });
-
-    li.appendChild(btn);
-    return li;
   }
 
   // ── Show error state ───────────────────────────────────────────────────────
   function _showError(msg) {
     _loadingSentinel.classList.add('hidden');
-    _summary.classList.add('hidden');
+    _content.classList.add('hidden');
     _errorMsg.innerHTML = _esc(msg)
       + ' <button type="button"'
       + ' class="underline ms-1 focus-visible:ring-2 focus-visible:ring-danger-500"'
-      + ' data-hr-dd-retry="1">Try again</button>';
+      + ' data-hr-pf-retry="1">Try again</button>';
     _errorMsg.classList.remove('hidden');
   }
 
-  // ── Number formatters ──────────────────────────────────────────────────────
-  function _fmtEGP(val) {
-    if (val == null) return '—';
-    return Math.round(val).toLocaleString('en-EG') + ' EGP';
-  }
-
-  function _fmtPct(val) {
-    if (val == null) return '—';
-    return val.toFixed(1) + '%';
+  // ── Date formatter — manual parse; no Date constructor to avoid TZ shift ──
+  // ISO "YYYY-MM-DD" → "30 Jun 2026"
+  function _fmtDate(iso) {
+    if (!iso) return '—';
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var parts = iso.split('-');
+    return parseInt(parts[2], 10) + ' ' + MONTHS[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
   }
 
   // ── Escape HTML to prevent XSS in server-supplied strings ─────────────────
@@ -254,16 +247,7 @@
     if (el) el.classList.add('hidden');
   }
 
-  // ── Focus management (mirrors ca_drilldown.js exactly) ────────────────────
-
-  // Sets #app inert to prevent focus reaching content behind the panel.
-  // #app is the root application div in base.html (id="app").
-  function _setMainInert(active) {
-    var app = document.getElementById('app');
-    if (!app) return;
-    if (active) app.setAttribute('inert', '');
-    else        app.removeAttribute('inert');
-  }
+  // ── Focus management (mirrors hr_drilldown.js exactly) ────────────────────
 
   function _getFocusable() {
     if (!_panel) return [];
@@ -302,7 +286,7 @@
     _backdrop.addEventListener('click', close);
 
     _errorMsg.addEventListener('click', function (e) {
-      if (e.target.closest('[data-hr-dd-retry]')) {
+      if (e.target.closest('[data-hr-pf-retry]')) {
         _hide(_errorMsg);
         _loadingSentinel.classList.remove('hidden');
         _state.isLoading = false;
@@ -314,12 +298,12 @@
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
-  window.hrDeptPanel = {
+  window.hrEmployeePanel = {
     open:  open,
     close: close,
   };
 
-  // Init on DOMContentLoaded (mirrors ca_drilldown.js)
+  // Init on DOMContentLoaded (mirrors hr_drilldown.js)
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       _initRefs();

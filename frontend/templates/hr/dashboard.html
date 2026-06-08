@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "components/_hr_dept_panel.html" import hr_dept_panel with context %}
+{% from "components/_hr_profile_panel.html" import hr_profile_panel with context %}
 
 {% block title %}HR Overview — LaVerde ERP AI Engine{% endblock %}
 {% block page_title %}HR Overview{% endblock %}
@@ -388,8 +389,9 @@
 </div>
 {% endblock %}
 
-{% block portal %}{{ hr_dept_panel() }}{% endblock %}
+{% block portal %}{{ hr_dept_panel() }}{{ hr_profile_panel() }}{% endblock %}
 
 {% block extra_scripts %}
 <script src="/static/js/hr_drilldown.js"></script>
+<script src="/static/js/hr_employee_drilldown.js"></script>
 {% endblock %}

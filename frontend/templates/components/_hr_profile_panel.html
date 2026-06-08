@@ -1,0 +1,111 @@
+{# _hr_profile_panel.html — HR employee profile slide-over (F3).
+   Usage: {% from "components/_hr_profile_panel.html" import hr_profile_panel with context %}
+          {{ hr_profile_panel() }}
+   Controller: window.hrEmployeePanel.open(employeeId, triggerEl) / .close()
+   IDs: hr-pf-backdrop, hr-pf-panel, hr-pf-title, hr-pf-subtitle,
+        hr-pf-close-btn, hr-pf-loading-sentinel, hr-pf-content,
+        hr-pf-detail-rows, hr-pf-error-msg
+   READ-ONLY: no POST or Odoo mutation.
+   Auth: endpoint requires Basic auth; browser carries credentials via same-origin fetch.
+   Z-layer: backdrop z-[55] (over dept panel z-50), panel z-[60].
+   Focus: does NOT touch #app inert — hrDeptPanel owns it; own focus-trap isolates Tab.
+#}
+
+{% macro hr_profile_panel() %}
+
+{# ── Backdrop ─────────────────────────────────────────────────────────────── #}
+<div id="hr-pf-backdrop"
+     class="fixed inset-0 z-[55] bg-black/50 hidden"
+     aria-hidden="true">
+</div>
+
+{# ── Panel shell ──────────────────────────────────────────────────────────── #}
+<aside id="hr-pf-panel"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="hr-pf-title"
+       class="fixed inset-y-0 end-0 z-[60]
+              w-full lg:w-[440px]
+              bg-white dark:bg-neutral-900
+              border-s border-neutral-200 dark:border-neutral-800
+              shadow-2xl
+              transition-transform duration-300 ease-in-out"
+       hidden
+       tabindex="-1">
+
+  <div class="flex flex-col h-full">
+
+    {# ── Header ───────────────────────────────────────────────────────────── #}
+    <header class="px-5 py-4 shrink-0
+                   border-b border-neutral-200 dark:border-neutral-700">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <h2 id="hr-pf-title"
+              class="text-base font-semibold
+                     text-neutral-900 dark:text-neutral-100
+                     truncate">
+            —
+          </h2>
+          <p id="hr-pf-subtitle"
+             class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 hidden">
+          </p>
+        </div>
+        <button id="hr-pf-close-btn"
+                type="button"
+                class="shrink-0 p-1.5 rounded-lg
+                       text-neutral-500 dark:text-neutral-400
+                       hover:bg-neutral-100 dark:hover:bg-neutral-800
+                       focus-visible:ring-2 focus-visible:ring-primary-500
+                       transition-colors"
+                aria-label="Close panel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    {# ── Scrollable body ──────────────────────────────────────────────────── #}
+    <div class="flex-1 overflow-y-auto min-h-0">
+
+      {# Loading skeleton — shown on open, hidden after data arrives #}
+      <div id="hr-pf-loading-sentinel" class="px-5 py-6 space-y-4 hidden">
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-2/3"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-5/6"></div>
+      </div>
+
+      {# Profile content — hidden until JS populates it #}
+      <div id="hr-pf-content" class="hidden">
+
+        {# Running badge strip — always shown; contract_status always "Running" #}
+        <section class="px-5 py-4
+                        border-b border-neutral-100 dark:border-neutral-800">
+          <span class="badge badge-success">Running</span>
+        </section>
+
+        {# Detail rows — JS writes innerHTML; null rows omitted in JS #}
+        <section id="hr-pf-detail-rows"
+                 class="px-5 py-4 space-y-3">
+        </section>
+
+      </div>
+
+      {# Error state — message set by JS; no empty state (endpoint 404s on missing) #}
+      <p id="hr-pf-error-msg"
+         class="hidden px-5 py-10 text-sm text-center
+                text-danger-600 dark:text-danger-400">
+      </p>
+
+    </div>{# /.scrollable body #}
+
+  </div>
+
+</aside>
+
+{% endmacro %}
