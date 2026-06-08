@@ -243,7 +243,7 @@ def _tenure_years(fcd: date, today: date) -> int:
     # alternative (days/365.25 with floor) understates by 1 in every
     # non-leap year because 365 / 365.25 = 0.9979... < 1, so an
     # employee at their 1-year anniversary on a non-leap year would
-    # land in <1y.
+    # land in "lt1y".
     #
     # Feb 29 hires: on non-leap years, anniversary fires on Mar 1,
     # not Feb 28 (conservative — Feb 28 has not "reached" Feb 29
