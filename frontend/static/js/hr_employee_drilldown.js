@@ -36,7 +36,7 @@
   };
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
-  var _panel, _backdrop, _title, _subtitle, _closeBtn,
+  var _panel, _backdrop, _title, _subtitle, _backBtn, _closeBtn,
       _loadingSentinel, _content, _detailRows, _errorMsg;
 
   function _initRefs() {
@@ -44,6 +44,7 @@
     _backdrop        = document.getElementById('hr-pf-backdrop');
     _title           = document.getElementById('hr-pf-title');
     _subtitle        = document.getElementById('hr-pf-subtitle');
+    _backBtn         = document.getElementById('hr-pf-back-btn');
     _closeBtn        = document.getElementById('hr-pf-close-btn');
     _loadingSentinel = document.getElementById('hr-pf-loading-sentinel');
     _content         = document.getElementById('hr-pf-content');
@@ -294,6 +295,7 @@
   function _wire() {
     if (!_panel) return;
 
+    _backBtn.addEventListener('click', close);
     _closeBtn.addEventListener('click', close);
     _backdrop.addEventListener('click', close);
 

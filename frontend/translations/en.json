@@ -347,5 +347,7 @@
   "hr_month_sep": "Sep",
   "hr_month_oct": "Oct",
   "hr_month_nov": "Nov",
-  "hr_month_dec": "Dec"
+  "hr_month_dec": "Dec",
+
+  "hr_back_to_staff": "Back to staff list"
 }
