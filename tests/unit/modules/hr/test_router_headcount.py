@@ -152,3 +152,20 @@ def test_null_job_id_serialized_as_null(client: TestClient) -> None:
     null_rows = [row for row in by_job if row["job_id"] is None]
     assert len(null_rows) == 1, "Null-job bucket must be present in serialized response"
     assert null_rows[0]["count"] == 3
+
+
+# ── Test 8 — 401 when no auth supplied ───────────────────────────────────────
+
+
+def test_401_when_no_auth(client: TestClient) -> None:
+    """HR KPI endpoints must reject unauthenticated requests with 401.
+
+    Added 2026-06-09 as part of the security hotfix that wired
+    Depends(get_current_user) onto headcount, tenure-distribution,
+    payroll-risk-dashboard, and department-cost.
+    No service patch needed — auth is checked before the handler body runs.
+    """
+    r = client.get(_URL)  # no auth; _URL = /api/v1/hr/kpi/headcount
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated HR KPI request, got {r.status_code}"
+    )

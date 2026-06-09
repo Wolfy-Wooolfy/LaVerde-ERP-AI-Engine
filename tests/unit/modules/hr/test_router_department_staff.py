@@ -324,10 +324,10 @@ def test_currency_and_basis(client: TestClient) -> None:
 def test_401_when_no_auth(client: TestClient) -> None:
     """PII endpoint must reject unauthenticated requests with 401.
 
-    The sibling HR KPI endpoints (/kpi/*) are currently unprotected at the
-    FastAPI level — confirmed by no-auth curl returning 200 (2026-06-07).
-    That is a separate security cleanup out of F2 scope.
-    This endpoint is explicitly protected because it returns employee names.
+    The sibling HR KPI endpoints (/kpi/*) were unprotected prior to 2026-06-09.
+    They are now protected by Depends(get_current_user) as part of the
+    security hotfix applied across Collections, Customer Accounts, and HR KPIs.
+    This endpoint has always been explicitly protected because it returns employee names.
     """
     with _patch_both():
         r = client.get(_URL)  # no auth

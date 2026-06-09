@@ -12,10 +12,11 @@ GET /api/v1/customer-accounts/customer/{partner_id}          — M3-S6: Customer
 import uuid
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.customer_accounts.schemas import (
@@ -58,6 +59,7 @@ def _req_id(request: Request) -> str:
 async def total_customer_receivables(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_total_customer_receivables()
@@ -82,6 +84,7 @@ async def total_customer_receivables(
 async def top_overdue_customers(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_top_overdue_customers()
@@ -106,6 +109,7 @@ async def top_overdue_customers(
 async def unallocated_wallet_balance(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_unallocated_wallet_balance()
@@ -130,6 +134,7 @@ async def unallocated_wallet_balance(
 async def refunds_summary(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_refunds_summary()
@@ -154,6 +159,7 @@ async def refunds_summary(
 async def refunds_detail(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_refunds_detail()
@@ -182,6 +188,7 @@ async def customer_drilldown(
     page_size: int = Query(default=50, ge=1, le=200),
     sort_by: Literal["date", "amount", "due_amount"] = Query(default="date"),
     sort_dir: Literal["asc", "desc"] = Query(default="asc"),
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
     try:

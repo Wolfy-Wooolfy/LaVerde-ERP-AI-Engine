@@ -52,6 +52,7 @@ _ERR_500 = {"error": {"code": "internal_error", "message": "An unexpected error 
 async def headcount(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_headcount()
@@ -76,6 +77,7 @@ async def headcount(
 async def tenure_distribution(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_tenure_distribution()
@@ -100,6 +102,7 @@ async def tenure_distribution(
 async def payroll_risk_dashboard(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_payroll_risk_dashboard()
@@ -124,6 +127,7 @@ async def payroll_risk_dashboard(
 async def department_cost(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_department_cost()

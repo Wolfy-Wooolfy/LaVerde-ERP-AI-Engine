@@ -21,10 +21,11 @@ GET /api/v1/collections/drilldown/trend/{month}           — KPI 6 installments
 import uuid
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.collections.schemas import (
@@ -70,6 +71,7 @@ router = APIRouter(prefix="/collections", tags=["collections"])
 async def late_uncollected(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_late_uncollected()
@@ -103,7 +105,10 @@ async def late_uncollected(
 
 @router.get("/kpi/total-portfolio-value", summary="KPI 1 — Total Portfolio Value")
 @limiter.limit("60/minute")
-async def total_portfolio_value(request: Request) -> JSONResponse:
+async def total_portfolio_value(
+    request: Request,
+    _user: str = Depends(get_current_user),
+) -> JSONResponse:
     try:
         data = await get_total_portfolio_value()
     except OdooQueryError:
@@ -143,7 +148,10 @@ async def total_portfolio_value(request: Request) -> JSONResponse:
     summary="KPI 5 — Late Uncollected per project (New Capital, Cassette, La puerta)",
 )
 @limiter.limit("60/minute")
-async def late_uncollected_by_project(request: Request) -> JSONResponse:
+async def late_uncollected_by_project(
+    request: Request,
+    _user: str = Depends(get_current_user),
+) -> JSONResponse:
     try:
         data = await get_late_uncollected_by_project()
     except OdooQueryError:
@@ -183,7 +191,10 @@ async def late_uncollected_by_project(request: Request) -> JSONResponse:
     summary="KPI 3 — Pending Check Exposure (checks received, not yet cashed)",
 )
 @limiter.limit("60/minute")
-async def pending_check_exposure(request: Request) -> JSONResponse:
+async def pending_check_exposure(
+    request: Request,
+    _user: str = Depends(get_current_user),
+) -> JSONResponse:
     try:
         data = await get_pending_check_exposure()
     except OdooQueryError:
@@ -223,7 +234,10 @@ async def pending_check_exposure(request: Request) -> JSONResponse:
     summary="KPI 6 — 6-Month Collection Trend (payment installment headers, state=post)",
 )
 @limiter.limit("60/minute")
-async def collection_trend_6m(request: Request) -> JSONResponse:
+async def collection_trend_6m(
+    request: Request,
+    _user: str = Depends(get_current_user),
+) -> JSONResponse:
     try:
         data = await get_collection_trend_6m()
     except OdooQueryError:
@@ -264,7 +278,10 @@ async def collection_trend_6m(request: Request) -> JSONResponse:
     summary="KPI 4 — Collection Rate MTD & YTD (payments received ÷ installments due)",
 )
 @limiter.limit("60/minute")
-async def collection_rate(request: Request) -> JSONResponse:
+async def collection_rate(
+    request: Request,
+    _user: str = Depends(get_current_user),
+) -> JSONResponse:
     try:
         data = await get_collection_rate_mtd_ytd()
     except OdooQueryError:
@@ -304,7 +321,10 @@ async def collection_rate(request: Request) -> JSONResponse:
     summary="KPI 5b — Collection Rate per Project MTD & YTD (payments ÷ installments due per project)",
 )
 @limiter.limit("60/minute")
-async def collection_rate_by_project(request: Request) -> JSONResponse:
+async def collection_rate_by_project(
+    request: Request,
+    _user: str = Depends(get_current_user),
+) -> JSONResponse:
     try:
         data = await get_collection_rate_by_project()
     except OdooQueryError:
@@ -348,6 +368,7 @@ async def collection_rate_by_project(request: Request) -> JSONResponse:
 async def expected_collections_forecast(
     request: Request,
     response: Response,
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
         data = await get_expected_collections_forecast()
@@ -410,6 +431,7 @@ async def drilldown_late(
     sort_dir: Literal["asc", "desc"] = Query(default="desc"),
     payment_state: Optional[Literal["unpaid", "partial"]] = Query(default=None),
     has_pending_cheque: Optional[bool] = Query(default=None, description="True → cheque>0 only; False → cheque=0 only; omit for all"),
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
     try:
@@ -449,6 +471,7 @@ async def drilldown_forecast(
     sort_dir: Literal["asc", "desc"] = Query(default="desc"),
     payment_state: Optional[Literal["unpaid", "partial"]] = Query(default=None),
     has_pending_cheque: Optional[bool] = Query(default=None, description="True → cheque>0 only; False → cheque=0 only; omit for all"),
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
     try:
@@ -491,6 +514,7 @@ async def drilldown_portfolio(
     page_size: int = Query(default=50, ge=1, le=200),
     cursor: Optional[str] = Query(default=None),
     project_id: Optional[int] = Query(default=None, ge=1, le=3, description="Filter to a specific project (1=New Capital, 2=Cassette, 3=La puerta)"),
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
     try:
@@ -527,6 +551,7 @@ async def drilldown_project(
     sort_dir: Literal["asc", "desc"] = Query(default="desc"),
     payment_state: Optional[Literal["unpaid", "partial"]] = Query(default=None),
     has_pending_cheque: Optional[bool] = Query(default=None, description="True → cheque>0 only; False → cheque=0 only; omit for all"),
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
     try:
@@ -573,6 +598,7 @@ async def drilldown_trend(
     sort_dir: Literal["asc", "desc"] = Query(default="desc"),
     payment_state: Optional[Literal["unpaid", "partial"]] = Query(default=None),
     has_pending_cheque: Optional[bool] = Query(default=None, description="True → cheque>0 only; False → cheque=0 only; omit for all"),
+    _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
     try:

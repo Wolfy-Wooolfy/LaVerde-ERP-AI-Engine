@@ -716,3 +716,21 @@ def test_kpi7_response_model_validates_success_shape(client: TestClient) -> None
     assert set(validated.buckets.keys()) == {
         "this_month", "this_quarter", "this_half", "this_year"
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Auth regression — all Collections endpoints must reject unauthenticated callers
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def test_401_when_no_auth(client: TestClient) -> None:
+    """Collections endpoints must reject unauthenticated requests with 401.
+
+    Added 2026-06-09 as part of the security hotfix that wired
+    Depends(get_current_user) onto all 13 Collections routes.
+    No service patch needed — auth is checked before the handler body runs.
+    """
+    r = client.get(_URL)  # no auth; _URL = /api/v1/collections/kpi/late-uncollected
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
