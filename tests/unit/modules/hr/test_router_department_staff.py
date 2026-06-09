@@ -23,14 +23,21 @@ Coverage:
   13. test_currency_and_basis        — currency="EGP", basis="monthly"
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.deps import get_current_user
+from backend.auth.models import UserRecord
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
+
+_TESTADMIN_RECORD = UserRecord(
+    username="testadmin", password_hash="", modules=["*"],
+    is_admin=True, is_active=True,
+    created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
+)
 
 _URL = "/api/v1/hr/department/5"
 
@@ -146,9 +153,14 @@ def _patch_both(staff_return=_MOCK_STAFF_DATA, cost_return=_MOCK_COST_DATA):
 @pytest.fixture
 def client() -> TestClient:
     app.dependency_overrides[get_current_user] = lambda: "testadmin"
+    mock_repo = MagicMock()
+    mock_repo.get_user.return_value = _TESTADMIN_RECORD
+    app.state.user_repo = mock_repo
     c = TestClient(app, raise_server_exceptions=True)
     yield c
     app.dependency_overrides.pop(get_current_user, None)
+    if hasattr(app.state, "user_repo"):
+        del app.state.user_repo
 
 
 # ── Test 1 — 200 + all schema keys ───────────────────────────────────────────

@@ -155,3 +155,90 @@ start in `tests/conftest.py` so the seed always fires fresh). Real `data/users.d
 is never touched by the test suite. Not `:memory:` — the repository uses a single
 persistent connection so `:memory:` would work, but a file gives a cleaner failure
 message if something goes wrong.
+
+---
+
+## A3 — RBAC Enforcement
+
+**Implemented:** 2026-06-09
+
+### A3.D1 — require_module Design
+
+Two dependency factories in `backend/api/deps.py`:
+- `require_module_api(module_id: str)` — chains off `get_current_user` (which handles 401).
+  Raises `HTTPException(403, detail={"code": "MODULE_ACCESS_DENIED", "module": module_id})`
+  if `"*" not in user.modules and module_id not in user.modules`.
+- `require_module_html(module_id: str)` — chains off `get_current_user_html` (which handles 302).
+  Raises `HTTPException(403)` (no detail body; the global handler renders `403.html` for browsers).
+
+FastAPI's per-request dependency caching means `get_current_user` / `get_current_user_html` run
+exactly once even when both the endpoint's own parameter and the module guard depend on them.
+One additional `user_repo.get_user(username)` SQLite read per guarded request.
+
+### A3.D2 — Gating Points
+
+API routes: `include_router(router, dependencies=[Depends(require_module_api(module_id))])` in
+`backend/api/v1/router.py` only. Zero endpoint body changes. CRM spans 6 files — all share a
+single `_crm = [Depends(require_module_api("crm"))]` list. `/api/v1/metrics` and
+`/api/v1/health/*` are intentionally NOT module-gated (authenticated-only).
+
+HTML routes: `dependencies=[Depends(require_module_html(module_id))]` added to each
+`@router.get(...)` decorator in `dashboard.py`. Five decorators; zero function body changes.
+
+### A3.D3 — Global 403 Exception Handler
+
+`@app.exception_handler(403)` in `backend/main.py`. Dispatches by Accept header:
+- `Accept: text/html` present → renders `frontend/templates/403.html` (standalone, no base.html)
+- Otherwise → returns `_error_response(request, 403, "MODULE_ACCESS_DENIED", ...)`
+
+Does not intercept `ReadOnlyViolationError` responses — that handler returns a `JSONResponse`
+directly (not via `HTTPException`), so it is unaffected.
+
+### A3.D4 — Sidebar Filtering
+
+`_base_ctx` in `dashboard.py` resolves `UserRecord` from `user_repo` and adds
+`allowed_modules` (the raw `user.modules` list, e.g. `["hr"]` or `["*"]`) to context.
+Both the desktop and mobile sidebars in `base.html` wrap each active module link in
+`{% if 'module_id' in allowed_modules or '*' in allowed_modules %}`.
+"Coming Soon" stub entries (Customer Service, Contracts, Accounting, Project Mgmt) are
+wrapped in `{% if '*' in allowed_modules %}` — visible only to wildcard (`["*"]`) users.
+
+### A3.D5 — Post-Login Landing
+
+`login_submit` checks the `next` param against `_PATH_MODULE_MAP`. If `next` differs from the
+form default `/dashboard` and the user can access the path → redirect there. Else → redirect
+to the user's first allowed module dashboard per `_ORDERED_MODULE_DASHBOARDS` (order:
+crm → hr → collections → customer_accounts). If no modules → redirect to `/no-modules`.
+
+### A3.D6 — No-Modules and Forbidden Pages
+
+`/no-modules` — new route in `auth.py`, protected by `get_current_user_html` (no module guard),
+renders `no_modules.html`. Reached only when login lands a user with `modules=[]`.
+`403.html` — standalone template. Rendered by the global 403 handler for browser requests.
+Neither template extends `base.html` (avoids context dependency on `allowed_modules`).
+The 403 page has `← Previous` (history.back()) and Logout buttons (Q3 answer).
+
+### A3.D7 — User Management CLI
+
+`scripts/manage_users.py` — argparse CLI for managing users without direct DB access:
+- `add <username> <password> [--modules m1,m2] [--admin]`
+- `list` — tabular output of all users
+- `set-modules <username> m1,m2`
+- `deactivate <username>`
+CLI calls `hash_password()` before passing to `create_user` (repository takes a hash, not plaintext).
+
+### A3.D8 — Test Strategy
+
+Commit 1 (implementation) includes unit fixture updates — never split implementation from the
+unit fixes that make it testable. The 7 affected unit router test files (6 HR + 1 collections)
+have their `client` fixture updated to inject a `MagicMock` `user_repo` into `app.state` with
+`get_user.return_value = UserRecord(modules=["*"])`. The 401 path (unauthenticated) is unaffected.
+
+`tests/unit/modules/customer_accounts/test_routes.py` did NOT need changes — it only has
+`test_401_when_no_auth` with plain `TestClient(app)`. The 401 path raises before the module
+guard runs, so `user_repo` is never accessed.
+
+Commit 2 adds `tests/integration/test_rbac.py` with 5 test classes (API matrix, HTML matrix,
+sidebar filtering, post-login landing, no-modules) and restricted-user fixtures in
+`tests/integration/conftest.py`. The `_seed_rbac_test_users` fixture uses `hash_password()`
+to create users — `create_user` takes a hash, never plaintext.

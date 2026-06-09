@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -254,6 +255,28 @@ async def budget_exceeded_handler(request: Request, exc: BudgetExceededError) ->
 @app.exception_handler(AIServiceError)
 async def ai_service_handler(request: Request, exc: AIServiceError) -> JSONResponse:
     return _error_response(request, 502, "AI_SERVICE_ERROR", "AI service error")
+
+
+_err_templates = Jinja2Templates(directory="frontend/templates")
+
+
+@app.exception_handler(403)
+async def module_forbidden_handler(request: Request, exc: Exception) -> Response:
+    """Render 403.html for browser requests; JSON for API requests."""
+    from backend.core.i18n import detect_lang, make_translator
+    if "text/html" in request.headers.get("accept", ""):
+        lang = detect_lang(dict(request.cookies), request.headers.get("accept-language", ""))
+        ctx = {
+            "request": request,
+            "lang": lang,
+            "is_rtl": lang == "ar",
+            "_t": make_translator(lang),
+        }
+        return _err_templates.TemplateResponse("403.html", ctx, status_code=403)
+    return _error_response(
+        request, 403, "MODULE_ACCESS_DENIED",
+        "You do not have access to this module.",
+    )
 
 
 # ── Public health check (no auth) ─────────────────────────────────────────────

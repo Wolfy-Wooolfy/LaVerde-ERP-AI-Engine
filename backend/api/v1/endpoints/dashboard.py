@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from backend.api.deps import get_crm_service, get_current_user_html
+from backend.api.deps import get_crm_service, get_current_user_html, require_module_html
 from backend.core.config import settings
 from backend.core.i18n import detect_lang, load_translations, make_translator
 from backend.modules.crm.service import CrmService
@@ -35,6 +35,8 @@ def _extract_first_name(username: str) -> str:
 def _base_ctx(request: Request, user: str) -> dict:
     """Common context injected into every page."""
     lang = detect_lang(dict(request.cookies), request.headers.get("accept-language", ""))
+    _user_record = request.app.state.user_repo.get_user(user)
+    allowed_modules: list[str] = _user_record.modules if _user_record else []
     return {
         "request": request,
         "current_user": user,
@@ -42,10 +44,11 @@ def _base_ctx(request: Request, user: str) -> dict:
         "lang": lang,
         "is_rtl": lang == "ar",
         "_t": make_translator(lang),
+        "allowed_modules": allowed_modules,
     }
 
 
-@router.get("/dashboard", response_class=HTMLResponse, summary="CRM dashboard (HTML)")
+@router.get("/dashboard", response_class=HTMLResponse, summary="CRM dashboard (HTML)", dependencies=[Depends(require_module_html("crm"))])
 async def dashboard(
     request: Request,
     user: str = Depends(get_current_user_html),
@@ -67,7 +70,7 @@ async def dashboard(
     return templates.TemplateResponse(request, "dashboard.html", ctx)
 
 
-@router.get("/collections/dashboard", response_class=HTMLResponse, summary="Collections dashboard (HTML)")
+@router.get("/collections/dashboard", response_class=HTMLResponse, summary="Collections dashboard (HTML)", dependencies=[Depends(require_module_html("collections"))])
 async def collections_dashboard(
     request: Request,
     user: str = Depends(get_current_user_html),
@@ -77,7 +80,7 @@ async def collections_dashboard(
     return templates.TemplateResponse(request, "collections/dashboard.html", ctx)
 
 
-@router.get("/customer-accounts/dashboard", response_class=HTMLResponse, summary="Customer Accounts dashboard (HTML)")
+@router.get("/customer-accounts/dashboard", response_class=HTMLResponse, summary="Customer Accounts dashboard (HTML)", dependencies=[Depends(require_module_html("customer_accounts"))])
 async def customer_accounts_dashboard(
     request: Request,
     user: str = Depends(get_current_user_html),
@@ -87,7 +90,7 @@ async def customer_accounts_dashboard(
     return templates.TemplateResponse(request, "customer_accounts/dashboard.html", ctx)
 
 
-@router.get("/hr/dashboard", response_class=HTMLResponse, summary="HR overview dashboard (HTML)")
+@router.get("/hr/dashboard", response_class=HTMLResponse, summary="HR overview dashboard (HTML)", dependencies=[Depends(require_module_html("hr"))])
 async def hr_dashboard(
     request: Request,
     user: str = Depends(get_current_user_html),
@@ -142,6 +145,7 @@ async def hr_dashboard(
     "/data-quality/missing-contact",
     response_class=HTMLResponse,
     summary="Missing contact details page (HTML)",
+    dependencies=[Depends(require_module_html("crm"))],
 )
 async def missing_contact_page(
     request: Request,

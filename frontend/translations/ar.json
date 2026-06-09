@@ -363,5 +363,10 @@
   "hr_tenure_y1_3":   "1-3 سنوات",
   "hr_tenure_y3_5":   "3-5 سنوات",
   "hr_tenure_y5_10":  "5-10 سنوات",
-  "hr_tenure_y10plus": "10 سنوات فأكثر"
+  "hr_tenure_y10plus": "10 سنوات فأكثر",
+
+  "forbidden.heading": "تم رفض الوصول",
+  "forbidden.body": "ليس لديك صلاحية الوصول إلى هذا القسم.",
+  "no_modules.heading": "لا توجد وحدات مُعيَّنة",
+  "no_modules.body": "ليس لحسابك أي وحدات مُعيَّنة. تواصل مع المسؤول."
 }

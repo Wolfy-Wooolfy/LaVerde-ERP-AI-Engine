@@ -1,9 +1,10 @@
 """Authentication routes: GET /login, POST /login, GET /logout."""
 
-from fastapi import APIRouter, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from backend.api.deps import get_current_user_html
 from backend.core.i18n import detect_lang, load_translations, make_translator
 from backend.core.limiter import limiter
 
@@ -18,6 +19,40 @@ def _sanitize_next(next_url: str) -> str:
     if next_url and next_url.startswith("/") and not next_url.startswith("//"):
         return next_url
     return "/dashboard"
+
+
+_ORDERED_MODULE_DASHBOARDS: list[tuple[str, str]] = [
+    ("crm",               "/dashboard"),
+    ("hr",                "/hr/dashboard"),
+    ("collections",       "/collections/dashboard"),
+    ("customer_accounts", "/customer-accounts/dashboard"),
+]
+
+_PATH_MODULE_MAP: dict[str, str] = {
+    "/dashboard":         "crm",
+    "/data-quality":      "crm",
+    "/hr":                "hr",
+    "/collections":       "collections",
+    "/customer-accounts": "customer_accounts",
+}
+
+
+def _user_can_access_path(user_modules: list[str], path: str) -> bool:
+    if "*" in user_modules:
+        return True
+    for prefix, module_id in _PATH_MODULE_MAP.items():
+        if path.startswith(prefix):
+            return module_id in user_modules
+    return True
+
+
+def _first_allowed_dashboard(user_modules: list[str]) -> str | None:
+    if "*" in user_modules:
+        return "/dashboard"
+    for module_id, url in _ORDERED_MODULE_DASHBOARDS:
+        if module_id in user_modules:
+            return url
+    return None
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
@@ -65,7 +100,30 @@ async def login_submit(
         return templates.TemplateResponse(request, "login.html", ctx, status_code=401)
 
     request.session["username"] = username
-    return RedirectResponse(url=_sanitize_next(next), status_code=303)
+    safe_next = _sanitize_next(next)
+    if safe_next != "/dashboard" and _user_can_access_path(user.modules, safe_next):
+        target = safe_next
+    else:
+        landing = _first_allowed_dashboard(user.modules)
+        target = landing if landing is not None else "/no-modules"
+    return RedirectResponse(url=target, status_code=303)
+
+
+@router.get("/no-modules", response_class=HTMLResponse, include_in_schema=False)
+async def no_modules_page(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    """Landing page for authenticated users with no modules assigned."""
+    lang = detect_lang(dict(request.cookies), request.headers.get("accept-language", ""))
+    ctx = {
+        "request": request,
+        "current_user": user,
+        "lang": lang,
+        "is_rtl": lang == "ar",
+        "_t": make_translator(lang),
+    }
+    return templates.TemplateResponse(request, "no_modules.html", ctx)
 
 
 @router.get("/logout", include_in_schema=False)
