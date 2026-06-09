@@ -51,6 +51,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     setup_logging()
     init_cache(settings.CACHE_TTL_SECONDS)
+
+    from backend.auth.repository import SQLiteUserRepository
+    from backend.auth.seed import seed_initial_user
+    user_repo = SQLiteUserRepository(settings.USER_DB_PATH)
+    seed_initial_user(user_repo)
+    app.state.user_repo = user_repo
+
     app.state.crm_service = CrmService()
     app.state.limiter = limiter
     set_start_time()

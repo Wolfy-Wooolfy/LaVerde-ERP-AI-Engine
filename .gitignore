@@ -26,5 +26,8 @@ Thumbs.db
 node_modules/
 frontend/node_modules/
 
+# User store SQLite DB (never committed — regenerated from env on startup)
+data/*.db
+
 # Discovery script transient output (curated doc committed separately)
 scripts/discover_collections_output.txt

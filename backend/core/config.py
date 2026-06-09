@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # ── Auth ──────────────────────────────────────────────────────────────────
     BASIC_AUTH_USERNAME: str
     BASIC_AUTH_PASSWORD: str
+    USER_DB_PATH: str = "data/users.db"
 
     # ── Cache ─────────────────────────────────────────────────────────────────
     CACHE_TTL_SECONDS: int = 60
