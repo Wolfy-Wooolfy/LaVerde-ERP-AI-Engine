@@ -15,8 +15,6 @@ from backend.core.exceptions import (
 )
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
-
 
 def _raising(exc: Exception):  # type: ignore[type-arg]
     def _override() -> None:
@@ -45,7 +43,7 @@ def _clear() -> None:
 def test_read_only_violation_returns_403(client: TestClient) -> None:
     _with_auth(_raising(ReadOnlyViolationError("create not allowed")))
     try:
-        r = client.get("/api/v1/summary", auth=_AUTH)
+        r = client.get("/api/v1/summary")
         assert r.status_code == 403
         body = r.json()
         assert body["ok"] is False
@@ -62,7 +60,7 @@ def test_read_only_violation_returns_403(client: TestClient) -> None:
 def test_odoo_auth_error_returns_502(client: TestClient) -> None:
     _with_auth(_raising(OdooAuthenticationError("bad key")))
     try:
-        r = client.get("/api/v1/summary", auth=_AUTH)
+        r = client.get("/api/v1/summary")
         assert r.status_code == 502
         body = r.json()
         assert body["error"]["code"] == "ODOO_AUTH_ERROR"
@@ -76,7 +74,7 @@ def test_odoo_auth_error_returns_502(client: TestClient) -> None:
 def test_odoo_connection_error_returns_503(client: TestClient) -> None:
     _with_auth(_raising(OdooConnectionError("unreachable")))
     try:
-        r = client.get("/api/v1/summary", auth=_AUTH)
+        r = client.get("/api/v1/summary")
         assert r.status_code == 503
         body = r.json()
         assert body["error"]["code"] == "ODOO_CONNECTION_ERROR"
@@ -90,7 +88,7 @@ def test_odoo_connection_error_returns_503(client: TestClient) -> None:
 def test_generic_crm_error_returns_500(client: TestClient) -> None:
     _with_auth(_raising(LaVerdeERPError("unexpected")))
     try:
-        r = client.get("/api/v1/summary", auth=_AUTH)
+        r = client.get("/api/v1/summary")
         assert r.status_code == 500
         body = r.json()
         assert body["error"]["code"] == "INTERNAL_ERROR"
@@ -104,7 +102,7 @@ def test_generic_crm_error_returns_500(client: TestClient) -> None:
 def test_error_response_always_has_ok_false(client: TestClient) -> None:
     _with_auth(_raising(ReadOnlyViolationError("x")))
     try:
-        r = client.get("/api/v1/summary", auth=_AUTH)
+        r = client.get("/api/v1/summary")
         assert r.json()["ok"] is False
     finally:
         _clear()

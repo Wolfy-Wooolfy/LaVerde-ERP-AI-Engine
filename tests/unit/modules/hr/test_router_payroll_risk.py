@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/hr/kpi/payroll-risk-dashboard"
 
 _MOCK_DATA = {
@@ -53,7 +53,10 @@ _BUCKET_LABELS = [
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
+    app.dependency_overrides[get_current_user] = lambda: "testadmin"
+    c = TestClient(app, raise_server_exceptions=True)
+    yield c
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Test 1 — 200 + all keys present ──────────────────────────────────────────
@@ -64,7 +67,7 @@ def test_payroll_risk_dashboard_returns_200_and_all_keys(client: TestClient) -> 
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -98,7 +101,7 @@ def test_six_buckets_present_in_fixed_order(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     buckets = r.json()["buckets"]
@@ -118,7 +121,7 @@ def test_department_breakdown_fields_present(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -136,7 +139,7 @@ def test_archived_with_running_count_present_and_non_negative(client: TestClient
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -152,7 +155,7 @@ def test_sanity_invariant_holds_in_serialized_response(client: TestClient) -> No
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -170,7 +173,7 @@ def test_response_has_cache_headers(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     assert "private, max-age=60" in r.headers.get("cache-control", "")
@@ -186,7 +189,7 @@ def test_cache_status_cached_reflected_in_header(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(return_value=cached_data),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     assert r.headers.get("x-cache-status") == "cached"
@@ -200,7 +203,7 @@ def test_odoo_query_error_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(side_effect=OdooQueryError("connection refused")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 503
     assert r.json()["error"]["code"] == "odoo_unavailable"
@@ -214,7 +217,7 @@ def test_unexpected_exception_returns_500(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_payroll_risk_dashboard",
         new=AsyncMock(side_effect=RuntimeError("unexpected")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 500
     assert r.json()["error"]["code"] == "internal_error"

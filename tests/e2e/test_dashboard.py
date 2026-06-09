@@ -25,11 +25,12 @@ PASSWORD = "password"
 
 
 def authenticate(page: "Page") -> None:
-    """Set Basic Auth for every navigation."""
-    import base64
-
-    creds = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
-    page.set_extra_http_headers({"Authorization": f"Basic {creds}"})
+    """Log in via the /login form to obtain a session cookie."""
+    page.goto(f"{BASE_URL}/login")
+    page.fill("input[name='username']", USERNAME)
+    page.fill("input[name='password']", PASSWORD)
+    page.click("button[type='submit']")
+    page.wait_for_load_state("networkidle")
 
 
 # ── Dashboard loads ───────────────────────────────────────────────────────────
@@ -151,12 +152,9 @@ def test_rtl_mode(page: "Page") -> None:
 
 @pytest.mark.e2e
 def test_unauthenticated_redirect(page: "Page") -> None:
-    # No auth headers
+    # No login — unauthenticated dashboard access should redirect to /login
     page.goto(f"{BASE_URL}/dashboard")
-    # Should get 401 or redirect to login
-    redirected = page.url != f"{BASE_URL}/dashboard"
-    has_401 = "401" in page.content()
-    assert redirected or has_401 or page.locator("body").is_visible()
+    assert "/login" in page.url
 
 
 # ── Mobile responsive ─────────────────────────────────────────────────────────

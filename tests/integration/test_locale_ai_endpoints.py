@@ -9,8 +9,6 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.modules.crm.ai.schemas import LeadPriority
 
-AUTH = ("testadmin", "testpass")
-
 
 def _make_priority(lead_id: int = 1, reasoning: str = "Good lead.") -> LeadPriority:
     return LeadPriority(
@@ -51,6 +49,12 @@ def client_with_ai():
     mock_prioritizer._fetch_overdue_leads = AsyncMock(return_value=[])
 
     with TestClient(app) as c:
+        r = c.post(
+            "/login",
+            data={"username": "testadmin", "password": "testpass", "next": "/"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, f"Login failed: {r.status_code}"
         app.state.ai_prioritizer = mock_prioritizer
         app.state.ai_budget_tracker = _make_mock_budget()
         yield c
@@ -60,7 +64,6 @@ def test_en_cookie_passes_en_locale_to_prioritize_overdue(client_with_ai):
     resp = client_with_ai.post(
         "/api/v1/ai/prioritize-overdue",
         json={"limit": 5},
-        auth=AUTH,
         cookies={"lang": "en"},
     )
     assert resp.status_code == 200
@@ -72,7 +75,6 @@ def test_ar_cookie_passes_ar_locale_to_prioritize_overdue(client_with_ai):
     resp = client_with_ai.post(
         "/api/v1/ai/prioritize-overdue",
         json={"limit": 5},
-        auth=AUTH,
         cookies={"lang": "ar"},
     )
     assert resp.status_code == 200
@@ -84,7 +86,6 @@ def test_no_cookie_defaults_to_en_locale(client_with_ai):
     resp = client_with_ai.post(
         "/api/v1/ai/prioritize-overdue",
         json={"limit": 5},
-        auth=AUTH,
     )
     assert resp.status_code == 200
     call_kwargs = client_with_ai.app.state.ai_prioritizer.prioritize_overdue.call_args
@@ -95,7 +96,6 @@ def test_invalid_cookie_value_defaults_to_en(client_with_ai):
     resp = client_with_ai.post(
         "/api/v1/ai/prioritize-overdue",
         json={"limit": 5},
-        auth=AUTH,
         cookies={"lang": "fr"},
     )
     assert resp.status_code == 200
@@ -107,7 +107,6 @@ def test_en_and_ar_locales_call_prioritizer_with_correct_limit(client_with_ai):
     client_with_ai.post(
         "/api/v1/ai/prioritize-overdue",
         json={"limit": 7},
-        auth=AUTH,
         cookies={"lang": "ar"},
     )
     call_kwargs = client_with_ai.app.state.ai_prioritizer.prioritize_overdue.call_args
@@ -119,7 +118,6 @@ def test_response_structure_unchanged_for_ar_locale(client_with_ai):
     resp = client_with_ai.post(
         "/api/v1/ai/prioritize-overdue",
         json={"limit": 5},
-        auth=AUTH,
         cookies={"lang": "ar"},
     )
     assert resp.status_code == 200

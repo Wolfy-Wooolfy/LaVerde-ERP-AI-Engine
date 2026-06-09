@@ -28,11 +28,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
-_URL  = "/api/v1/hr/employee/1057"
+_URL = "/api/v1/hr/employee/1057"
 
 _REQUIRED_TOP_KEYS = frozenset({
     "employee_id", "name", "job_title", "department_name", "manager_name",
@@ -78,14 +78,17 @@ def _patch_profile(return_value=_MOCK_PROFILE):
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
+    app.dependency_overrides[get_current_user] = lambda: "testadmin"
+    c = TestClient(app, raise_server_exceptions=True)
+    yield c
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Test 1 — 200 + all schema keys ───────────────────────────────────────────
 
 def test_200_and_all_keys(client: TestClient) -> None:
     with _patch_profile():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     body = r.json()
     missing = _REQUIRED_TOP_KEYS - set(body.keys())
@@ -98,7 +101,7 @@ def test_200_and_all_keys(client: TestClient) -> None:
 
 def test_no_wage_in_response(client: TestClient) -> None:
     with _patch_profile():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     found = _WAGE_KEYS & set(r.json().keys())
     assert not found, f"Wage/comp key in profile response: {found}"
@@ -107,7 +110,7 @@ def test_no_wage_in_response(client: TestClient) -> None:
 # ── Test 3 — 400 on zero id ───────────────────────────────────────────────────
 
 def test_400_on_zero_id(client: TestClient) -> None:
-    r = client.get("/api/v1/hr/employee/0", auth=_AUTH)
+    r = client.get("/api/v1/hr/employee/0")
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "invalid_employee_id"
 
@@ -116,7 +119,7 @@ def test_400_on_zero_id(client: TestClient) -> None:
 
 def test_404_on_none_profile(client: TestClient) -> None:
     with _patch_profile(return_value=None):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "employee_not_found"
 
@@ -128,7 +131,7 @@ def test_503_on_odoo_error(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_employee_profile",
         new=AsyncMock(side_effect=OdooQueryError("Odoo down")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 503
 
 
@@ -139,7 +142,7 @@ def test_500_on_unexpected_error(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_employee_profile",
         new=AsyncMock(side_effect=RuntimeError("boom")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 500
 
 
@@ -147,7 +150,7 @@ def test_500_on_unexpected_error(client: TestClient) -> None:
 
 def test_cache_control_no_store(client: TestClient) -> None:
     with _patch_profile():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     cc = r.headers.get("cache-control", "")
     assert "private"   in cc, f"Expected 'private' in Cache-Control: {cc!r}"
@@ -159,7 +162,7 @@ def test_cache_control_no_store(client: TestClient) -> None:
 
 def test_no_x_cache_status_header(client: TestClient) -> None:
     with _patch_profile():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     assert "x-cache-status" not in r.headers, (
         "PII endpoint must not expose X-Cache-Status"
@@ -168,9 +171,10 @@ def test_no_x_cache_status_header(client: TestClient) -> None:
 
 # ── Test 9 — 401 without auth ─────────────────────────────────────────────────
 
-def test_401_without_auth(client: TestClient) -> None:
+def test_401_without_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
     with _patch_profile():
-        r = client.get(_URL)  # no auth
+        r = c.get(_URL)  # no session
     assert r.status_code == 401, (
         f"Expected 401 for unauthenticated PII request, got {r.status_code}"
     )
@@ -180,7 +184,7 @@ def test_401_without_auth(client: TestClient) -> None:
 
 def test_contract_status_is_running(client: TestClient) -> None:
     with _patch_profile():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     assert r.json()["contract_status"] == "Running"
 
@@ -189,7 +193,7 @@ def test_contract_status_is_running(client: TestClient) -> None:
 
 def test_is_open_ended_present(client: TestClient) -> None:
     with _patch_profile():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     val = r.json()["is_open_ended"]
     assert isinstance(val, bool), f"is_open_ended must be bool, got {type(val)}"
@@ -199,7 +203,7 @@ def test_is_open_ended_present(client: TestClient) -> None:
 
 def test_open_ended_true_null_end(client: TestClient) -> None:
     with _patch_profile(_MOCK_PROFILE):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     body = r.json()
     assert body["is_open_ended"] is True
@@ -209,7 +213,7 @@ def test_open_ended_true_null_end(client: TestClient) -> None:
 # ── Test 13 — 400 error body has expected code ───────────────────────────────
 
 def test_400_error_code(client: TestClient) -> None:
-    r = client.get("/api/v1/hr/employee/0", auth=_AUTH)
+    r = client.get("/api/v1/hr/employee/0")
     assert r.status_code == 400
     body = r.json()
     assert "error" in body

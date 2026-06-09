@@ -10,9 +10,6 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
-
-
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app, raise_server_exceptions=True)

@@ -18,8 +18,6 @@ from backend.modules.crm.schemas import (
     SummaryResponse,
 )
 
-_AUTH = ("testadmin", "testpass")
-
 
 def _mock_summary() -> SummaryResponse:
     return SummaryResponse(
@@ -60,43 +58,38 @@ def override_crm_service() -> None:
     app.dependency_overrides.clear()
 
 
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
-
-
 # ── Dashboard page ─────────────────────────────────────────────────────────────
 
 
-def test_dashboard_loads(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_dashboard_loads(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     assert r.status_code == 200
     assert b"LaVerde ERP AI Engine" in r.content
 
 
-def test_dashboard_has_kpi_section(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_dashboard_has_kpi_section(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     assert r.status_code == 200
     assert b"kpi-card" in r.content
 
 
-def test_dashboard_has_chart_canvases(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_dashboard_has_chart_canvases(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     assert r.status_code == 200
     assert b"activityChart" in r.content
     assert b"salespersonChart" in r.content
     assert b"stageChart" in r.content
 
 
-def test_dashboard_greeting_uses_username(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_dashboard_greeting_uses_username(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     assert r.status_code == 200
     # The greeting span should carry translated data attributes
     assert b"data-morning=" in r.content
 
 
-def test_dashboard_no_cdn_references(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_dashboard_no_cdn_references(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     body = r.text
     # No CDN URLs in the rendered HTML
     assert "cdn.jsdelivr.net" not in body
@@ -104,8 +97,8 @@ def test_dashboard_no_cdn_references(client: TestClient) -> None:
     assert "fonts.googleapis.com" not in body
 
 
-def test_dashboard_vendor_scripts_referenced(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_dashboard_vendor_scripts_referenced(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     body = r.text
     assert "/static/vendor/alpine.min.js" in body
     assert "/static/vendor/chart.umd.min.js" in body
@@ -115,48 +108,48 @@ def test_dashboard_vendor_scripts_referenced(client: TestClient) -> None:
 # ── Missing contacts page ──────────────────────────────────────────────────────
 
 
-def test_missing_contact_loads(client: TestClient) -> None:
-    r = client.get("/data-quality/missing-contact", auth=_AUTH)
+def test_missing_contact_loads(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality/missing-contact")
     assert r.status_code == 200
 
 
-def test_missing_contact_has_title(client: TestClient) -> None:
-    r = client.get("/data-quality/missing-contact", auth=_AUTH)
+def test_missing_contact_has_title(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality/missing-contact")
     assert r.status_code == 200
     assert b"Missing" in r.content
 
 
-def test_missing_contact_empty_state(client: TestClient) -> None:
+def test_missing_contact_empty_state(authed_client: TestClient) -> None:
     # With 0 rows, should show the empty state, not an error
-    r = client.get("/data-quality/missing-contact", auth=_AUTH)
+    r = authed_client.get("/data-quality/missing-contact")
     assert r.status_code == 200
     assert b"No records found" in r.content
 
 
-def test_missing_contact_no_cdn_references(client: TestClient) -> None:
-    r = client.get("/data-quality/missing-contact", auth=_AUTH)
+def test_missing_contact_no_cdn_references(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality/missing-contact")
     body = r.text
     assert "cdn.jsdelivr.net" not in body
     assert "cdn.datatables.net" not in body
     assert "fonts.googleapis.com" not in body
 
 
-def test_missing_contact_pagination_params(client: TestClient) -> None:
-    r = client.get("/data-quality/missing-contact?page=2&page_size=25", auth=_AUTH)
+def test_missing_contact_pagination_params(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality/missing-contact?page=2&page_size=25")
     assert r.status_code == 200
 
 
 # ── CSP header ────────────────────────────────────────────────────────────────
 
 
-def test_csp_header_present(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_csp_header_present(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     csp = r.headers.get("content-security-policy", "")
     assert "default-src" in csp
 
 
-def test_csp_no_external_domains(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_csp_no_external_domains(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     csp = r.headers.get("content-security-policy", "")
     # The CSP must NOT allow external CDN domains
     assert "cdn.jsdelivr.net" not in csp
@@ -192,11 +185,11 @@ def test_extract_first_name_plain_username_fallback(monkeypatch):
     assert _extract_first_name("admin") == "Admin"
 
 
-def test_dashboard_renders_display_name(client: TestClient, monkeypatch) -> None:
+def test_dashboard_renders_display_name(authed_client: TestClient, monkeypatch) -> None:
     """When DISPLAY_NAME is set, the rendered dashboard must include it."""
     from backend.core.config import settings
 
     monkeypatch.setattr(settings, "DISPLAY_NAME", "La Verde")
-    r = client.get("/dashboard", auth=_AUTH)
+    r = authed_client.get("/dashboard")
     assert r.status_code == 200
     assert b"La Verde" in r.content

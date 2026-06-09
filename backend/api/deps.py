@@ -1,23 +1,36 @@
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import HTTPException, Request
 
-from backend.core.security import verify_credentials
 from backend.modules.crm.service import CrmService
 
-_http_basic = HTTPBasic()
+
+def _resolve_active_username(request: Request) -> str | None:
+    username = request.session.get("username")
+    if not username:
+        return None
+    user = request.app.state.user_repo.get_user(username)
+    if user is None or not user.is_active:
+        return None
+    return username
 
 
-def get_current_user(
-    credentials: HTTPBasicCredentials = Depends(_http_basic),
-) -> str:
-    """Validate Basic Auth credentials. Returns the authenticated username."""
-    if not verify_credentials(credentials.username, credentials.password):
+def get_current_user(request: Request) -> str:
+    """Session-based auth. Returns username or raises 401."""
+    username = _resolve_active_username(request)
+    if username is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return username
+
+
+def get_current_user_html(request: Request) -> str:
+    """Session-based auth for HTML routes. Returns username or redirects to /login."""
+    username = _resolve_active_username(request)
+    if username is None:
+        next_url = request.url.path
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-            headers={"WWW-Authenticate": "Basic"},
+            status_code=302,
+            headers={"Location": f"/login?next={next_url}"},
         )
-    return credentials.username
+    return username
 
 
 def get_crm_service(request: Request) -> CrmService:

@@ -51,19 +51,22 @@ def _make_mock_budget_tracker():
     return bt
 
 
-AUTH = ("testadmin", "testpass")
-
-
 @pytest.fixture
 def client_with_ai(tmp_path):
     with TestClient(app) as c:
+        r = c.post(
+            "/login",
+            data={"username": "testadmin", "password": "testpass", "next": "/"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, f"Login failed: {r.status_code}"
         app.state.ai_prioritizer = _make_mock_prioritizer(tmp_path)
         app.state.ai_budget_tracker = _make_mock_budget_tracker()
         yield c
 
 
 def test_ai_health_ok(client_with_ai):
-    resp = client_with_ai.get("/api/v1/ai/health", auth=AUTH)
+    resp = client_with_ai.get("/api/v1/ai/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ai_enabled"] is True
@@ -72,7 +75,7 @@ def test_ai_health_ok(client_with_ai):
 
 
 def test_ai_budget_endpoint(client_with_ai):
-    resp = client_with_ai.get("/api/v1/ai/budget", auth=AUTH)
+    resp = client_with_ai.get("/api/v1/ai/budget")
     assert resp.status_code == 200
     data = resp.json()
     assert "current_month_spend_usd" in data
@@ -81,7 +84,7 @@ def test_ai_budget_endpoint(client_with_ai):
 
 
 def test_prioritize_overdue_returns_leads(client_with_ai):
-    resp = client_with_ai.post("/api/v1/ai/prioritize-overdue", json={"limit": 10}, auth=AUTH)
+    resp = client_with_ai.post("/api/v1/ai/prioritize-overdue", json={"limit": 10})
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
@@ -91,7 +94,7 @@ def test_prioritize_overdue_returns_leads(client_with_ai):
 
 
 def test_prioritize_overdue_lead_fields(client_with_ai):
-    resp = client_with_ai.post("/api/v1/ai/prioritize-overdue", json={"limit": 5}, auth=AUTH)
+    resp = client_with_ai.post("/api/v1/ai/prioritize-overdue", json={"limit": 5})
     lead = resp.json()["leads"][0]
     assert "lead_id" in lead
     assert "score" in lead
@@ -126,7 +129,7 @@ def test_prioritize_overdue_budget_exceeded(client_with_ai):
     client_with_ai.app.state.ai_prioritizer.prioritize_overdue = AsyncMock(
         side_effect=BudgetExceededError(10.0, 10.0)
     )
-    resp = client_with_ai.post("/api/v1/ai/prioritize-overdue", json={"limit": 10}, auth=AUTH)
+    resp = client_with_ai.post("/api/v1/ai/prioritize-overdue", json={"limit": 10})
     assert resp.status_code == 402
     data = resp.json()
     # FastAPI wraps HTTPException detail under "detail" key
@@ -136,7 +139,7 @@ def test_prioritize_overdue_budget_exceeded(client_with_ai):
 
 
 def test_metrics_includes_ai_section(client_with_ai):
-    resp = client_with_ai.get("/api/v1/metrics", auth=AUTH)
+    resp = client_with_ai.get("/api/v1/metrics")
     assert resp.status_code == 200
     data = resp.json()
     assert "ai" in data
@@ -150,7 +153,6 @@ def test_endpoint_returns_503_not_500_on_service_error(client_with_ai):
     resp = client_with_ai.post(
         "/api/v1/ai/prioritize-overdue",
         json={"limit": 10},
-        auth=AUTH,
     )
     assert resp.status_code == 503
     detail = resp.json().get("detail", {})

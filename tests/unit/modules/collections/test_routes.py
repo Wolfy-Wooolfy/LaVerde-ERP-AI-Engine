@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
 from backend.modules.collections.schemas import (
@@ -22,7 +23,6 @@ from backend.modules.collections.schemas import (
     LateUncollectedResponse,
 )
 
-_AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/collections/kpi/late-uncollected"
 
 _MOCK_DATA = {
@@ -51,7 +51,10 @@ _MOCK_DATA = {
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
+    app.dependency_overrides[get_current_user] = lambda: "testadmin"
+    c = TestClient(app, raise_server_exceptions=True)
+    yield c
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Test 8a — 200 + JSON shape ────────────────────────────────────────────────
@@ -62,7 +65,7 @@ def test_get_returns_200_and_all_keys(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_late_uncollected",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -79,7 +82,7 @@ def test_response_has_cache_control_and_x_cache_status(client: TestClient) -> No
         "backend.api.v1.endpoints.collections.get_late_uncollected",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     assert "private" in r.headers.get("cache-control", "")
@@ -95,7 +98,7 @@ def test_x_cache_status_reflects_cached_when_served_from_cache(
         "backend.api.v1.endpoints.collections.get_late_uncollected",
         new=AsyncMock(return_value=cached_data),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.headers.get("x-cache-status") == "cached"
 
@@ -108,7 +111,7 @@ def test_odoo_unavailable_returns_503_with_error_shape(client: TestClient) -> No
         "backend.api.v1.endpoints.collections.get_late_uncollected",
         new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 503
     body = r.json()
@@ -121,7 +124,7 @@ def test_odoo_unavailable_returns_503_with_error_shape(client: TestClient) -> No
 
 
 def test_post_returns_405(client: TestClient) -> None:
-    r = client.post(_URL, auth=_AUTH)
+    r = client.post(_URL)
     assert r.status_code == 405
 
 
@@ -133,7 +136,7 @@ def test_kpi2_endpoint_response_model_validates_success_shape(client: TestClient
         "backend.api.v1.endpoints.collections.get_late_uncollected",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     # Must not raise — confirms response_model= is active on the success path
@@ -148,7 +151,7 @@ def test_kpi2_endpoint_strict_shape_includes_new_fields(client: TestClient) -> N
         "backend.api.v1.endpoints.collections.get_late_uncollected",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -201,7 +204,7 @@ def test_kpi1_get_returns_200_and_all_keys(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_total_portfolio_value",
         new=AsyncMock(return_value=_MOCK_DATA_KPI1),
     ):
-        r = client.get(_URL_KPI1, auth=_AUTH)
+        r = client.get(_URL_KPI1)
 
     assert r.status_code == 200
     body = r.json()
@@ -218,7 +221,7 @@ def test_kpi1_response_has_cache_control_and_x_cache_status(client: TestClient) 
         "backend.api.v1.endpoints.collections.get_total_portfolio_value",
         new=AsyncMock(return_value=_MOCK_DATA_KPI1),
     ):
-        r = client.get(_URL_KPI1, auth=_AUTH)
+        r = client.get(_URL_KPI1)
 
     assert r.status_code == 200
     assert "private" in r.headers.get("cache-control", "")
@@ -234,7 +237,7 @@ def test_kpi1_odoo_unavailable_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_total_portfolio_value",
         new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
     ):
-        r = client.get(_URL_KPI1, auth=_AUTH)
+        r = client.get(_URL_KPI1)
 
     assert r.status_code == 503
     body = r.json()
@@ -247,7 +250,7 @@ def test_kpi1_odoo_unavailable_returns_503(client: TestClient) -> None:
 
 
 def test_kpi1_post_returns_405(client: TestClient) -> None:
-    r = client.post(_URL_KPI1, auth=_AUTH)
+    r = client.post(_URL_KPI1)
     assert r.status_code == 405
 
 
@@ -285,7 +288,7 @@ def test_kpi5_get_returns_200_and_all_keys(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_late_uncollected_by_project",
         new=AsyncMock(return_value=_MOCK_DATA_KPI5),
     ):
-        r = client.get(_URL_KPI5, auth=_AUTH)
+        r = client.get(_URL_KPI5)
 
     assert r.status_code == 200
     body = r.json()
@@ -308,7 +311,7 @@ def test_kpi5_response_has_cache_control_and_x_cache_status(client: TestClient) 
         "backend.api.v1.endpoints.collections.get_late_uncollected_by_project",
         new=AsyncMock(return_value=_MOCK_DATA_KPI5),
     ):
-        r = client.get(_URL_KPI5, auth=_AUTH)
+        r = client.get(_URL_KPI5)
 
     assert r.status_code == 200
     assert "private" in r.headers.get("cache-control", "")
@@ -324,7 +327,7 @@ def test_kpi5_odoo_unavailable_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_late_uncollected_by_project",
         new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
     ):
-        r = client.get(_URL_KPI5, auth=_AUTH)
+        r = client.get(_URL_KPI5)
 
     assert r.status_code == 503
     body = r.json()
@@ -337,7 +340,7 @@ def test_kpi5_odoo_unavailable_returns_503(client: TestClient) -> None:
 
 
 def test_kpi5_post_returns_405(client: TestClient) -> None:
-    r = client.post(_URL_KPI5, auth=_AUTH)
+    r = client.post(_URL_KPI5)
     assert r.status_code == 405
 
 
@@ -370,7 +373,7 @@ def test_kpi3_get_returns_200_and_all_keys(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_pending_check_exposure",
         new=AsyncMock(return_value=_MOCK_DATA_KPI3),
     ):
-        r = client.get(_URL_KPI3, auth=_AUTH)
+        r = client.get(_URL_KPI3)
 
     assert r.status_code == 200
     body = r.json()
@@ -391,7 +394,7 @@ def test_kpi3_response_has_cache_control_and_x_cache_status(client: TestClient) 
         "backend.api.v1.endpoints.collections.get_pending_check_exposure",
         new=AsyncMock(return_value=_MOCK_DATA_KPI3),
     ):
-        r = client.get(_URL_KPI3, auth=_AUTH)
+        r = client.get(_URL_KPI3)
 
     assert r.status_code == 200
     assert "private" in r.headers.get("cache-control", "")
@@ -407,7 +410,7 @@ def test_kpi3_odoo_unavailable_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_pending_check_exposure",
         new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
     ):
-        r = client.get(_URL_KPI3, auth=_AUTH)
+        r = client.get(_URL_KPI3)
 
     assert r.status_code == 503
     body = r.json()
@@ -420,7 +423,7 @@ def test_kpi3_odoo_unavailable_returns_503(client: TestClient) -> None:
 
 
 def test_kpi3_post_returns_405(client: TestClient) -> None:
-    r = client.post(_URL_KPI3, auth=_AUTH)
+    r = client.post(_URL_KPI3)
     assert r.status_code == 405
 
 
@@ -471,7 +474,7 @@ def test_kpi6_get_returns_200_and_all_keys(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_collection_trend_6m",
         new=AsyncMock(return_value=_MOCK_DATA_KPI6),
     ):
-        r = client.get(_URL_KPI6, auth=_AUTH)
+        r = client.get(_URL_KPI6)
 
     assert r.status_code == 200
     body = r.json()
@@ -497,7 +500,7 @@ def test_kpi6_response_has_cache_control_max_age_3600(client: TestClient) -> Non
         "backend.api.v1.endpoints.collections.get_collection_trend_6m",
         new=AsyncMock(return_value=_MOCK_DATA_KPI6),
     ):
-        r = client.get(_URL_KPI6, auth=_AUTH)
+        r = client.get(_URL_KPI6)
 
     assert r.status_code == 200
     cc = r.headers.get("cache-control", "")
@@ -515,7 +518,7 @@ def test_kpi6_x_cache_status_reflects_cached_when_served_from_cache(
         "backend.api.v1.endpoints.collections.get_collection_trend_6m",
         new=AsyncMock(return_value=cached_data),
     ):
-        r = client.get(_URL_KPI6, auth=_AUTH)
+        r = client.get(_URL_KPI6)
 
     assert r.headers.get("x-cache-status") == "cached"
 
@@ -528,7 +531,7 @@ def test_kpi6_odoo_unavailable_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_collection_trend_6m",
         new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
     ):
-        r = client.get(_URL_KPI6, auth=_AUTH)
+        r = client.get(_URL_KPI6)
 
     assert r.status_code == 503
     body = r.json()
@@ -541,7 +544,7 @@ def test_kpi6_odoo_unavailable_returns_503(client: TestClient) -> None:
 
 
 def test_kpi6_post_returns_405(client: TestClient) -> None:
-    r = client.post(_URL_KPI6, auth=_AUTH)
+    r = client.post(_URL_KPI6)
     assert r.status_code == 405
 
 
@@ -608,7 +611,7 @@ def test_kpi7_get_returns_200_and_strict_shape(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
         new=AsyncMock(return_value=_MOCK_DATA_KPI7),
     ):
-        r = client.get(_URL_KPI7, auth=_AUTH)
+        r = client.get(_URL_KPI7)
 
     assert r.status_code == 200
     body = r.json()
@@ -651,7 +654,7 @@ def test_kpi7_response_has_cache_control_and_x_cache_status(client: TestClient) 
         "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
         new=AsyncMock(return_value=_MOCK_DATA_KPI7),
     ):
-        r = client.get(_URL_KPI7, auth=_AUTH)
+        r = client.get(_URL_KPI7)
 
     assert r.status_code == 200
     assert "private"    in r.headers.get("cache-control", "")
@@ -667,7 +670,7 @@ def test_kpi7_x_cache_status_reflects_cached_when_served_from_cache(
         "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
         new=AsyncMock(return_value=cached_data),
     ):
-        r = client.get(_URL_KPI7, auth=_AUTH)
+        r = client.get(_URL_KPI7)
 
     assert r.headers.get("x-cache-status") == "cached"
 
@@ -680,7 +683,7 @@ def test_kpi7_odoo_unavailable_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
         new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
     ):
-        r = client.get(_URL_KPI7, auth=_AUTH)
+        r = client.get(_URL_KPI7)
 
     assert r.status_code == 503
     body = r.json()
@@ -693,7 +696,7 @@ def test_kpi7_odoo_unavailable_returns_503(client: TestClient) -> None:
 
 
 def test_kpi7_post_returns_405(client: TestClient) -> None:
-    r = client.post(_URL_KPI7, auth=_AUTH)
+    r = client.post(_URL_KPI7)
     assert r.status_code == 405
 
 
@@ -705,7 +708,7 @@ def test_kpi7_response_model_validates_success_shape(client: TestClient) -> None
         "backend.api.v1.endpoints.collections.get_expected_collections_forecast",
         new=AsyncMock(return_value=_MOCK_DATA_KPI7),
     ):
-        r = client.get(_URL_KPI7, auth=_AUTH)
+        r = client.get(_URL_KPI7)
 
     assert r.status_code == 200
     # If response_model= is active on the success path, the dict return is
@@ -723,14 +726,15 @@ def test_kpi7_response_model_validates_success_shape(client: TestClient) -> None
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_401_when_no_auth(client: TestClient) -> None:
+def test_401_when_no_auth() -> None:
     """Collections endpoints must reject unauthenticated requests with 401.
 
     Added 2026-06-09 as part of the security hotfix that wired
     Depends(get_current_user) onto all 13 Collections routes.
     No service patch needed — auth is checked before the handler body runs.
     """
-    r = client.get(_URL)  # no auth; _URL = /api/v1/collections/kpi/late-uncollected
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL)  # no session
     assert r.status_code == 401, (
         f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
     )

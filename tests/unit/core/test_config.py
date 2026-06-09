@@ -64,3 +64,45 @@ def test_stage_ids_with_spaces() -> None:
         CRM_CRITICAL_STAGE_IDS=" 10 , 20 , 30 ",
     )
     assert s.critical_stage_ids == [10, 20, 30]
+
+
+# ── SESSION_SECRET validation tests ─────────────────────────────────────────
+
+_BASE_SETTINGS = dict(
+    ODOO_URL="http://x",
+    ODOO_DB="db",
+    ODOO_USERNAME="u",
+    ODOO_API_KEY="k",
+    BASIC_AUTH_USERNAME="admin",
+    BASIC_AUTH_PASSWORD="pass",
+    AI_ENABLED=False,
+)
+
+
+def test_production_raises_when_session_secret_empty() -> None:
+    from backend.core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(**_BASE_SETTINGS, ENVIRONMENT="production", SESSION_SECRET="")
+
+
+def test_production_raises_when_session_secret_too_short() -> None:
+    from backend.core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(**_BASE_SETTINGS, ENVIRONMENT="production", SESSION_SECRET="tooshort")
+
+
+def test_production_accepts_session_secret_32_chars() -> None:
+    from backend.core.config import Settings
+
+    secret = "a" * 32
+    s = Settings(**_BASE_SETTINGS, ENVIRONMENT="production", SESSION_SECRET=secret)
+    assert s.SESSION_SECRET == secret
+
+
+def test_development_allows_empty_session_secret() -> None:
+    from backend.core.config import Settings
+
+    s = Settings(**_BASE_SETTINGS, ENVIRONMENT="development", SESSION_SECRET="")
+    assert s.SESSION_SECRET == ""

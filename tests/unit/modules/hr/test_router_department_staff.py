@@ -28,10 +28,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/hr/department/5"
 
 _REQUIRED_TOP_KEYS = frozenset({
@@ -145,7 +145,10 @@ def _patch_both(staff_return=_MOCK_STAFF_DATA, cost_return=_MOCK_COST_DATA):
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
+    app.dependency_overrides[get_current_user] = lambda: "testadmin"
+    c = TestClient(app, raise_server_exceptions=True)
+    yield c
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Test 1 — 200 + all schema keys ───────────────────────────────────────────
@@ -153,7 +156,7 @@ def client() -> TestClient:
 
 def test_200_and_all_keys(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     body = r.json()
     missing = _REQUIRED_TOP_KEYS - set(body.keys())
@@ -165,7 +168,7 @@ def test_200_and_all_keys(client: TestClient) -> None:
 
 def test_staff_row_keys_exact(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     for row in r.json()["staff"]:
         assert set(row.keys()) == _REQUIRED_STAFF_KEYS, (
@@ -178,7 +181,7 @@ def test_staff_row_keys_exact(client: TestClient) -> None:
 
 def test_no_wage_in_staff_rows(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     for row in r.json()["staff"]:
         found = _WAGE_KEYS & set(row.keys())
@@ -190,7 +193,7 @@ def test_no_wage_in_staff_rows(client: TestClient) -> None:
 
 def test_dept_aggregates_present(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     body = r.json()
     assert "total_wage" in body
@@ -206,7 +209,7 @@ def test_dept_aggregates_present(client: TestClient) -> None:
 
 def test_pct_and_avg_computed(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     body = r.json()
     expected_pct = round(33000.0 / 635000.0 * 100, 1)
     expected_avg = round(33000.0 / 3, 0)
@@ -219,7 +222,7 @@ def test_pct_and_avg_computed(client: TestClient) -> None:
 
 def test_404_on_empty_staff(client: TestClient) -> None:
     with _patch_both(staff_return=_MOCK_EMPTY_STAFF):
-        r = client.get("/api/v1/hr/department/999", auth=_AUTH)
+        r = client.get("/api/v1/hr/department/999")
     assert r.status_code == 404
     body = r.json()
     assert body["error"]["code"] == "department_not_found"
@@ -229,7 +232,7 @@ def test_404_on_empty_staff(client: TestClient) -> None:
 
 
 def test_400_on_zero_dept_id(client: TestClient) -> None:
-    r = client.get("/api/v1/hr/department/0", auth=_AUTH)
+    r = client.get("/api/v1/hr/department/0")
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "invalid_department_id"
 
@@ -245,7 +248,7 @@ def test_503_on_odoo_error(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=_MOCK_COST_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 503
 
 
@@ -260,7 +263,7 @@ def test_500_on_unexpected_error(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=_MOCK_COST_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 500
 
 
@@ -269,7 +272,7 @@ def test_500_on_unexpected_error(client: TestClient) -> None:
 
 def test_cache_control_no_store(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     cc = r.headers.get("cache-control", "")
     assert "private" in cc, f"Expected 'private' in Cache-Control: {cc!r}"
@@ -282,7 +285,7 @@ def test_cache_control_no_store(client: TestClient) -> None:
 
 def test_no_x_cache_status_header(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     assert "x-cache-status" not in r.headers, (
         "PII endpoint must not expose X-Cache-Status"
@@ -298,7 +301,7 @@ def test_total_wage_null_when_missing(client: TestClient) -> None:
         "rows": [r for r in _MOCK_COST_DATA["rows"] if r["department_id"] != 5],
     }
     with _patch_both(cost_return=cost_without_dept5):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     body = r.json()
     assert body["total_wage"] is None
@@ -311,7 +314,7 @@ def test_total_wage_null_when_missing(client: TestClient) -> None:
 
 def test_currency_and_basis(client: TestClient) -> None:
     with _patch_both():
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
     assert r.status_code == 200
     body = r.json()
     assert body["currency"] == "EGP"
@@ -321,7 +324,7 @@ def test_currency_and_basis(client: TestClient) -> None:
 # ── Test 14 — 401 when no auth supplied ──────────────────────────────────────
 
 
-def test_401_when_no_auth(client: TestClient) -> None:
+def test_401_when_no_auth() -> None:
     """PII endpoint must reject unauthenticated requests with 401.
 
     The sibling HR KPI endpoints (/kpi/*) were unprotected prior to 2026-06-09.
@@ -329,8 +332,9 @@ def test_401_when_no_auth(client: TestClient) -> None:
     security hotfix applied across Collections, Customer Accounts, and HR KPIs.
     This endpoint has always been explicitly protected because it returns employee names.
     """
+    c = TestClient(app, raise_server_exceptions=True)
     with _patch_both():
-        r = client.get(_URL)  # no auth
+        r = c.get(_URL)  # no session
     assert r.status_code == 401, (
         f"Expected 401 for unauthenticated PII request, got {r.status_code}"
     )

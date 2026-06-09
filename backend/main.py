@@ -19,7 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from backend.api.deps import get_current_user  # noqa: F401 — re-exported for tests
+from backend.api.deps import get_current_user  # re-exported for dependency_overrides in tests
 from backend.api.v1.endpoints.auth import router as auth_router
 from backend.api.v1.endpoints.dashboard import router as dashboard_router
 from backend.api.v1.router import api_v1_router
@@ -285,19 +285,6 @@ def legacy_followup() -> RedirectResponse:
 @app.get("/crm/data-quality/missing-contact", include_in_schema=False)
 def legacy_missing_contact() -> RedirectResponse:
     return RedirectResponse(url="/api/v1/data-quality/missing-contact", status_code=301)
-
-
-# ── Logout ─────────────────────────────────────────────────────────────────────
-
-
-@app.get("/logout", include_in_schema=False)
-def logout() -> Response:
-    return Response(
-        status_code=401,
-        headers={"WWW-Authenticate": 'Basic realm="LaVerde ERP AI Engine"'},
-        content=b"Logged out. <a href='/dashboard'>Sign in again</a>",
-        media_type="text/html",
-    )
 
 
 # ── Mount routers ─────────────────────────────────────────────────────────────

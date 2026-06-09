@@ -10,13 +10,38 @@
     {"key": "username", "value": "admin", "type": "string"},
     {"key": "password", "value": "password", "type": "string"}
   ],
-  "auth": {
-    "type": "basic",
-    "basic": [
-      {"key": "username", "value": "{{username}}", "type": "string"},
-      {"key": "password", "value": "{{password}}", "type": "string"}
-    ]
-  },
+  "auth": {"type": "noauth"},
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Obtain session cookie via POST /login before each request.",
+          "// Postman stores the returned Set-Cookie in its cookie jar automatically.",
+          "const baseUrl  = pm.variables.get('base_url');",
+          "const username = pm.variables.get('username');",
+          "const password = pm.variables.get('password');",
+          "pm.sendRequest({",
+          "    url: baseUrl + '/login',",
+          "    method: 'POST',",
+          "    header: {'Content-Type': 'application/x-www-form-urlencoded'},",
+          "    body: {",
+          "        mode: 'urlencoded',",
+          "        urlencoded: [",
+          "            {key: 'username', value: username},",
+          "            {key: 'password', value: password},",
+          "            {key: 'next',     value: '/dashboard'}",
+          "        ]",
+          "    }",
+          "}, function (err, res) {",
+          "    if (err) { console.error('Login pre-request failed:', err); }",
+          "    else if (res.code !== 303) { console.warn('Login returned', res.code, '— check credentials'); }",
+          "});"
+        ]
+      }
+    }
+  ],
   "item": [
     {
       "name": "Health",

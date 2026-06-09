@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/hr/kpi/department-cost"
 
 _MOCK_DATA = {
@@ -74,7 +74,10 @@ _MOCK_DATA_SUPPRESSED = {
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
+    app.dependency_overrides[get_current_user] = lambda: "testadmin"
+    c = TestClient(app, raise_server_exceptions=True)
+    yield c
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Test 1 — 200 + all top-level keys present ─────────────────────────────────
@@ -85,7 +88,7 @@ def test_department_cost_returns_200_and_all_keys(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -114,7 +117,7 @@ def test_rows_have_required_fields(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     rows = r.json()["rows"]
@@ -135,7 +138,7 @@ def test_grand_total_and_total_running_contracts_present(client: TestClient) -> 
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -153,7 +156,7 @@ def test_cache_control_and_x_cache_status_headers(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     assert "private, max-age=60" in r.headers.get("cache-control", "")
@@ -169,7 +172,7 @@ def test_cache_status_cached_reflected_in_header(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=cached_data),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     assert r.headers.get("x-cache-status") == "cached"
@@ -183,7 +186,7 @@ def test_odoo_query_error_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(side_effect=OdooQueryError("connection refused")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 503
     assert r.json()["error"]["code"] == "odoo_unavailable"
@@ -197,7 +200,7 @@ def test_unexpected_exception_returns_500(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(side_effect=RuntimeError("unexpected")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 500
     assert r.json()["error"]["code"] == "internal_error"
@@ -217,7 +220,7 @@ def test_suppressed_total_wage_serializes_as_null(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_department_cost",
         new=AsyncMock(return_value=_MOCK_DATA_SUPPRESSED),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()

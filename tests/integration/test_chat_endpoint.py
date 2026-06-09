@@ -12,9 +12,6 @@ from backend.modules.crm.ai.chat.session_manager import SessionManager
 from backend.modules.crm.schemas import OverdueBySalesperson
 from backend.modules.crm.service import CrmService
 
-AUTH = ("testadmin", "testpass")
-
-
 # ── Mock factories ─────────────────────────────────────────────────────────────
 
 
@@ -68,6 +65,12 @@ def _make_crm():
 @pytest.fixture
 def chat_client():
     with TestClient(app) as c:
+        r = c.post(
+            "/login",
+            data={"username": "testadmin", "password": "testpass", "next": "/"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, f"Login failed: {r.status_code}"
         app.state.chat_session_manager = SessionManager()
         app.state.chat_intent_cache = IntentCache()
         app.state.ai_client = _make_ai_client()
@@ -83,7 +86,6 @@ def chat_client():
 def test_suggested_questions_en(chat_client):
     resp = chat_client.get(
         "/api/v1/chat/suggested-questions",
-        auth=AUTH,
         cookies={"lang": "en"},
     )
     assert resp.status_code == 200
@@ -96,7 +98,6 @@ def test_suggested_questions_en(chat_client):
 def test_suggested_questions_ar(chat_client):
     resp = chat_client.get(
         "/api/v1/chat/suggested-questions",
-        auth=AUTH,
         cookies={"lang": "ar"},
     )
     assert resp.status_code == 200
@@ -109,7 +110,6 @@ def test_suggested_questions_ar(chat_client):
 def test_suggested_questions_default_en_for_unknown_locale(chat_client):
     resp = chat_client.get(
         "/api/v1/chat/suggested-questions",
-        auth=AUTH,
         cookies={"lang": "de"},
     )
     assert resp.status_code == 200
@@ -117,8 +117,9 @@ def test_suggested_questions_default_en_for_unknown_locale(chat_client):
     assert any(q[0].isascii() for q in qs)
 
 
-def test_suggested_questions_requires_auth(chat_client):
-    resp = chat_client.get("/api/v1/chat/suggested-questions")
+def test_suggested_questions_requires_auth():
+    with TestClient(app) as c:
+        resp = c.get("/api/v1/chat/suggested-questions")
     assert resp.status_code == 401
 
 
@@ -128,7 +129,6 @@ def test_suggested_questions_requires_auth(chat_client):
 def test_post_message_success(chat_client):
     resp = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "test-001", "message": "Show overdue by salesperson"},
         cookies={"lang": "en"},
     )
@@ -141,18 +141,18 @@ def test_post_message_success(chat_client):
     assert data["message"]["intent"] == "list_overdue_by_salesperson"
 
 
-def test_post_message_requires_auth(chat_client):
-    resp = chat_client.post(
-        "/api/v1/chat/message",
-        json={"session_id": "test-002", "message": "Hello"},
-    )
+def test_post_message_requires_auth():
+    with TestClient(app) as c:
+        resp = c.post(
+            "/api/v1/chat/message",
+            json={"session_id": "test-002", "message": "Hello"},
+        )
     assert resp.status_code == 401
 
 
 def test_post_message_rejects_empty(chat_client):
     resp = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "test-003", "message": ""},
     )
     assert resp.status_code == 422
@@ -161,7 +161,6 @@ def test_post_message_rejects_empty(chat_client):
 def test_post_message_rejects_too_long(chat_client):
     resp = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "test-004", "message": "x" * 501},
     )
     assert resp.status_code == 422
@@ -169,6 +168,12 @@ def test_post_message_rejects_too_long(chat_client):
 
 def test_post_message_budget_exceeded():
     with TestClient(app) as c:
+        r = c.post(
+            "/login",
+            data={"username": "testadmin", "password": "testpass", "next": "/"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
         app.state.chat_session_manager = SessionManager()
         app.state.chat_intent_cache = IntentCache()
         app.state.ai_client = _make_ai_client()
@@ -178,7 +183,6 @@ def test_post_message_budget_exceeded():
 
         resp = c.post(
             "/api/v1/chat/message",
-            auth=AUTH,
             json={"session_id": "budget-test", "message": "Hello"},
             cookies={"lang": "en"},
         )
@@ -191,7 +195,6 @@ def test_post_message_session_continuity(chat_client):
     app.state.ai_client = _make_ai_client("count_by_stage")
     r1 = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": session_id, "message": "How many in Negotiation?"},
         cookies={"lang": "en"},
     )
@@ -201,7 +204,6 @@ def test_post_message_session_continuity(chat_client):
     app.state.ai_client = _make_ai_client("free_form_analysis")
     r2 = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": session_id, "message": "What about the pipeline overall?"},
         cookies={"lang": "en"},
     )
@@ -213,7 +215,6 @@ def test_post_message_ar_locale(chat_client):
     app.state.ai_client = _make_ai_client("list_overdue_by_salesperson")
     resp = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "ar-test", "message": "إيه أعلى مندوبين؟"},
         cookies={"lang": "ar"},
     )
@@ -228,11 +229,10 @@ def test_delete_session(chat_client):
     app.state.ai_client = _make_ai_client()
     chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "to-delete", "message": "Hello"},
         cookies={"lang": "en"},
     )
-    resp = chat_client.delete("/api/v1/chat/session/to-delete", auth=AUTH)
+    resp = chat_client.delete("/api/v1/chat/session/to-delete")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
@@ -240,15 +240,16 @@ def test_delete_session(chat_client):
 
 
 def test_delete_nonexistent_session(chat_client):
-    resp = chat_client.delete("/api/v1/chat/session/does-not-exist", auth=AUTH)
+    resp = chat_client.delete("/api/v1/chat/session/does-not-exist")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
     assert data["deleted"] is False
 
 
-def test_delete_session_requires_auth(chat_client):
-    resp = chat_client.delete("/api/v1/chat/session/some-id")
+def test_delete_session_requires_auth():
+    with TestClient(app) as c:
+        resp = c.delete("/api/v1/chat/session/some-id")
     assert resp.status_code == 401
 
 
@@ -281,7 +282,6 @@ def test_greeting_does_not_call_crm(chat_client):
 
     resp = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "greeting-test", "message": "أهلاً"},
         cookies={"lang": "ar"},
     )
@@ -297,7 +297,6 @@ def test_thanks_response_is_low_cost(chat_client):
 
     resp = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "thanks-test", "message": "شكراً"},
         cookies={"lang": "ar"},
     )
@@ -313,7 +312,6 @@ def test_meta_question_returns_200(chat_client):
 
     resp = chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "meta-test", "message": "إنت AI ولا بشر؟"},
         cookies={"lang": "ar"},
     )
@@ -331,7 +329,6 @@ def test_no_odoo_writes_during_chat(chat_client):
 
     chat_client.post(
         "/api/v1/chat/message",
-        auth=AUTH,
         json={"session_id": "readonly-test", "message": "Show overdue"},
         cookies={"lang": "en"},
     )

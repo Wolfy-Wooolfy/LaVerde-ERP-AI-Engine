@@ -316,8 +316,16 @@
         HR
       </a>
     </nav>
-    <div class="p-3 border-t border-neutral-100 dark:border-neutral-800 text-sm text-neutral-500">
-      {{ current_user }}
+    <div class="p-3 border-t border-neutral-100 dark:border-neutral-800">
+      <div class="text-sm text-neutral-500 dark:text-neutral-400 px-1 mb-2">{{ current_user }}</div>
+      <a href="/logout"
+        class="sidebar-link text-danger-600 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-950/30"
+        title="{{ _t('Logout') }}">
+        <svg class="sidebar-link-icon shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+        </svg>
+        <span class="text-xs truncate">{{ _t("Logout") }}</span>
+      </a>
     </div>
   </aside>
 

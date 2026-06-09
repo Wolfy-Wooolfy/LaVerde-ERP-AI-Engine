@@ -24,7 +24,7 @@ window.crmApi = {
       response = await fetch(url, {
         method,
         headers,
-        credentials: 'include',   // sends Basic Auth cookies
+        credentials: 'include',   // sends session cookie
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (networkError) {

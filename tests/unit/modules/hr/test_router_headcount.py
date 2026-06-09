@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.api.deps import get_current_user
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
 _URL = "/api/v1/hr/kpi/headcount"
 
 _MOCK_DATA = {
@@ -37,7 +37,10 @@ _MOCK_DATA = {
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
+    app.dependency_overrides[get_current_user] = lambda: "testadmin"
+    c = TestClient(app, raise_server_exceptions=True)
+    yield c
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ── Test 1 — 200 + JSON shape ─────────────────────────────────────────────────
@@ -48,7 +51,7 @@ def test_headcount_returns_200_and_all_keys(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_headcount",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     body = r.json()
@@ -70,7 +73,7 @@ def test_response_has_cache_headers(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_headcount",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     assert "private, max-age=60" in r.headers.get("cache-control", "")
@@ -86,7 +89,7 @@ def test_cache_status_cached_reflected_in_header(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_headcount",
         new=AsyncMock(return_value=cached_data),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     assert r.headers.get("x-cache-status") == "cached"
@@ -100,7 +103,7 @@ def test_odoo_query_error_returns_503(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_headcount",
         new=AsyncMock(side_effect=OdooQueryError("connection refused")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 503
     assert r.json()["error"]["code"] == "odoo_unavailable"
@@ -114,7 +117,7 @@ def test_unexpected_exception_returns_500(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_headcount",
         new=AsyncMock(side_effect=RuntimeError("unexpected")),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 500
     assert r.json()["error"]["code"] == "internal_error"
@@ -128,7 +131,7 @@ def test_null_department_id_serialized_as_null(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_headcount",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     by_dept = r.json()["by_department"]
@@ -145,7 +148,7 @@ def test_null_job_id_serialized_as_null(client: TestClient) -> None:
         "backend.api.v1.endpoints.hr.get_headcount",
         new=AsyncMock(return_value=_MOCK_DATA),
     ):
-        r = client.get(_URL, auth=_AUTH)
+        r = client.get(_URL)
 
     assert r.status_code == 200
     by_job = r.json()["by_job"]
@@ -157,7 +160,7 @@ def test_null_job_id_serialized_as_null(client: TestClient) -> None:
 # ── Test 8 — 401 when no auth supplied ───────────────────────────────────────
 
 
-def test_401_when_no_auth(client: TestClient) -> None:
+def test_401_when_no_auth() -> None:
     """HR KPI endpoints must reject unauthenticated requests with 401.
 
     Added 2026-06-09 as part of the security hotfix that wired
@@ -165,7 +168,8 @@ def test_401_when_no_auth(client: TestClient) -> None:
     payroll-risk-dashboard, and department-cost.
     No service patch needed — auth is checked before the handler body runs.
     """
-    r = client.get(_URL)  # no auth; _URL = /api/v1/hr/kpi/headcount
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL)  # no session
     assert r.status_code == 401, (
         f"Expected 401 for unauthenticated HR KPI request, got {r.status_code}"
     )

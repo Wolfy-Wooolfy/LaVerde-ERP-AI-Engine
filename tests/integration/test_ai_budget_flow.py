@@ -13,8 +13,6 @@ from backend.shared.ai.exceptions import BudgetExceededError
 from backend.modules.crm.ai.prioritizer import LeadPrioritizer
 from backend.main import app
 
-AUTH = ("testadmin", "testpass")
-
 
 @pytest.fixture
 def exhausted_tracker(tmp_path):
@@ -49,9 +47,15 @@ def test_budget_endpoint_shows_exhausted_state(tmp_path):
     tracker.record_spend(0.02, "gpt-4o-mini")
 
     with TestClient(app) as client:
+        r = client.post(
+            "/login",
+            data={"username": "testadmin", "password": "testpass", "next": "/"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
         app.state.ai_budget_tracker = tracker
         app.state.ai_prioritizer = MagicMock()
-        resp = client.get("/api/v1/ai/budget", auth=AUTH)
+        resp = client.get("/api/v1/ai/budget")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -68,9 +72,15 @@ def test_prioritize_overdue_returns_402_when_budget_exhausted(tmp_path):
     )
 
     with TestClient(app) as client:
+        r = client.post(
+            "/login",
+            data={"username": "testadmin", "password": "testpass", "next": "/"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
         app.state.ai_budget_tracker = tracker
         app.state.ai_prioritizer = mock_prioritizer
-        resp = client.post("/api/v1/ai/prioritize-overdue", json={"limit": 10}, auth=AUTH)
+        resp = client.post("/api/v1/ai/prioritize-overdue", json={"limit": 10})
 
     assert resp.status_code == 402
     data = resp.json()
@@ -84,9 +94,15 @@ def test_ai_health_shows_degraded_when_budget_exhausted(tmp_path):
     tracker.record_spend(0.02, "gpt-4o-mini")
 
     with TestClient(app) as client:
+        r = client.post(
+            "/login",
+            data={"username": "testadmin", "password": "testpass", "next": "/"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
         app.state.ai_budget_tracker = tracker
         app.state.ai_prioritizer = MagicMock()
-        resp = client.get("/api/v1/ai/health", auth=AUTH)
+        resp = client.get("/api/v1/ai/health")
 
     assert resp.status_code == 200
     data = resp.json()

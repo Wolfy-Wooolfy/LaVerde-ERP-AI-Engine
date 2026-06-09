@@ -20,8 +20,6 @@ from backend.modules.crm.schemas import (
     SummaryResponse,
 )
 
-_AUTH = ("testadmin", "testpass")
-
 # ── Mock service factory ──────────────────────────────────────────────────────
 
 
@@ -110,8 +108,8 @@ def test_v1_health_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def test_v1_health_with_auth(client: TestClient) -> None:
-    r = client.get("/api/v1/health", auth=_AUTH)
+def test_v1_health_with_auth(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/health")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
@@ -127,24 +125,25 @@ def test_summary_requires_auth(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def test_summary_with_auth(client: TestClient) -> None:
-    r = client.get("/api/v1/summary", auth=_AUTH)
+def test_summary_with_auth(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/summary")
     assert r.status_code == 200
     body = r.json()
     assert body["mode"] == "read_only"
     assert body["summary"]["total_leads"] == 50
 
 
-def test_summary_wrong_password(client: TestClient) -> None:
-    r = client.get("/api/v1/summary", auth=("testadmin", "wrong"))
+def test_summary_unauthenticated(client: TestClient) -> None:
+    """Basic auth is no longer accepted; only session cookies work."""
+    r = client.get("/api/v1/summary")
     assert r.status_code == 401
 
 
 # ── /api/v1/followup-risk ─────────────────────────────────────────────────────
 
 
-def test_followup_risk_with_auth(client: TestClient) -> None:
-    r = client.get("/api/v1/followup-risk", auth=_AUTH)
+def test_followup_risk_with_auth(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/followup-risk")
     assert r.status_code == 200
     assert "followup_risk" in r.json()
 
@@ -152,29 +151,29 @@ def test_followup_risk_with_auth(client: TestClient) -> None:
 # ── /api/v1/data-quality/missing-contact (paginated) ─────────────────────────
 
 
-def test_missing_contact_with_auth(client: TestClient) -> None:
-    r = client.get("/api/v1/data-quality/missing-contact", auth=_AUTH)
+def test_missing_contact_with_auth(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-contact")
     assert r.status_code == 200
     body = r.json()
     assert "data" in body
     assert "pagination" in body
 
 
-def test_missing_contact_pagination_params(client: TestClient) -> None:
-    r = client.get("/api/v1/data-quality/missing-contact?page=2&page_size=25", auth=_AUTH)
+def test_missing_contact_pagination_params(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-contact?page=2&page_size=25")
     assert r.status_code == 200
 
 
-def test_missing_contact_invalid_page_size(client: TestClient) -> None:
-    r = client.get("/api/v1/data-quality/missing-contact?page_size=999", auth=_AUTH)
+def test_missing_contact_invalid_page_size(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-contact?page_size=999")
     assert r.status_code == 422  # Pydantic validation
 
 
 # ── /api/v1/metrics ───────────────────────────────────────────────────────────
 
 
-def test_metrics_endpoint_with_auth(client: TestClient) -> None:
-    r = client.get("/api/v1/metrics", auth=_AUTH)
+def test_metrics_endpoint_with_auth(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/metrics")
     assert r.status_code == 200
     body = r.json()
     assert "odoo" in body
@@ -206,12 +205,13 @@ def test_legacy_missing_contact_redirects(client: TestClient) -> None:
 
 
 def test_dashboard_html_requires_auth(client: TestClient) -> None:
-    r = client.get("/dashboard")
-    assert r.status_code == 401
+    r = client.get("/dashboard", follow_redirects=False)
+    assert r.status_code == 302
+    assert "/login" in r.headers.get("location", "")
 
 
-def test_dashboard_html_with_auth(client: TestClient) -> None:
-    r = client.get("/dashboard", auth=_AUTH)
+def test_dashboard_html_with_auth(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
     assert r.status_code == 200
     assert "LaVerde ERP AI Engine" in r.text
 
@@ -238,5 +238,5 @@ def test_request_id_header_present(client: TestClient) -> None:
 
 def test_error_response_structure_on_401(client: TestClient) -> None:
     r = client.get("/api/v1/summary")
-    # 401 comes from HTTPBasic, not our handler — just verify it's 401
+    # 401 from session check (no session) — verify it's 401
     assert r.status_code == 401

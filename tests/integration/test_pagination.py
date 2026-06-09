@@ -12,8 +12,6 @@ from backend.modules.crm.schemas import (
     Pagination,
 )
 
-_AUTH = ("testadmin", "testpass")
-
 
 def _paginated(page: int, page_size: int, total: int) -> PaginatedMissingContactResponse:
     total_pages = max(1, -(-total // page_size))  # ceiling division
@@ -42,13 +40,8 @@ def override_service() -> None:
     app.dependency_overrides.clear()
 
 
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app)
-
-
-def test_default_pagination(client: TestClient) -> None:
-    r = client.get("/api/v1/data-quality/missing-contact", auth=_AUTH)
+def test_default_pagination(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-contact")
     assert r.status_code == 200
     body = r.json()
     p = body["pagination"]
@@ -56,27 +49,27 @@ def test_default_pagination(client: TestClient) -> None:
     assert p["page_size"] == 50
 
 
-def test_page_2_has_prev(client: TestClient) -> None:
-    r = client.get("/api/v1/data-quality/missing-contact?page=2&page_size=50", auth=_AUTH)
+def test_page_2_has_prev(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-contact?page=2&page_size=50")
     assert r.status_code == 200
     p = r.json()["pagination"]
     assert p["has_prev"] is True
     assert p["page"] == 2
 
 
-def test_last_page_has_no_next(client: TestClient) -> None:
+def test_last_page_has_no_next(authed_client: TestClient) -> None:
     # 234 total, page_size=50 → 5 pages, last page = 5
-    r = client.get("/api/v1/data-quality/missing-contact?page=5&page_size=50", auth=_AUTH)
+    r = authed_client.get("/api/v1/data-quality/missing-contact?page=5&page_size=50")
     assert r.status_code == 200
     p = r.json()["pagination"]
     assert p["has_next"] is False
 
 
-def test_page_size_max_200(client: TestClient) -> None:
-    r = client.get("/api/v1/data-quality/missing-contact?page_size=200", auth=_AUTH)
+def test_page_size_max_200(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-contact?page_size=200")
     assert r.status_code == 200
 
 
-def test_page_size_over_200_rejected(client: TestClient) -> None:
-    r = client.get("/api/v1/data-quality/missing-contact?page_size=201", auth=_AUTH)
+def test_page_size_over_200_rejected(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-contact?page_size=201")
     assert r.status_code == 422

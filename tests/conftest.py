@@ -39,3 +39,9 @@ else:
 # Always enforce these test-specific overrides regardless of .env.test content.
 os.environ["USER_DB_PATH"] = _TEST_USER_DB
 os.environ["SESSION_SECRET"] = "test-session-secret-exactly-32-chars!"
+
+# Disable rate limiting so fixture POST /login calls are never throttled.
+# The 10/minute limit on POST /login is designed for production; under test the
+# testclient IP is shared across all modules and would exhaust the limit instantly.
+from backend.core.limiter import limiter as _app_limiter  # noqa: E402
+_app_limiter.enabled = False

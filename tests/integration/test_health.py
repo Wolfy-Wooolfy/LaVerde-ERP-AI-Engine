@@ -8,8 +8,6 @@ from fastapi.testclient import TestClient
 from backend.api.deps import get_crm_service
 from backend.main import app
 
-_AUTH = ("testadmin", "testpass")
-
 
 def _make_service(auth_ok: bool = True, query_ok: bool = True) -> MagicMock:
     svc = MagicMock()
@@ -74,8 +72,8 @@ def test_liveness_probe(client: TestClient) -> None:
 # ── /api/v1/health ────────────────────────────────────────────────────────────
 
 
-def test_authenticated_health(client: TestClient, ok_service: None) -> None:
-    r = client.get("/api/v1/health", auth=_AUTH)
+def test_authenticated_health(authed_client: TestClient, ok_service: None) -> None:
+    r = authed_client.get("/api/v1/health")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
@@ -86,8 +84,8 @@ def test_authenticated_health(client: TestClient, ok_service: None) -> None:
 # ── /api/v1/health/odoo ───────────────────────────────────────────────────────
 
 
-def test_odoo_health_ok(client: TestClient, ok_service: None) -> None:
-    r = client.get("/api/v1/health/odoo", auth=_AUTH)
+def test_odoo_health_ok(authed_client: TestClient, ok_service: None) -> None:
+    r = authed_client.get("/api/v1/health/odoo")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
@@ -95,17 +93,17 @@ def test_odoo_health_ok(client: TestClient, ok_service: None) -> None:
     assert "response_time_ms" in body
 
 
-def test_odoo_health_auth_fail(client: TestClient, auth_fail_service: None) -> None:
-    r = client.get("/api/v1/health/odoo", auth=_AUTH)
+def test_odoo_health_auth_fail(authed_client: TestClient, auth_fail_service: None) -> None:
+    r = authed_client.get("/api/v1/health/odoo")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "degraded"
     assert body["auth_valid"] is False
 
 
-def test_odoo_health_conn_fail(client: TestClient, conn_fail_service: None) -> None:
+def test_odoo_health_conn_fail(authed_client: TestClient, conn_fail_service: None) -> None:
     # conn_fail_service fails execute_kw but auth succeeds — health/odoo only checks auth
-    r = client.get("/api/v1/health/odoo", auth=_AUTH)
+    r = authed_client.get("/api/v1/health/odoo")
     assert r.status_code == 200
     # auth passed, so status is ok (deep check would catch the execute_kw failure)
     assert r.json()["auth_valid"] is True
@@ -114,15 +112,15 @@ def test_odoo_health_conn_fail(client: TestClient, conn_fail_service: None) -> N
 # ── /api/v1/health/deep ───────────────────────────────────────────────────────
 
 
-def test_deep_health_ok(client: TestClient, ok_service: None) -> None:
-    r = client.get("/api/v1/health/deep", auth=_AUTH)
+def test_deep_health_ok(authed_client: TestClient, ok_service: None) -> None:
+    r = authed_client.get("/api/v1/health/deep")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
     assert body["checks"]["odoo"]["ok"] is True
 
 
-def test_deep_health_odoo_down(client: TestClient) -> None:
+def test_deep_health_odoo_down(authed_client: TestClient) -> None:
     from backend.core.exceptions import OdooConnectionError
 
     svc = MagicMock()
@@ -131,7 +129,7 @@ def test_deep_health_odoo_down(client: TestClient) -> None:
     svc.client.execute_kw = AsyncMock(side_effect=OdooConnectionError("down"))
     app.dependency_overrides[get_crm_service] = lambda: svc
     try:
-        r = client.get("/api/v1/health/deep", auth=_AUTH)
+        r = authed_client.get("/api/v1/health/deep")
         assert r.status_code == 503
         body = r.json()
         assert body["status"] == "degraded"

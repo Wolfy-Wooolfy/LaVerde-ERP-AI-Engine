@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from backend.api.deps import get_crm_service, get_current_user
+from backend.api.deps import get_crm_service, get_current_user_html
 from backend.core.config import settings
 from backend.core.i18n import detect_lang, load_translations, make_translator
 from backend.modules.crm.service import CrmService
@@ -48,7 +48,7 @@ def _base_ctx(request: Request, user: str) -> dict:
 @router.get("/dashboard", response_class=HTMLResponse, summary="CRM dashboard (HTML)")
 async def dashboard(
     request: Request,
-    user: str = Depends(get_current_user),
+    user: str = Depends(get_current_user_html),
     service: CrmService = Depends(get_crm_service),
 ) -> HTMLResponse:
     data = await service.summary()
@@ -70,7 +70,7 @@ async def dashboard(
 @router.get("/collections/dashboard", response_class=HTMLResponse, summary="Collections dashboard (HTML)")
 async def collections_dashboard(
     request: Request,
-    user: str = Depends(get_current_user),
+    user: str = Depends(get_current_user_html),
 ) -> HTMLResponse:
     ctx = _base_ctx(request, user)
     ctx["page"] = "collections_dashboard"
@@ -80,7 +80,7 @@ async def collections_dashboard(
 @router.get("/customer-accounts/dashboard", response_class=HTMLResponse, summary="Customer Accounts dashboard (HTML)")
 async def customer_accounts_dashboard(
     request: Request,
-    user: str = Depends(get_current_user),
+    user: str = Depends(get_current_user_html),
 ) -> HTMLResponse:
     ctx = _base_ctx(request, user)
     ctx["page"] = "customer_accounts_dashboard"
@@ -90,7 +90,7 @@ async def customer_accounts_dashboard(
 @router.get("/hr/dashboard", response_class=HTMLResponse, summary="HR overview dashboard (HTML)")
 async def hr_dashboard(
     request: Request,
-    user: str = Depends(get_current_user),
+    user: str = Depends(get_current_user_html),
 ) -> HTMLResponse:
     headcount, tenure, payroll_risk, dept_cost = await asyncio.gather(
         get_headcount(),
@@ -150,7 +150,7 @@ async def missing_contact_page(
     team_id: int | None = Query(None),
     salesperson_id: int | None = Query(None),
     sort: str = Query("create_date desc"),
-    user: str = Depends(get_current_user),
+    user: str = Depends(get_current_user_html),
     service: CrmService = Depends(get_crm_service),
 ) -> HTMLResponse:
     rows, total = await service.missing_contact_details(
