@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="{{ lang | default('en') }}"
+      dir="{{ 'rtl' if is_rtl else 'ltr' }}"
+      data-lang="{{ lang | default('en') }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{{ _t("login.title") }} — LaVerde ERP AI Engine</title>
+
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="mask-icon" href="/static/favicon.svg" color="#4f46e5">
+  <link rel="stylesheet" href="/static/vendor/fonts.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+
+  <!-- Prevent theme flash -->
+  <script>
+    (function() {
+      var theme = localStorage.getItem('crmTheme') || 'system';
+      var dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      if (dark) document.documentElement.classList.add('dark');
+    })();
+  </script>
+</head>
+
+<body class="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center p-4">
+
+  <div class="w-full max-w-sm">
+
+    <!-- Card -->
+    <div class="bg-white dark:bg-neutral-900 rounded-2xl shadow-sm border border-neutral-200 dark:border-neutral-800 p-8">
+
+      <!-- Logo + branding -->
+      <div class="flex flex-col items-center gap-3 mb-8">
+        <div class="w-12 h-12 rounded-xl bg-primary-600 flex items-center justify-center">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+        </div>
+        <div class="text-center">
+          <h1 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">LaVerde ERP AI Engine</h1>
+          <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{{ _t("login.subtitle") }}</p>
+        </div>
+      </div>
+
+      <!-- Error banner -->
+      {% if error %}
+      <div class="mb-5 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800
+                  text-sm text-red-700 dark:text-red-400" role="alert">
+        {{ _t(error) }}
+      </div>
+      {% endif %}
+
+      <!-- Login form -->
+      <form action="/login" method="POST" class="space-y-4">
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <div>
+          <label for="username"
+                 class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">
+            {{ _t("login.username_label") }}
+          </label>
+          <input id="username"
+                 name="username"
+                 type="text"
+                 autocomplete="username"
+                 autofocus
+                 required
+                 class="w-full px-3 py-2 rounded-lg text-sm
+                        bg-white dark:bg-neutral-800
+                        border border-neutral-300 dark:border-neutral-700
+                        text-neutral-900 dark:text-neutral-100
+                        placeholder-neutral-400 dark:placeholder-neutral-500
+                        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                        transition-colors">
+        </div>
+
+        <div>
+          <label for="password"
+                 class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">
+            {{ _t("login.password_label") }}
+          </label>
+          <input id="password"
+                 name="password"
+                 type="password"
+                 autocomplete="current-password"
+                 required
+                 class="w-full px-3 py-2 rounded-lg text-sm
+                        bg-white dark:bg-neutral-800
+                        border border-neutral-300 dark:border-neutral-700
+                        text-neutral-900 dark:text-neutral-100
+                        placeholder-neutral-400 dark:placeholder-neutral-500
+                        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                        transition-colors">
+        </div>
+
+        <button type="submit"
+                class="w-full py-2.5 px-4 rounded-lg text-sm font-semibold
+                       bg-primary-600 hover:bg-primary-700 active:bg-primary-800
+                       text-white transition-colors focus:outline-none focus:ring-2
+                       focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-900">
+          {{ _t("login.submit") }}
+        </button>
+      </form>
+
+    </div>
+
+    <!-- Language toggle -->
+    <div class="mt-4 flex justify-center gap-3 text-sm text-neutral-500 dark:text-neutral-400">
+      <a href="?next={{ next }}"
+         onclick="document.cookie='lang=en;path=/;max-age=31536000'; return true;"
+         class="hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors
+                {% if not is_rtl %}font-semibold text-neutral-700 dark:text-neutral-200{% endif %}">
+        English
+      </a>
+      <span class="select-none">·</span>
+      <a href="?next={{ next }}"
+         onclick="document.cookie='lang=ar;path=/;max-age=31536000'; return true;"
+         class="hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors
+                {% if is_rtl %}font-semibold text-neutral-700 dark:text-neutral-200{% endif %}">
+        العربية
+      </a>
+    </div>
+
+  </div>
+
+</body>
+</html>

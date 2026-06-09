@@ -1,4 +1,12 @@
 {
+  "login.title": "تسجيل الدخول",
+  "login.subtitle": "سجّل دخولك إلى حسابك",
+  "login.username_label": "اسم المستخدم",
+  "login.password_label": "كلمة المرور",
+  "login.submit": "دخول",
+  "login.error.invalid": "اسم المستخدم أو كلمة المرور غير صحيحة.",
+  "login.error.inactive": "تم تعطيل حسابك. تواصل مع المسؤول.",
+
   "Dashboard": "لوحة التحكم",
   "Missing Contacts": "جهات الاتصال المفقودة",
   "Sales Pipeline": "خط المبيعات",

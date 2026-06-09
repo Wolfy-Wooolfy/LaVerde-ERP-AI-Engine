@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     BASIC_AUTH_PASSWORD: str
     USER_DB_PATH: str = "data/users.db"
 
+    # ── Session ───────────────────────────────────────────────────────────────
+    SESSION_SECRET: str = ""
+    SESSION_COOKIE_MAX_AGE: int = 28800  # 8 hours
+
     # ── Cache ─────────────────────────────────────────────────────────────────
     CACHE_TTL_SECONDS: int = 60
 
@@ -111,6 +115,23 @@ class Settings(BaseSettings):
         if lower not in allowed:
             raise ValueError(f"ENVIRONMENT must be one of {allowed}")
         return lower
+
+    @model_validator(mode="after")
+    def validate_session_secret(self) -> "Settings":
+        if self.ENVIRONMENT == "production":
+            if not self.SESSION_SECRET:
+                raise ValueError(
+                    "SESSION_SECRET is required in production. "
+                    "Generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
+            if len(self.SESSION_SECRET) < 32:
+                raise ValueError("SESSION_SECRET must be at least 32 characters in production.")
+        elif not self.SESSION_SECRET:
+            logger.warning(
+                "SESSION_SECRET is not set — sessions will use an insecure dev default. "
+                "Set SESSION_SECRET in .env before deploying."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_ai_config(self) -> "Settings":

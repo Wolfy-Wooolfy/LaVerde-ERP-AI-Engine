@@ -5,6 +5,13 @@ Root conftest — sets up test environment variables BEFORE any backend module i
 import os
 from pathlib import Path
 
+_TEST_USER_DB = "data/test-users.db"
+
+# Wipe the test user DB before every session so the A1 seed always fires fresh.
+Path(_TEST_USER_DB).parent.mkdir(parents=True, exist_ok=True)
+if Path(_TEST_USER_DB).exists():
+    Path(_TEST_USER_DB).unlink()
+
 # Load test env vars before pydantic-settings instantiates Settings
 _env_file = Path(__file__).parent / ".env.test"
 if _env_file.exists():
@@ -28,3 +35,7 @@ else:
     }
     for k, v in _defaults.items():
         os.environ.setdefault(k, v)
+
+# Always enforce these test-specific overrides regardless of .env.test content.
+os.environ["USER_DB_PATH"] = _TEST_USER_DB
+os.environ["SESSION_SECRET"] = "test-session-secret-exactly-32-chars!"

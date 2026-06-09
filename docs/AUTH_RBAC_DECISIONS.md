@@ -76,3 +76,82 @@ users. An IT admin has `modules=["hr"], is_admin=True` — manages users, sees o
   the username is not found, `ValueError` if called with no fields to update.
 - `create_user` raises `ValueError` if the username already exists (wraps
   `sqlite3.IntegrityError`).
+
+---
+
+## A2 — Session-Cookie Authentication
+
+### A2.D1 — SessionMiddleware
+
+Starlette's built-in `SessionMiddleware` (zero extra deps — Starlette is already a FastAPI
+transitive dependency). Session payload: `{"username": <str>}` only. Full `UserRecord`
+is resolved from `user_repo` on every authenticated request to propagate deactivation
+immediately without session invalidation.
+
+Placement in middleware stack (outermost → innermost):
+```
+request_id_middleware → security_headers_middleware → SessionMiddleware → CORSMiddleware → routes
+```
+CORS still handles OPTIONS before session parsing runs.
+
+### A2.D2 — Cookie Flags
+
+`HttpOnly=True` (Starlette default), `SameSite=lax`, `Secure=True` iff
+`ENVIRONMENT=="production"`, `max_age=28800` (8 h — one work session).
+`SameSite=lax` chosen over `strict` to allow intranet link-following without forcing
+re-login. Sub-resource cross-origin requests (AJAX) don't carry lax cookies → adequate
+CSRF protection for the API surface.
+
+### A2.D3 — Dual Unauthenticated Behaviour
+
+Two FastAPI dependencies, both returning `str` (username) on success:
+
+- `get_current_user(request)` → `str` or raises HTTP 401.  
+  Used on all `/api/v1/*` routes. Keeps the hotfix-era 401 guarantees intact.
+- `get_current_user_html(request)` → `str` or raises HTTP 302 to `/login?next=<path>`.  
+  Used on all HTML page routes in `dashboard.py`.
+
+The 23 API endpoint files' `user: str = Depends(get_current_user)` annotations are
+**unchanged** — Amendment A1. Full `UserRecord` / `modules` exposure is deferred to A3.
+
+No global auth middleware — per-route `Depends` pattern retained from A1.
+
+### A2.D4 — /login, /logout Route Placement
+
+New file `backend/api/v1/endpoints/auth.py`, included via `app.include_router(auth_router)`
+with no prefix. Routes are `GET /login`, `POST /login` (rate-limited to 10/min per IP),
+`GET /logout`. The old inline `/logout` stub in `main.py` (401 + WWW-Authenticate) is
+removed in Commit 2. Both `/login` and `/logout` are standalone HTML routes (not under
+`/api/v1`).
+
+### A2.D5 — SESSION_SECRET Handling
+
+`SESSION_SECRET: str = ""` in `Settings`. Empty string allowed in `development`/`staging`
+with a logger.warning (dev default passed to middleware). Required + ≥ 32 chars in
+`production` — fail-fast at `Settings` instantiation so the process never starts.
+Never committed; `.env.example` has an empty placeholder with a generation command.
+
+### A2.D6 — Basic Auth Retirement
+
+`backend/core/security.py` deleted in Commit 2. `HTTPBasic` and `verify_credentials`
+removed from `backend/api/deps.py`. `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` retained
+in `Settings` as the A1 seed source only — they are no longer runtime auth credentials.
+`WWW-Authenticate: Basic` header no longer sent on 401 responses.
+
+### A2.D7 — Test Auth Strategy
+
+Integration tests: shared `authed_client` fixture in `tests/integration/conftest.py`
+that logs in via `POST /login` and carries the session cookie (`scope="module"` to
+amortise bcrypt). Service mocking (dependency_overrides for `get_crm_service`) continues
+per-file as before; it composes with the session cookie independently.
+
+Unit router tests: `app.dependency_overrides[get_current_user] = lambda: "testadmin"`
+pattern — faster, isolated, no DB dependency.
+
+E2E (Playwright): login-form flow replacing Authorization header injection.
+
+Test DB: `USER_DB_PATH=data/test-users.db` (dedicated temp file, deleted at session
+start in `tests/conftest.py` so the seed always fires fresh). Real `data/users.db`
+is never touched by the test suite. Not `:memory:` — the repository uses a single
+persistent connection so `:memory:` would work, but a file gives a cleaner failure
+message if something goes wrong.

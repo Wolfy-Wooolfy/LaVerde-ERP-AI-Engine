@@ -15,10 +15,12 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from backend.api.deps import get_current_user  # noqa: F401 — re-exported for tests
+from backend.api.v1.endpoints.auth import router as auth_router
 from backend.api.v1.endpoints.dashboard import router as dashboard_router
 from backend.api.v1.router import api_v1_router
 from backend.core.cache import init_cache
@@ -145,6 +147,14 @@ app.add_middleware(
     allow_methods=["GET", "OPTIONS"],
     allow_headers=["*"],
     allow_credentials=False,
+)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.SESSION_SECRET or "dev-insecure-change-me-in-env",
+    max_age=settings.SESSION_COOKIE_MAX_AGE,
+    https_only=(settings.ENVIRONMENT == "production"),
+    same_site="lax",
 )
 
 # ── Security headers middleware ───────────────────────────────────────────────
@@ -294,6 +304,7 @@ def logout() -> Response:
 
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(dashboard_router)
+app.include_router(auth_router)
 
 # ── Static files ──────────────────────────────────────────────────────────────
 

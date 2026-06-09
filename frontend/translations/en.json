@@ -1,4 +1,12 @@
 {
+  "login.title": "Sign In",
+  "login.subtitle": "Sign in to your account",
+  "login.username_label": "Username",
+  "login.password_label": "Password",
+  "login.submit": "Sign In",
+  "login.error.invalid": "Invalid username or password.",
+  "login.error.inactive": "Your account is deactivated. Contact an administrator.",
+
   "Dashboard": "Dashboard",
   "Missing Contacts": "Missing Contacts",
   "Sales Pipeline": "Sales Pipeline",
