@@ -262,6 +262,8 @@
   "ca_dd_no_results":         "لا توجد أقساط",
   "ca_dd_error_fetch":        "خطأ في التحميل. حاول مجدداً.",
   "ca_dd_try_again":          "إعادة المحاولة",
+  "ca_dd_overpaid_credit":    "رصيد مدفوع بالزيادة",
+  "ca_dd_quality_note":       "ملحوظة عن جودة البيانات: أرقام العميل ده مش متطابقة بالكامل",
 
   "ca_rd_panel_title":        "الاستردادات",
   "ca_rd_close":              "إغلاق",

@@ -31,6 +31,7 @@
   var _panel, _backdrop, _title, _subtitle, _closeBtn,
       _loadingSentinel, _summary,
       _totalDue, _lateDue, _futureDue, _paidCash, _contractLine,
+      _overpaidCard, _overpaidCredit, _qualityNote,
       _paymentRatio, _walletBalance, _instCount,
       _listBody, _emptyMsg, _errorMsg, _loadMoreBtn;
 
@@ -47,6 +48,9 @@
     _futureDue        = document.getElementById('ca-dd-future-due');
     _paidCash         = document.getElementById('ca-dd-paid-cash');
     _contractLine     = document.getElementById('ca-dd-contract-line');
+    _overpaidCard     = document.getElementById('ca-dd-overpaid-card');
+    _overpaidCredit   = document.getElementById('ca-dd-overpaid-credit');
+    _qualityNote      = document.getElementById('ca-dd-quality-note');
     _paymentRatio     = document.getElementById('ca-dd-payment-ratio');
     _walletBalance    = document.getElementById('ca-dd-wallet-balance');
     _instCount        = document.getElementById('ca-dd-inst-count');
@@ -79,6 +83,8 @@
     _hide(_emptyMsg);
     _hide(_errorMsg);
     _hide(_loadMoreBtn);
+    _hide(_overpaidCard);
+    _hide(_qualityNote);
     _loadingSentinel.classList.remove('hidden');
 
     // Animate panel in
@@ -181,12 +187,29 @@
     _futureDue.textContent = _fmtFull(exposure.future_due_egp, lang);
     _paidCash.textContent  = _fmtFull(exposure.paid_cash_egp,  lang);
 
+    // Overpaid credit (رصيد مدفوع بالزيادة) — only when > 0 (Decision 18.2)
+    if (exposure.overpaid_credit_egp > 0) {
+      _overpaidCredit.textContent = _fmtFull(exposure.overpaid_credit_egp, lang);
+      _overpaidCard.classList.remove('hidden');
+    } else {
+      _hide(_overpaidCard);
+    }
+
     // Contract total secondary line
     var contractLabel = S.ca_dd_total_original || 'Contract Total';
     _contractLine.textContent = contractLabel + ': '
       + _fmtFull(exposure.total_original_egp, lang)
       + ' · ' + (exposure.total_installments || 0) + ' '
       + (S.ca_installments || 'installments');
+
+    // Non-blocking data-quality note (meta.data_quality_warning, Decision 18.2)
+    if (meta && meta.data_quality_warning) {
+      _qualityNote.textContent = (S.ca_dd_quality_note || 'Data quality note')
+        + ' (' + meta.data_quality_warning + ')';
+      _qualityNote.classList.remove('hidden');
+    } else {
+      _hide(_qualityNote);
+    }
 
     // Behavior
     _paymentRatio.textContent  = (behavior.payment_ratio_pct != null)

@@ -262,6 +262,8 @@
   "ca_dd_no_results":         "No installments found",
   "ca_dd_error_fetch":        "Failed to load. Please try again.",
   "ca_dd_try_again":          "Try again",
+  "ca_dd_overpaid_credit":    "Overpaid Credit",
+  "ca_dd_quality_note":       "Data quality note: this customer's figures did not fully reconcile",
 
   "ca_rd_panel_title":        "Refunds",
   "ca_rd_close":              "Close",

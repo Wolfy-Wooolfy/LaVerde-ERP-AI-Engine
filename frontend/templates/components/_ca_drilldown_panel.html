@@ -4,6 +4,7 @@
    Controller: window.caCustomerPanel.open(partnerId, triggerEl) / .close()
    IDs: ca-dd-backdrop, ca-dd-panel, ca-dd-title, ca-dd-subtitle,
         ca-dd-close-btn, ca-dd-loading-sentinel, ca-dd-summary,
+        ca-dd-overpaid-card, ca-dd-overpaid-credit, ca-dd-quality-note,
         ca-dd-list-body, ca-dd-empty-msg, ca-dd-error-msg, ca-dd-load-more-btn
    Animation and visibility fully managed by ca_drilldown.js.
    READ-ONLY: no POST or Odoo mutation.
@@ -153,9 +154,35 @@
 
           </div>
 
+          {# رصيد مدفوع بالزيادة — success strip, shown by JS only when
+             overpaid_credit_egp > 0 (Decision 18.2) #}
+          <div id="ca-dd-overpaid-card"
+               class="hidden mt-2.5 rounded-xl px-3 py-2.5
+                      bg-emerald-50 dark:bg-emerald-950/30
+                      border border-emerald-200 dark:border-emerald-800">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-[10px] text-emerald-600 dark:text-emerald-400">
+                {{ _t("ca_dd_overpaid_credit") }}
+              </p>
+              <p id="ca-dd-overpaid-credit"
+                 class="text-sm font-bold tabular text-emerald-700 dark:text-emerald-300 break-all">
+                —
+              </p>
+            </div>
+          </div>
+
           {# Contract total — secondary line below the 4 cards #}
           <p id="ca-dd-contract-line"
              class="mt-2 text-xs text-neutral-400 dark:text-neutral-500">
+          </p>
+
+          {# Data-quality note — non-blocking amber strip, shown by JS only when
+             meta.data_quality_warning is set (Decision 18.2) #}
+          <p id="ca-dd-quality-note"
+             class="hidden mt-2 rounded-lg px-3 py-2 text-[11px]
+                    bg-warning-50 dark:bg-warning-900/30
+                    border border-warning-200 dark:border-warning-800
+                    text-warning-700 dark:text-warning-300">
           </p>
         </section>
 
