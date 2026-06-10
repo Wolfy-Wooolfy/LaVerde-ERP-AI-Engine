@@ -189,7 +189,7 @@ class TestSidebarFiltering:
             pytest.skip(f"/hr/dashboard returned {r.status_code} — Odoo unavailable, skipping body check")
         body = r.text
         assert 'href="/hr/dashboard"' in body
-        assert 'href="/dashboard"' not in body  # CRM Overview + CRM module link absent
+        assert 'href="/dashboard"' not in body  # CRM module link absent
 
     def test_hr_only_sidebar_hides_collections_and_ca(self, hr_only_client):
         r = hr_only_client.get("/hr/dashboard")
