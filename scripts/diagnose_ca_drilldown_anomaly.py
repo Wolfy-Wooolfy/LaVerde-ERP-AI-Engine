@@ -24,10 +24,13 @@ AUTH EVIDENCE (verbatim sources):
     discover_m3s6_drilldown.py lines 59-74:  rpc() via POST /jsonrpc
     discover_m3s6_drilldown.py lines 77-84:  execute() via execute_kw
     discover_m3s6_drilldown.py lines 112-119: connect() via common/authenticate
-  Endpoint probe (FastAPI HTTP Basic Auth):
-    verify_kpi1_live.py line 37:  USERNAME = os.environ.get("VERIFY_USERNAME", "admin")
-    verify_kpi1_live.py line 38:  PASSWORD = os.environ.get("VERIFY_PASSWORD", "password")
-    verify_kpi1_live.py line 115: client.get(url, auth=(USERNAME, PASSWORD))
+  Endpoint probe (FastAPI session-cookie auth — post-A2, Decision 18.1):
+    backend/api/deps.py lines 16-21:  get_current_user() reads
+        request.session.get("username") → 401 if absent/inactive
+    backend/api/v1/endpoints/auth.py lines 76-110:  POST /login form
+        {username, password, next} → 303 + session cookie on success
+    scripts/_lib/api_session.py:  login() helper (env VERIFY_USERNAME/
+        VERIFY_PASSWORD), one login per process (limiter: 10/minute)
   today (Cairo-local):
     backend/modules/customer_accounts/services/cache.py line 26:
     datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
@@ -49,6 +52,8 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 # Force UTF-8 stdout — Windows console defaults to cp1252
@@ -61,10 +66,9 @@ ODOO_DB   = os.environ["ODOO_DB"]
 ODOO_USER = os.environ["ODOO_USERNAME"]
 ODOO_KEY  = os.environ["ODOO_API_KEY"]
 
-# FastAPI HTTP Basic Auth (verify_kpi1_live.py lines 37-38 pattern)
+# FastAPI session-cookie auth (scripts/_lib/api_session.py, Decision 18.1)
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 FA_USER     = os.environ.get("VERIFY_USERNAME", "admin")
-FA_PASS     = os.environ.get("VERIFY_PASSWORD", "password")
 
 # today: exact same expression as cache.today_str() (cache.py line 26)
 TODAY = datetime.now(ZoneInfo("Africa/Cairo")).date().isoformat()
@@ -401,23 +405,30 @@ def section_f_portfolio_scan(client, uid) -> None:
 
 def section_g_endpoint_probe(partner_id: int, base_url: str) -> None:
     print(f"\n{SEP}")
-    print("  SECTION G  Live Endpoint Probe  (FastAPI HTTP Basic Auth — verify_kpi1_live.py:115)")
+    print("  SECTION G  Live Endpoint Probe  (session-cookie auth — scripts/_lib/api_session.py)")
     print(SEP)
-    url = f"{base_url.rstrip('/')}/api/v1/customer-accounts/customer/{partner_id}"
-    print(f"\n  GET {url}")
-    print(f"  auth user : {FA_USER}")
+    path = f"/api/v1/customer-accounts/customer/{partner_id}"
+    print(f"\n  GET {base_url.rstrip('/')}{path}")
+    print(f"  auth user : {FA_USER}  (POST /login session, Decision 18.1)")
     try:
-        with httpx.Client(timeout=30) as client:
-            r = client.get(url, auth=(FA_USER, FA_PASS))
+        client = api_login(base_url)
+    except ApiLoginError as exc:
+        print(f"  [FAIL]  Login failed: {exc}")
+        return
+    except httpx.ConnectError as exc:
+        print(f"  [WARN]  Cannot reach {base_url} — server not running? ({exc})")
+        print(f"  Run scripts/start_server.bat (Decision 6.4 ritual) then re-run section G.")
+        return
+    try:
+        r = client.get(path)
         print(f"  HTTP status : {r.status_code}")
         try:
             body = r.json()
             print(f"  JSON body   :\n{json.dumps(body, ensure_ascii=False, indent=2)[:3000]}")
         except Exception:
             print(f"  Body (raw)  : {r.text[:500]}")
-    except httpx.ConnectError as exc:
-        print(f"  [WARN]  Cannot reach {base_url} — server not running? ({exc})")
-        print(f"  Run scripts/start_server.bat (Decision 6.4 ritual) then re-run section G.")
+    finally:
+        client.close()
 
 
 # ── SECTION H: Log grep ───────────────────────────────────────────────────────
