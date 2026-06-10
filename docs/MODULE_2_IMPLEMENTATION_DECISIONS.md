@@ -3042,3 +3042,109 @@ the CRM link is inside the same RBAC block, so HR-only users see neither entry.
 
 **Test result:** 32 passed, 3 skipped (Odoo-connection-dependent sidebar body checks,
 same baseline as pre-N1), 0 failed. No regressions.
+
+---
+
+## Session 18 — 2026-06-10 — CA Drill-down Fix (N2): Overpayment Credit + Script Auth Repair
+
+### Decision 18.1 — Session-cookie auth pattern for verify_*/diagnose_* scripts
+
+**Background:** Post-A2 the FastAPI app authenticates exclusively via session
+cookie — `get_current_user()` (backend/api/deps.py:16-21) reads
+`request.session.get("username")` and returns 401 otherwise. There is no HTTP
+Basic path anywhere in the app. Every script using the old
+`client.get(url, auth=(USERNAME, PASSWORD))` pattern therefore gets HTTP 401
+(observed live in diagnose Section G on 2026-06-10).
+
+**Choice:** New shared helper **`scripts/_lib/api_session.py`**:
+`login(base_url, username=None, password=None) → httpx.Client`. It POSTs
+`/login` with form fields `{username, password, next}` (matching
+backend/api/v1/endpoints/auth.py:76-110), treats 303 + cookie as success,
+raises `ApiLoginError` with a clear message on 401 (bad credentials/inactive),
+429 (rate limit), or any unexpected status. Credentials default to env
+`VERIFY_USERNAME` / `VERIFY_PASSWORD`. Because `POST /login` is rate-limited
+**10/minute**, the helper is called ONCE per process and the returned client
+(carrying the cookie jar) is reused for every request.
+
+**Migrated this session:** `scripts/diagnose_ca_drilldown_anomaly.py` Section G
+only. Re-run end-to-end confirms HTTP 200 with the full drill-down envelope.
+
+**Phase 0.4 audit — scripts still on the dead Basic-auth pattern (deferred,
+see Stage Tracker D-8):** verify_kpi1_live.py, verify_kpi2_live.py,
+verify_kpi3_live.py, verify_kpi4_live.py, verify_kpi5_live.py,
+verify_kpi5b_live.py, verify_kpi6_live.py, verify_kpi7_live.py,
+verify_kpi7_breakdown_live.py, verify_kpia_live.py, verify_kpib_live.py,
+verify_kpic_live.py, verify_kpi_a_headcount_live.py,
+verify_kpi_b_tenure_live.py, verify_kpi_c_payroll_risk_live.py,
+verify_kpi_d_department_cost_live.py, verify_refunds_live.py — 17 scripts.
+All currently return 401 against the live app and must be migrated to the
+helper before their next use.
+
+**Commit:** `e4f4a12` — `feat(scripts): N2 C1 — session-cookie auth helper + diagnose Section G migration`
+
+### Decision 18.2 — Overpaid credit (رصيد مدفوع بالزيادة) + identity check v2 (warn, not raise)
+
+**Background:** `GET /api/v1/customer-accounts/customer/{partner_id}` returned
+HTTP 500 for 45 partners (54 settled rows, −382,183 EGP portfolio-wide). Root
+cause per docs/CA_DRILLDOWN_ANOMALY_FINDINGS.md: a settled installment can
+carry `due_amount < 0` when the customer overpaid (partner 62112: installment
+66422, amount 259,000, paid 259,450 → due −450). The old assertion
+`late + future == all_posted_due` is false in that case (delta = 450) and was
+raised as AssertionError → endpoint 500.
+
+**Choice (supersedes findings-doc Options A/B/C — none adopted as written):**
+convert the anomaly into board-useful information.
+
+1. **Split-sign settled aggregates — RPC count 6 → 8** (amending the original
+   plan's single 7th RPC). Over
+   `[state=post, partner_id=X, payment_state NOT IN (unpaid,partial)]`:
+   - RPC 7: `+ due_amount < 0` → `neg_sum` (≤ 0), `neg_count`
+   - RPC 8: `+ due_amount > 0` → `pos_sum` (≥ 0), `pos_count`
+   Rationale: a single netted SUM would let a positive settled row (graver
+   anomaly — understated exposure) silently shrink the credit and hide itself.
+   The portfolio's "all 54 rows negative" reading came from per-state SUMS and
+   could not exclude offsetting positives.
+2. **Identity v2:** `late + future + neg_sum + pos_sum ≈ all_posted_due`
+   (|delta| < 1.0 EGP). For 62112: 4,560,007 + (−450) + 0 = 4,559,557 ✓.
+3. **Warn, never raise:** on identity breach → `logger.error` +
+   `meta.data_quality_warning = "exposure_identity_mismatch"`; else if
+   `pos_sum >= 1.0` → `"settled_positive_residual"`; else `null`. The
+   AssertionError path for this check is removed. The R10 read-only assert
+   stays fail-loud, and the endpoint's AssertionError→500 handler stays for it.
+4. **Schema:** `DrilldownExposure.overpaid_credit_egp: float = 0.0`
+   (= −neg_sum) and `overpaid_record_count: int = 0` (= neg_count);
+   `CustomerDrilldownMeta.data_quality_warning: str | None = None` (meta, not
+   data — meta is already passed into the frontend's `_renderSummary()`).
+   `pos_sum`/`pos_count` are NOT exposed — they only drive the identity and
+   the warning. **`total_due_egp` keeps its meaning (late + future)** — the
+   credit is a separate figure, never netted.
+5. **Frontend:** emerald "رصيد مدفوع بالزيادة / Overpaid Credit" strip in the
+   exposure section, rendered only when `overpaid_credit_egp > 0`; amber
+   non-blocking note when `data_quality_warning` is set. New i18n keys
+   `ca_dd_overpaid_credit`, `ca_dd_quality_note` (en + Egyptian-dialect ar).
+   CSS rebuilt (`npm run build:css`) — the amber note's dark-mode
+   warning-palette variants were not previously in app.css.
+
+**Tests:** old `test_assertion_fires` replaced by `test_identity_mismatch_warns`
+(no exception, warning set, valid envelope). New: credit from the −450 mock;
+credit zero with no settled residual; identity balances with the credit term
+(the exact old 500 scenario); `overpaid_record_count`; positive-settled-residual
+warning. customer_accounts unit suite: **86/86 passed** (baseline had no
+failures; none introduced).
+
+**Live verification (scripts/verify_ca_drilldown_fix_live.py, after the
+Decision 6.4 ritual): 13/13 PASS.**
+- Partner 62112: HTTP 200 (was 500), `overpaid_credit_egp = 450.00`,
+  `overpaid_record_count = 1`, `data_quality_warning = null`, triple agreement
+  resp(late 2,976,187 + future 1,583,820) + direct(−450 + 0) = direct
+  all_posted_due 4,559,557 — delta 0.0000.
+- Affected partners 889308 (credit 1.00) and 890368 (credit 4.00): HTTP 200,
+  credit == −neg_sum within 0.01.
+- Unaffected partner 643138: HTTP 200, credit 0.0, warning null.
+- Diagnose Section G re-run: session login → HTTP 200 (401 gone).
+
+**Constraints honored:** Odoo strictly read-only (ALLOWED_METHODS untouched),
+zero OpenAI calls, no git push/tags, no KPI A/B/C or refunds-panel changes.
+
+**Commits:** `e4f4a12` (C1 auth) · `9c3848b` (C2 backend + tests) ·
+`73eda07` (C3 frontend + i18n + CSS) · C4 = verify script + this doc.
