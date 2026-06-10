@@ -2998,3 +2998,47 @@ requiring the two blocks to stay in sync. The forecast injection guard
 - (c) Mobile widths — bars render correctly, text truncates cleanly.
 
 Gate 3 closed 2026-05-22.
+
+---
+
+## Session 17 — 2026-06-10 — Nav Restructure (N1)
+
+### Decision 17.1 — Remove Overview section, unify CRM entry across both navs
+
+**Background:** The desktop sidebar had two entries pointing to `/dashboard`:
+(1) a "Dashboard" link under an "Overview" section header (grid icon), and
+(2) a "CRM" link under the "Modules" section (bar-chart icon).
+The mobile drawer had only the Dashboard/grid entry, not the CRM/bar-chart entry.
+This caused visual redundancy on desktop and inconsistency between desktop and mobile.
+Additionally, the desktop nav block contained a dead `nav_items` Jinja literal
+(a list of tuples) that was never rendered — added early in development and never removed.
+
+**Choice:**
+- Remove the `nav_items` dead-code literal from the desktop nav block.
+- Remove the "Overview" section header (`{{ _t("Overview") }}`) and the duplicate
+  "Dashboard" link (grid icon) from the desktop sidebar's `{% if 'crm' in am %}` block.
+- Update the mobile drawer: replace the grid icon + `_t("Dashboard")` label with the
+  bar-chart icon + hardcoded "CRM" label, matching the desktop Modules entry.
+- Change `dashboard.html` `{% block title %}` and `{% block page_title %}` from
+  `_t("Dashboard")` to the literal string `CRM`.
+- Change `missing_contact.html` breadcrumb back-link text from `_t("Dashboard")` to `CRM`.
+
+**Rationale:** `/dashboard` is the CRM module's landing page. Labeling it "Dashboard"
+in the nav implied a generic overview (which it is not — it shows CRM-specific KPIs).
+After this change, the CRM link under "Modules" is the sole nav entry for `/dashboard`
+and is consistently labeled "CRM" in both desktop and mobile navs.
+
+**Route:** `/dashboard` is NOT renamed. Only nav labels, icons, and page titles change.
+
+**i18n:** The `"Dashboard"` and `"Overview"` keys in `en.json`/`ar.json` are retained
+(zero template usages post-change). Orphaned keys are kept per project convention — no
+deletions from translation files.
+
+**RBAC:** Every `{% if 'crm' in am or '*' in am %}` conditional preserved intact.
+The `assert 'href="/dashboard"' not in body` assertion in `test_rbac.py` still passes:
+the CRM link is inside the same RBAC block, so HR-only users see neither entry.
+
+**Commit:** `c0c979c` — `feat(nav): N1 — remove Overview entry, unify CRM across both navs`
+
+**Test result:** 32 passed, 3 skipped (Odoo-connection-dependent sidebar body checks,
+same baseline as pre-N1), 0 failed. No regressions.
