@@ -86,3 +86,17 @@ def no_modules_client():
         )
         assert r.status_code == 303, f"no_modules login failed: {r.status_code} {r.text[:100]}"
         yield c
+
+
+@pytest.fixture(scope="module")
+def second_admin_client():
+    """TestClient authenticated as second_admin (is_admin=True, modules=['*'])."""
+    with TestClient(app) as c:
+        _ensure_user("second_admin", ["*"], is_admin=True)
+        r = c.post(
+            "/login",
+            data={"username": "second_admin", "password": "testpass"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, f"second_admin login failed: {r.status_code} {r.text[:100]}"
+        yield c
