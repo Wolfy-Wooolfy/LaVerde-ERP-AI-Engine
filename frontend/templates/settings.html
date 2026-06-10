@@ -3,9 +3,589 @@
 {% block page_title %}{{ _t("settings.page_title") }}{% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-center py-24">
-  <p class="text-neutral-400 dark:text-neutral-600 text-sm">
-    {{ _t("settings.page_title") }} — coming soon
-  </p>
+<div x-data="settingsApp()" x-init="init()">
+
+  <!-- Page header -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <h1 class="text-xl font-bold text-neutral-900 dark:text-neutral-100">
+      {{ _t("settings.page_title") }}
+    </h1>
+    <button @click="openCreate()"
+            class="btn btn-primary btn-sm shrink-0">
+      + {{ _t("settings.add_user") }}
+    </button>
+  </div>
+
+  <!-- Loading spinner -->
+  <div x-show="loading" class="flex justify-center py-16">
+    <div class="animate-spin w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full"></div>
+  </div>
+
+  <!-- Load error -->
+  <div x-show="!loading && loadError"
+       class="text-sm text-danger-600 dark:text-danger-400 py-8 text-center"
+       x-text="loadError">
+  </div>
+
+  <!-- Users table -->
+  <div x-show="!loading && !loadError"
+       class="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-card overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="border-b border-neutral-200 dark:border-neutral-700">
+        <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+          <th class="px-4 py-3 font-medium">{{ _t("settings.table.username") }}</th>
+          <th class="px-4 py-3 font-medium">{{ _t("settings.table.status") }}</th>
+          <th class="px-4 py-3 font-medium">{{ _t("settings.table.admin") }}</th>
+          <th class="px-4 py-3 font-medium">{{ _t("settings.table.modules") }}</th>
+          <th class="px-4 py-3 font-medium text-right">{{ _t("settings.table.actions") }}</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-neutral-100 dark:divide-neutral-800">
+        <template x-if="users.length === 0">
+          <tr>
+            <td colspan="5"
+                class="px-4 py-10 text-center text-neutral-400 dark:text-neutral-600 text-sm">
+              {{ _t("settings.no_users") }}
+            </td>
+          </tr>
+        </template>
+        <template x-for="user in users" :key="user.username">
+          <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
+
+            <!-- Username -->
+            <td class="px-4 py-3 font-mono text-xs font-medium text-neutral-900 dark:text-neutral-100"
+                x-text="user.username"></td>
+
+            <!-- Status badge -->
+            <td class="px-4 py-3">
+              <span :class="user.is_active ? 'badge-success' : 'badge-neutral'"
+                    class="badge text-xs"
+                    x-text="user.is_active
+                      ? '{{ _t("settings.status.active") }}'
+                      : '{{ _t("settings.status.inactive") }}'">
+              </span>
+            </td>
+
+            <!-- Admin badge -->
+            <td class="px-4 py-3">
+              <span x-show="user.is_admin" class="badge badge-warning text-xs">Admin</span>
+              <span x-show="!user.is_admin" class="text-neutral-300 dark:text-neutral-600 text-xs">—</span>
+            </td>
+
+            <!-- Modules -->
+            <td class="px-4 py-3">
+              <template x-if="user.modules.includes('*')">
+                <span class="badge badge-info text-xs">{{ _t("settings.all_modules_badge") }}</span>
+              </template>
+              <template x-if="!user.modules.includes('*') && user.modules.length > 0">
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="mod in user.modules" :key="mod">
+                    <span class="badge badge-neutral text-xs" x-text="mod"></span>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!user.modules.includes('*') && user.modules.length === 0">
+                <span class="text-neutral-300 dark:text-neutral-600 text-xs">—</span>
+              </template>
+            </td>
+
+            <!-- Actions -->
+            <td class="px-4 py-3">
+              <div class="flex items-center justify-end gap-1 flex-wrap">
+                <button @click="openEditModules(user)"
+                        class="btn btn-ghost btn-sm text-xs">
+                  {{ _t("settings.action.edit_modules") }}
+                </button>
+                <button @click="toggleStatus(user)"
+                        :class="user.is_active
+                          ? 'text-warning-600 dark:text-warning-400 hover:text-warning-700'
+                          : 'text-success-600 dark:text-success-400 hover:text-success-700'"
+                        class="btn btn-ghost btn-sm text-xs">
+                  <span x-text="user.is_active
+                    ? '{{ _t("settings.action.deactivate") }}'
+                    : '{{ _t("settings.action.activate") }}'">
+                  </span>
+                </button>
+                <button @click="toggleAdmin(user)"
+                        class="btn btn-ghost btn-sm text-xs">
+                  <span x-text="user.is_admin
+                    ? '{{ _t("settings.action.revoke_admin") }}'
+                    : '{{ _t("settings.action.make_admin") }}'">
+                  </span>
+                </button>
+                <button @click="openResetPassword(user)"
+                        class="btn btn-ghost btn-sm text-xs">
+                  {{ _t("settings.action.reset_password") }}
+                </button>
+              </div>
+            </td>
+
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
 </div>
+{% endblock %}
+
+
+{% block portal %}
+<!-- ── Settings modal — rendered outside main so z-index stacking is clean ── -->
+<div x-data="settingsApp.__modal()"
+     @settings-open-modal.window="receiveOpen($event.detail)"
+     x-show="modal.open"
+     x-transition:enter="transition ease-out duration-150"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+     @keydown.escape.window="closeModal()">
+
+  <div x-show="modal.open"
+       x-transition:enter="transition ease-out duration-150"
+       x-transition:enter-start="opacity-0 scale-95"
+       x-transition:enter-end="opacity-100 scale-100"
+       x-transition:leave="transition ease-in duration-100"
+       x-transition:leave-start="opacity-100 scale-100"
+       x-transition:leave-end="opacity-0 scale-95"
+       class="bg-white dark:bg-neutral-900 rounded-xl shadow-2xl w-full max-w-md border border-neutral-200 dark:border-neutral-700"
+       @click.outside="closeModal()">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-neutral-700">
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+        <span x-show="modal.mode === 'create'">{{ _t("settings.modal.create_title") }}</span>
+        <span x-show="modal.mode === 'edit_modules'">{{ _t("settings.modal.edit_modules_title") }}</span>
+        <span x-show="modal.mode === 'reset_password'">{{ _t("settings.modal.reset_password_title") }}</span>
+      </h2>
+      <button @click="closeModal()" class="btn btn-ghost btn-icon">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Body -->
+    <div class="px-6 py-5 space-y-4">
+
+      <!-- API error -->
+      <div x-show="modal.apiError"
+           class="text-xs text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-950/30 rounded-lg px-3 py-2"
+           x-text="modal.apiError">
+      </div>
+
+      <!-- CREATE -->
+      <div x-show="modal.mode === 'create'" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+            {{ _t("settings.form.username") }}
+          </label>
+          <input type="text" x-model="modal.form.username"
+                 autocomplete="off" autocapitalize="none" spellcheck="false"
+                 class="w-full px-3 py-2 rounded-lg text-sm
+                        bg-white dark:bg-neutral-800
+                        border border-neutral-300 dark:border-neutral-700
+                        text-neutral-900 dark:text-neutral-100
+                        placeholder-neutral-400 dark:placeholder-neutral-500
+                        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                        transition-colors">
+          <p x-show="modal.errors.username"
+             class="text-xs text-danger-600 dark:text-danger-400 mt-1"
+             x-text="modal.errors.username"></p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+            {{ _t("settings.form.password") }}
+          </label>
+          <input type="password" x-model="modal.form.password"
+                 autocomplete="new-password"
+                 class="w-full px-3 py-2 rounded-lg text-sm
+                        bg-white dark:bg-neutral-800
+                        border border-neutral-300 dark:border-neutral-700
+                        text-neutral-900 dark:text-neutral-100
+                        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                        transition-colors">
+          <p x-show="modal.errors.password"
+             class="text-xs text-danger-600 dark:text-danger-400 mt-1"
+             x-text="modal.errors.password"></p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+            {{ _t("settings.form.confirm_password") }}
+          </label>
+          <input type="password" x-model="modal.form.confirmPassword"
+                 autocomplete="new-password"
+                 class="w-full px-3 py-2 rounded-lg text-sm
+                        bg-white dark:bg-neutral-800
+                        border border-neutral-300 dark:border-neutral-700
+                        text-neutral-900 dark:text-neutral-100
+                        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                        transition-colors">
+          <p x-show="modal.errors.confirmPassword"
+             class="text-xs text-danger-600 dark:text-danger-400 mt-1"
+             x-text="modal.errors.confirmPassword"></p>
+        </div>
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" x-model="modal.form.is_admin"
+                 class="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500">
+          <span class="text-sm text-neutral-700 dark:text-neutral-300">{{ _t("settings.form.is_admin") }}</span>
+        </label>
+        <div>
+          <p class="text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-2">
+            {{ _t("settings.form.modules_label") }}
+          </p>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" x-model="modal.form.allModules"
+                     class="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500">
+              <span class="text-sm text-neutral-700 dark:text-neutral-300">{{ _t("settings.form.all_modules") }}</span>
+            </label>
+            <template x-for="mod in ['crm', 'hr', 'collections', 'customer_accounts']" :key="mod">
+              <label class="flex items-center gap-2 cursor-pointer select-none"
+                     :class="modal.form.allModules ? 'opacity-40 pointer-events-none' : ''">
+                <input type="checkbox"
+                       :checked="modal.form.modules.includes(mod)"
+                       :disabled="modal.form.allModules"
+                       @change="toggleModule(mod)"
+                       class="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500">
+                <span class="text-sm text-neutral-700 dark:text-neutral-300 capitalize" x-text="mod"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- EDIT MODULES -->
+      <div x-show="modal.mode === 'edit_modules'" class="space-y-2">
+        <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">
+          Editing modules for
+          <span class="font-mono font-medium text-neutral-900 dark:text-neutral-100" x-text="modal.target"></span>
+        </p>
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" x-model="modal.form.allModules"
+                 class="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500">
+          <span class="text-sm text-neutral-700 dark:text-neutral-300">{{ _t("settings.form.all_modules") }}</span>
+        </label>
+        <template x-for="mod in ['crm', 'hr', 'collections', 'customer_accounts']" :key="mod">
+          <label class="flex items-center gap-2 cursor-pointer select-none"
+                 :class="modal.form.allModules ? 'opacity-40 pointer-events-none' : ''">
+            <input type="checkbox"
+                   :checked="modal.form.modules.includes(mod)"
+                   :disabled="modal.form.allModules"
+                   @change="toggleModule(mod)"
+                   class="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-primary-600 focus:ring-primary-500">
+            <span class="text-sm text-neutral-700 dark:text-neutral-300 capitalize" x-text="mod"></span>
+          </label>
+        </template>
+      </div>
+
+      <!-- RESET PASSWORD -->
+      <div x-show="modal.mode === 'reset_password'" class="space-y-4">
+        <p class="text-xs text-neutral-500 dark:text-neutral-400">
+          Resetting password for
+          <span class="font-mono font-medium text-neutral-900 dark:text-neutral-100" x-text="modal.target"></span>
+        </p>
+        <div>
+          <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+            {{ _t("settings.form.new_password") }}
+          </label>
+          <input type="password" x-model="modal.form.new_password"
+                 autocomplete="new-password"
+                 class="w-full px-3 py-2 rounded-lg text-sm
+                        bg-white dark:bg-neutral-800
+                        border border-neutral-300 dark:border-neutral-700
+                        text-neutral-900 dark:text-neutral-100
+                        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                        transition-colors">
+          <p x-show="modal.errors.new_password"
+             class="text-xs text-danger-600 dark:text-danger-400 mt-1"
+             x-text="modal.errors.new_password"></p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+            {{ _t("settings.form.confirm_new_password") }}
+          </label>
+          <input type="password" x-model="modal.form.confirmNewPassword"
+                 autocomplete="new-password"
+                 class="w-full px-3 py-2 rounded-lg text-sm
+                        bg-white dark:bg-neutral-800
+                        border border-neutral-300 dark:border-neutral-700
+                        text-neutral-900 dark:text-neutral-100
+                        focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
+                        transition-colors">
+          <p x-show="modal.errors.confirmNewPassword"
+             class="text-xs text-danger-600 dark:text-danger-400 mt-1"
+             x-text="modal.errors.confirmNewPassword"></p>
+        </div>
+      </div>
+
+    </div><!-- /modal body -->
+
+    <!-- Footer -->
+    <div class="px-6 py-4 border-t border-neutral-200 dark:border-neutral-700 flex justify-end gap-2">
+      <button @click="closeModal()" class="btn btn-secondary btn-sm">
+        {{ _t("settings.form.cancel") }}
+      </button>
+      <button @click="submitModal()"
+              :disabled="modal.submitting"
+              class="btn btn-primary btn-sm min-w-[80px]">
+        <span x-show="!modal.submitting">
+          <span x-show="modal.mode === 'create'">{{ _t("settings.form.submit_create") }}</span>
+          <span x-show="modal.mode !== 'create'">{{ _t("settings.form.submit_save") }}</span>
+        </span>
+        <span x-show="modal.submitting"
+              class="flex items-center justify-center gap-1.5">
+          <span class="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin"></span>
+        </span>
+      </button>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+
+{% block extra_scripts %}
+<script>
+// ── i18n strings for client-side validation ───────────────────────────────────
+window._SETTINGS_I18N = {
+  err_password_mismatch:          "{{ _t('settings.error.password_mismatch') | e }}",
+  err_password_too_short:         "{{ _t('settings.error.password_too_short') | e }}",
+  err_username_invalid:           "{{ _t('settings.error.username_invalid') | e }}",
+  err_username_exists:            "{{ _t('settings.error.username_exists') | e }}",
+  err_invalid_module:             "{{ _t('settings.error.invalid_module') | e }}",
+  err_self_lockout_deactivation:  "{{ _t('settings.error.self_lockout_deactivation') | e }}",
+  err_self_lockout_demote:        "{{ _t('settings.error.self_lockout_demote') | e }}",
+  err_last_admin:                 "{{ _t('settings.error.last_admin') | e }}",
+};
+
+const _U_RE = /^[A-Za-z0-9._@\-]{2,64}$/;
+
+// Shared modal state — dispatched via custom events so the portal component
+// can react without being nested inside the page x-data scope.
+settingsApp.__modal = function () {
+  return {
+    modal: {
+      open: false, mode: null, target: null,
+      form: { username:'', password:'', confirmPassword:'', is_admin:false,
+              modules:[], allModules:false, new_password:'', confirmNewPassword:'' },
+      errors: {}, apiError: '', submitting: false,
+    },
+
+    receiveOpen(detail) {
+      this.modal = detail;
+    },
+
+    closeModal() {
+      this.modal.open = false;
+      window.dispatchEvent(new CustomEvent('settings-modal-closed'));
+    },
+
+    toggleModule(mod) {
+      const idx = this.modal.form.modules.indexOf(mod);
+      if (idx === -1) this.modal.form.modules.push(mod);
+      else this.modal.form.modules.splice(idx, 1);
+    },
+
+    _errMsg(code) {
+      const i = window._SETTINGS_I18N;
+      return ({
+        SELF_LOCKOUT_DEACTIVATION: i.err_self_lockout_deactivation,
+        SELF_LOCKOUT_DEMOTE:       i.err_self_lockout_demote,
+        LAST_ADMIN_PROTECTION:     i.err_last_admin,
+        USERNAME_EXISTS:           i.err_username_exists,
+        INVALID_MODULE:            i.err_invalid_module,
+        PASSWORD_TOO_SHORT:        i.err_password_too_short,
+        INVALID_USERNAME:          i.err_username_invalid,
+      })[code] || ('Error: ' + code);
+    },
+
+    async _api(method, path, body) {
+      return fetch(path, {
+        method, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    },
+
+    async submitModal() {
+      const i = window._SETTINGS_I18N;
+      this.modal.errors = {};
+      this.modal.apiError = '';
+
+      if (this.modal.mode === 'create') {
+        if (!_U_RE.test(this.modal.form.username)) {
+          this.modal.errors = { username: i.err_username_invalid }; return;
+        }
+        if (this.modal.form.password.length < 8) {
+          this.modal.errors = { password: i.err_password_too_short }; return;
+        }
+        if (this.modal.form.password !== this.modal.form.confirmPassword) {
+          this.modal.errors = { confirmPassword: i.err_password_mismatch }; return;
+        }
+        this.modal.submitting = true;
+        const r = await this._api('POST', '/api/v1/settings/users', {
+          username: this.modal.form.username,
+          password: this.modal.form.password,
+          modules:  this.modal.form.allModules ? ['*'] : this.modal.form.modules,
+          is_admin: this.modal.form.is_admin,
+        });
+        this.modal.submitting = false;
+        if (r.ok) {
+          this.closeModal();
+          window.dispatchEvent(new CustomEvent('settings-reload-users'));
+          window.toast && window.toast.show('User created', 'success', 2500);
+        } else {
+          const d = await r.json();
+          this.modal.apiError = this._errMsg(d?.error?.code);
+        }
+
+      } else if (this.modal.mode === 'edit_modules') {
+        this.modal.submitting = true;
+        const r = await this._api('PATCH',
+          `/api/v1/settings/users/${this.modal.target}/modules`,
+          { modules: this.modal.form.allModules ? ['*'] : this.modal.form.modules });
+        this.modal.submitting = false;
+        if (r.ok) {
+          this.closeModal();
+          window.dispatchEvent(new CustomEvent('settings-reload-users'));
+          window.toast && window.toast.show('Modules updated', 'success', 2500);
+        } else {
+          const d = await r.json();
+          this.modal.apiError = this._errMsg(d?.error?.code);
+        }
+
+      } else if (this.modal.mode === 'reset_password') {
+        if (this.modal.form.new_password.length < 8) {
+          this.modal.errors = { new_password: i.err_password_too_short }; return;
+        }
+        if (this.modal.form.new_password !== this.modal.form.confirmNewPassword) {
+          this.modal.errors = { confirmNewPassword: i.err_password_mismatch }; return;
+        }
+        this.modal.submitting = true;
+        const r = await this._api('POST',
+          `/api/v1/settings/users/${this.modal.target}/reset-password`,
+          { new_password: this.modal.form.new_password });
+        this.modal.submitting = false;
+        if (r.ok) {
+          this.closeModal();
+          window.toast && window.toast.show('Password reset', 'success', 2500);
+        } else {
+          const d = await r.json();
+          this.modal.apiError = this._errMsg(d?.error?.code);
+        }
+      }
+    },
+  };
+};
+
+// ── Main page component ───────────────────────────────────────────────────────
+function settingsApp() {
+  return {
+    users:     [],
+    loading:   true,
+    loadError: '',
+
+    async init() {
+      await this.loadUsers();
+      window.addEventListener('settings-reload-users', () => this.loadUsers());
+    },
+
+    async loadUsers() {
+      this.loading = true;
+      this.loadError = '';
+      try {
+        const r = await fetch('/api/v1/settings/users', { credentials: 'same-origin' });
+        if (!r.ok) { this.loadError = 'Failed to load users (' + r.status + ')'; return; }
+        const d = await r.json();
+        this.users = d.data.users;
+      } catch {
+        this.loadError = 'Network error loading users.';
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    _emptyForm() {
+      return { username:'', password:'', confirmPassword:'', is_admin:false,
+               modules:[], allModules:false, new_password:'', confirmNewPassword:'' };
+    },
+
+    _openModal(mode, target, formOverride) {
+      const detail = {
+        open: true, mode, target,
+        form:       { ...this._emptyForm(), ...formOverride },
+        errors:     {},
+        apiError:   '',
+        submitting: false,
+      };
+      window.dispatchEvent(new CustomEvent('settings-open-modal', { detail }));
+    },
+
+    openCreate() {
+      this._openModal('create', null, {});
+    },
+
+    openEditModules(user) {
+      const hasWild = user.modules.includes('*');
+      this._openModal('edit_modules', user.username, {
+        modules:    hasWild ? [] : [...user.modules],
+        allModules: hasWild,
+      });
+    },
+
+    openResetPassword(user) {
+      this._openModal('reset_password', user.username, {});
+    },
+
+    async _api(method, path, body) {
+      return fetch(path, {
+        method, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    },
+
+    _errMsg(code) {
+      const i = window._SETTINGS_I18N;
+      return ({
+        SELF_LOCKOUT_DEACTIVATION: i.err_self_lockout_deactivation,
+        SELF_LOCKOUT_DEMOTE:       i.err_self_lockout_demote,
+        LAST_ADMIN_PROTECTION:     i.err_last_admin,
+      })[code] || ('Error: ' + code);
+    },
+
+    async toggleStatus(user) {
+      const r = await this._api('PATCH',
+        `/api/v1/settings/users/${user.username}/status`,
+        { is_active: !user.is_active });
+      if (r.ok) {
+        await this.loadUsers();
+        window.toast && window.toast.show(
+          user.is_active ? 'User deactivated' : 'User activated', 'success', 2500);
+      } else {
+        const d = await r.json();
+        window.toast && window.toast.show(this._errMsg(d?.error?.code), 'danger', 4000);
+      }
+    },
+
+    async toggleAdmin(user) {
+      const r = await this._api('PATCH',
+        `/api/v1/settings/users/${user.username}/admin`,
+        { is_admin: !user.is_admin });
+      if (r.ok) {
+        await this.loadUsers();
+        window.toast && window.toast.show(
+          user.is_admin ? 'Admin revoked' : 'Admin granted', 'success', 2500);
+      } else {
+        const d = await r.json();
+        window.toast && window.toast.show(this._errMsg(d?.error?.code), 'danger', 4000);
+      }
+    },
+  };
+}
+</script>
 {% endblock %}
