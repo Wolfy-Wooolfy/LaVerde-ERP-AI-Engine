@@ -250,3 +250,26 @@ def test_seed_skipped_when_users_exist(repo: SQLiteUserRepository) -> None:
     users = repo.list_users()
     assert len(users) == 1
     assert users[0].username == "existing"
+
+
+# ── count_active_admins ───────────────────────────────────────────────────────
+
+
+def test_count_active_admins_counts_correctly(repo: SQLiteUserRepository) -> None:
+    h = hash_password("pw")
+    # 1 active admin, 1 inactive admin, 1 active non-admin
+    repo.create_user("admin_active", h, ["*"], is_admin=True, is_active=True)
+    repo.create_user("admin_inactive", h, ["*"], is_admin=True, is_active=False)
+    repo.create_user("non_admin", h, ["crm"], is_admin=False, is_active=True)
+    assert repo.count_active_admins() == 1
+
+
+def test_count_active_admins_zero_when_empty(repo: SQLiteUserRepository) -> None:
+    assert repo.count_active_admins() == 0
+
+
+def test_count_active_admins_multiple(repo: SQLiteUserRepository) -> None:
+    h = hash_password("pw")
+    repo.create_user("admin1", h, ["*"], is_admin=True, is_active=True)
+    repo.create_user("admin2", h, ["*"], is_admin=True, is_active=True)
+    assert repo.count_active_admins() == 2

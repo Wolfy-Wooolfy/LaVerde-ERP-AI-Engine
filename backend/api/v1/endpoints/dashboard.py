@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from backend.api.deps import get_crm_service, get_current_user_html, require_module_html
+from backend.api.deps import get_crm_service, get_current_user_html, require_admin_html, require_module_html
 from backend.core.config import settings
 from backend.core.i18n import detect_lang, load_translations, make_translator
 from backend.modules.crm.service import CrmService
@@ -37,6 +37,7 @@ def _base_ctx(request: Request, user: str) -> dict:
     lang = detect_lang(dict(request.cookies), request.headers.get("accept-language", ""))
     _user_record = request.app.state.user_repo.get_user(user)
     allowed_modules: list[str] = _user_record.modules if _user_record else []
+    is_admin: bool = _user_record.is_admin if _user_record else False
     return {
         "request": request,
         "current_user": user,
@@ -45,6 +46,7 @@ def _base_ctx(request: Request, user: str) -> dict:
         "is_rtl": lang == "ar",
         "_t": make_translator(lang),
         "allowed_modules": allowed_modules,
+        "is_admin": is_admin,
     }
 
 
@@ -139,6 +141,22 @@ async def hr_dashboard(
         "attn_expiring_45d": buckets_by_label.get("expiring_45d", 0),
     })
     return templates.TemplateResponse(request, "hr/dashboard.html", ctx)
+
+
+@router.get(
+    "/settings",
+    response_class=HTMLResponse,
+    summary="Settings — User Management (admin only)",
+    include_in_schema=False,
+    dependencies=[Depends(require_admin_html)],
+)
+async def settings_page(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    ctx = _base_ctx(request, user)
+    ctx["page"] = "settings"
+    return templates.TemplateResponse(request, "settings.html", ctx)
 
 
 @router.get(

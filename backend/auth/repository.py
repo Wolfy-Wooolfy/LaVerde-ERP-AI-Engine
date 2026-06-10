@@ -55,6 +55,8 @@ class UserRepository(Protocol):
 
     def verify_password(self, username: str, plaintext: str) -> bool: ...
 
+    def count_active_admins(self) -> int: ...
+
 
 class SQLiteUserRepository:
     """SQLite-backed UserRepository. Thread-safe via a per-instance lock."""
@@ -186,3 +188,12 @@ class SQLiteUserRepository:
         if user is None:
             return False
         return verify_password_hash(plaintext, user.password_hash)
+
+    def count_active_admins(self) -> int:
+        """COUNT rows where is_admin=1 AND is_active=1. Used for last-admin lockout protection."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND is_active = 1"
+            )
+            row = cur.fetchone()
+        return row[0] if row else 0

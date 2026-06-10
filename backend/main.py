@@ -32,6 +32,7 @@ from backend.core.exceptions import (
     OdooConnectionError,
     ReadOnlyViolationError,
 )
+from backend.core.responses import error_response as _core_error_response
 from backend.core.limiter import limiter
 from backend.core.logging import setup_logging
 from backend.core.metrics import get_uptime, metrics, set_start_time
@@ -202,20 +203,7 @@ def _error_response(
     message: str,
     details: dict | None = None,
 ) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", None)
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "ok": False,
-            "error": {
-                "code": code,
-                "message": message,
-                "details": details or {},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-        },
-    )
+    return _core_error_response(request, status_code, code, message, details)
 
 
 # ── Global exception handlers ─────────────────────────────────────────────────

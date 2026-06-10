@@ -64,3 +64,33 @@ def require_module_html(module_id: str):
         if "*" not in user.modules and module_id not in user.modules:
             raise HTTPException(status_code=403)
     return _guard
+
+
+def require_admin_api(
+    request: Request,
+    username: str = Depends(get_current_user),
+) -> None:
+    """Allow iff is_admin=True. 401 handled upstream by get_current_user. is_admin is independent of modules (A1.D3)."""
+    user = request.app.state.user_repo.get_user(username)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "ADMIN_ACCESS_DENIED"},
+        )
+
+
+def require_admin_html(
+    request: Request,
+    username: str = Depends(get_current_user_html),
+) -> None:
+    """Allow iff is_admin=True. 302 to /login handled upstream by get_current_user_html."""
+    user = request.app.state.user_repo.get_user(username)
+    if user is None:
+        raise HTTPException(
+            status_code=302,
+            headers={"Location": f"/login?next={request.url.path}"},
+        )
+    if not user.is_admin:
+        raise HTTPException(status_code=403)

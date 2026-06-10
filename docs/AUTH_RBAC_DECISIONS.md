@@ -242,3 +242,111 @@ Commit 2 adds `tests/integration/test_rbac.py` with 5 test classes (API matrix, 
 sidebar filtering, post-login landing, no-modules) and restricted-user fixtures in
 `tests/integration/conftest.py`. The `_seed_rbac_test_users` fixture uses `hash_password()`
 to create users — `create_user` takes a hash, never plaintext.
+
+---
+
+## B — Settings UI (Admin User Management)
+
+**Implementing:** 2026-06-10
+
+### B.D1 — Admin Guard Design
+
+Two plain dependency functions (not factories) added to `backend/api/deps.py`:
+
+- `require_admin_api(request, username=Depends(get_current_user)) -> None`
+  Raises `HTTPException(403, detail={"code": "ADMIN_ACCESS_DENIED"})` if `not user.is_admin`.
+  Used on all `/api/v1/settings/*` routes via `dependencies=_admin` at `include_router` level.
+
+- `require_admin_html(request, username=Depends(get_current_user_html)) -> None`
+  Raises `HTTPException(403)` if `not user.is_admin`. The existing global `@app.exception_handler(403)`
+  renders `403.html` for browser requests — no new handler needed.
+
+Unlike `require_module_api/html` factories (parameterised by `module_id`), these are plain
+dependency functions — no parameter, no factory. One `user_repo.get_user(username)` SQLite read
+per guarded request; same cost profile as A3.
+
+`is_admin` is INDEPENDENT of `modules` (A1.D3). An admin with `modules=[]` passes all admin
+guards but is still blocked on module-gated data routes.
+
+### B.D2 — Settings API
+
+New file `backend/api/v1/endpoints/settings.py`. Registered in `backend/api/v1/router.py`:
+`api_v1_router.include_router(settings_router, prefix="/settings", dependencies=_admin)`
+
+Six endpoints:
+- `GET    /api/v1/settings/users`                    — list all users (no password_hash in response)
+- `POST   /api/v1/settings/users`                    — create user
+- `PATCH  /api/v1/settings/users/{u}/modules`        — replace module list
+- `PATCH  /api/v1/settings/users/{u}/status`         — activate/deactivate
+- `PATCH  /api/v1/settings/users/{u}/admin`          — grant/revoke is_admin
+- `POST   /api/v1/settings/users/{u}/reset-password` — reset password
+
+All responses use the project standard envelope (`{"ok":true,"data":{...}}` or
+`{"ok":false,"error":{...}}`). `_error_response` extracted to `backend/core/responses.py`
+to avoid circular imports between `main.py` and `settings.py`.
+Password hashes NEVER returned in any response. No hard-delete endpoint — deactivation is the
+soft-delete path. Hard-delete requires direct DB access or a future CLI extension.
+
+### B.D3 — Self-Lockout Protection
+
+Enforced at the API layer (`settings.py` handlers), not the repository layer.
+
+Four rules:
+- L1: Admin cannot deactivate themselves → 422 `SELF_LOCKOUT_DEACTIVATION`.
+- L2: Admin cannot revoke their own `is_admin` → 422 `SELF_LOCKOUT_DEMOTE`.
+- L3: Last active admin cannot be deactivated → 422 `LAST_ADMIN_PROTECTION`.
+- L4: Last active admin cannot be demoted → 422 `LAST_ADMIN_PROTECTION`.
+
+L1/L2 are pure string comparisons (no DB read). L3/L4 use `repo.count_active_admins()` (one SQL
+COUNT). SQLite's `threading.Lock` serialises concurrent demote attempts — no race condition.
+L3/L4 boundary covered by unit tests; integration suite covers L1/L2.
+
+### B.D4 — Password Rules
+
+Minimum 8 characters. Server-side validation → 422 `PASSWORD_TOO_SHORT`.
+"Confirm password" (type twice) is Alpine.js client-side only; the API receives a single
+`new_password`. No password is returned in any response or written to logs at any point.
+
+### B.D5 — Settings Page
+
+Route: `GET /settings` in `dashboard.py`, gated by `require_admin_html`.
+Template: `frontend/templates/settings.html` (extends `base.html`, uses `{% block content %}`
+and `{% block extra_scripts %}`).
+Alpine.js component `settingsApp()` loads user data from `GET /api/v1/settings/users` on init.
+Inline actions (toggle status, toggle admin) need no modal.
+Modal actions: create user, edit modules, reset password.
+
+### B.D6 — Sidebar and `_base_ctx`
+
+`_base_ctx` adds `"is_admin": bool` to Jinja2 context. Zero additional DB calls — `_user_record`
+was already fetched by existing code; `is_admin` is another field on the same object.
+Both desktop and mobile sidebars in `base.html` wrap the Settings link in `{% if is_admin %}`.
+The Settings label uses the existing `"Settings"` i18n key (already in en.json and ar.json).
+`page == 'settings'` marks the Settings link active.
+
+### B.D7 — Repository Addition
+
+`count_active_admins() -> int` added to both `UserRepository` Protocol and `SQLiteUserRepository`.
+Executes `SELECT COUNT(*) FROM users WHERE is_admin = 1 AND is_active = 1`.
+This is the ONLY new repository method. `update_user` already covers all field mutations via
+keyword args; no separate `update_password`, `set_active`, or `set_admin` methods are needed.
+
+### B.D8 — CORSMiddleware (DROPPED per C1)
+
+Settings UI is same-origin (Alpine `fetch()` to the same host). CORS governs cross-origin
+requests only. `CORSMiddleware allow_methods` is NOT widened. POST /login already works under
+GET-only CORS today — same principle applies to the settings API.
+
+### B.D9 — Module Whitelist and Username Validation
+
+`_VALID_MODULES = frozenset({"crm","hr","collections","customer_accounts","*"})` in `settings.py`.
+Any unknown module in a POST/PATCH body → 422 `INVALID_MODULE`.
+Username regex: `^[A-Za-z0-9._@\-]{2,64}$` — allows `@` (seed username may be email-format).
+Violation → 422 `INVALID_USERNAME`.
+
+### B.D10 — `_error_response` Extraction
+
+`backend/core/responses.py` (new file) exposes `error_response(request, status_code, code,
+message, details=None) -> JSONResponse`. Imported by `main.py` (via private `_error_response`
+wrapper that delegates to it) and directly by `settings.py`. Eliminates the circular-import
+risk of importing the private `_error_response` from `main.py` into `settings.py`.
