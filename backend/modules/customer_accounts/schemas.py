@@ -122,6 +122,8 @@ class DrilldownExposure(BaseModel):
     total_original_egp: float       # الإجمالي الأصلي — SUM(amount) all posted installments
     total_installments: int         # عدد كل أقساط العميل (posted, all states)
     unpaid_installment_count: int   # عدد الأقساط غير المدفوعة (late + future)
+    overpaid_credit_egp: float = 0.0    # رصيد مدفوع بالزيادة = -SUM(due<0, settled) (Decision 18.2)
+    overpaid_record_count: int = 0      # عدد الأقساط المسدّدة برصيد سالب (due_amount < 0)
 
 
 class DrilldownBehavior(BaseModel):
@@ -158,6 +160,8 @@ class CustomerDrilldownMeta(BaseModel):
     page_size: int
     sort_by: str
     sort_dir: str
+    # "exposure_identity_mismatch" | "settled_positive_residual" | None (Decision 18.2)
+    data_quality_warning: str | None = None
 
 
 class CustomerDrilldownResponse(BaseModel):

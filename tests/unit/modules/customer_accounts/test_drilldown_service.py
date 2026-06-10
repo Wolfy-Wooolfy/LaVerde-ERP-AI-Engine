@@ -7,16 +7,21 @@ Live verification: scripts/verify_m3s6_drilldown_live.py.
 Coverage:
   1.  test_late_timing             — installment date < today → timing='late'
   2.  test_future_timing           — installment date >= today → timing='future'
-  3.  test_assertion_holds         — late+future == all_due, no error
-  4.  test_assertion_fires         — delta >= 1.0 EGP raises AssertionError
+  3.  test_assertion_holds         — identity balances, no warning
+  4.  test_identity_mismatch_warns — delta >= 1.0 EGP → warning, NO exception (Decision 18.2)
   5.  test_payment_ratio_uses_actual_paid_not_paid_amount  ← KEY test (DR1)
   6.  test_pagination_has_next     — n+1 rows → has_next=True, cursor_next set
   7.  test_pagination_exact_page   — exactly n rows → has_next=False
   8.  test_cursor_roundtrip        — encode/decode preserves payload
-  9.  test_read_only_assertion     — is_read_only=False raises AssertionError
+  9.  test_read_only_assertion     — is_read_only=False raises AssertionError (R10, stays fail-loud)
   10. test_rpc_failure             — OdooQueryError on execute_kw exception
   11. test_response_shape          — all required top-level keys present
   12. test_wallet_zero_on_no_data  — empty wallet rows → wallet_balance=0.0
+  13. test_overpaid_credit_from_negative_settled — -450 mock → credit=450.00 (62112 case)
+  14. test_overpaid_credit_zero_when_no_settled_residual
+  15. test_identity_balances_with_credit_term — old check would 500, new one passes clean
+  16. test_overpaid_record_count
+  17. test_settled_positive_residual_warns — pos_sum >= 1.0 → "settled_positive_residual"
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -48,10 +53,11 @@ def _patch_today(today: str = _TODAY):
 
 
 def _make_client(side_effects: list) -> MagicMock:
-    """Build a minimal OdooClient mock for the 6-RPC gather.
+    """Build a minimal OdooClient mock for the 8-RPC gather.
 
-    side_effects must have exactly 6 items corresponding to the gather order:
-      [all_rg, late_rg, future_rg, wallet_rg, search_count, search_read]
+    side_effects must have exactly 8 items corresponding to the gather order:
+      [all_rg, late_rg, future_rg, wallet_rg, search_count, search_read,
+       settled_neg_rg, settled_pos_rg]
     """
     client = MagicMock()
     client.is_read_only = True
@@ -74,8 +80,12 @@ def _standard_mock_data(
     wallet_count: int = 3,
     unpaid_count: int = 8,
     inst_rows: list | None = None,
+    settled_neg_sum: float = 0.0,
+    settled_neg_count: int = 0,
+    settled_pos_sum: float = 0.0,
+    settled_pos_count: int = 0,
 ) -> list:
-    """Return the list of 6 mock return values for asyncio.gather."""
+    """Return the list of 8 mock return values for asyncio.gather."""
     if inst_rows is None:
         inst_rows = []
     all_rg = [{
@@ -89,7 +99,16 @@ def _standard_mock_data(
     late_rg   = [{"due_amount": late_due,   "__count": 6}]
     future_rg = [{"due_amount": future_due, "__count": 2}]
     wallet_rg = [{"residual_amount": wallet_balance, "__count": wallet_count}]
-    return [all_rg, late_rg, future_rg, wallet_rg, unpaid_count, inst_rows]
+    settled_neg_rg = (
+        [{"due_amount": settled_neg_sum, "__count": settled_neg_count}]
+        if settled_neg_count else []
+    )
+    settled_pos_rg = (
+        [{"due_amount": settled_pos_sum, "__count": settled_pos_count}]
+        if settled_pos_count else []
+    )
+    return [all_rg, late_rg, future_rg, wallet_rg, unpaid_count, inst_rows,
+            settled_neg_rg, settled_pos_rg]
 
 
 def _make_inst_row(
@@ -128,10 +147,10 @@ def test_future_timing():
         assert result["timing"] == "future", f"Expected future for date={test_date}"
 
 
-# ── Tests: assertion (التصحيح المفاهيمي) ─────────────────────────────────────
+# ── Tests: identity check (التصحيح المفاهيمي v2, Decision 18.2) ───────────────
 
 async def test_assertion_holds():
-    """When late+future == all_due, no AssertionError is raised."""
+    """When the identity balances (no settled residual), no warning is set."""
     data = _standard_mock_data(
         total_due=800_000.0, late_due=600_000.0, future_due=200_000.0
     )
@@ -143,21 +162,138 @@ async def test_assertion_holds():
     assert result["data"]["exposure"]["total_due_egp"] == 800_000.0
     assert result["data"]["exposure"]["late_due_egp"]   == 600_000.0
     assert result["data"]["exposure"]["future_due_egp"] == 200_000.0
+    assert result["meta"]["data_quality_warning"] is None
 
 
-async def test_assertion_fires():
-    """When late+future diverges from all_due by >= 1.0 EGP, AssertionError is raised."""
+async def test_identity_mismatch_warns():
+    """Identity off by >= 1.0 EGP → NO exception; warning set; envelope valid.
+
+    Replaces the old test_assertion_fires: the identity breach used to raise
+    AssertionError → endpoint 500. Since Decision 18.2 it degrades to
+    meta.data_quality_warning = "exposure_identity_mismatch".
+    """
     data = _standard_mock_data(
         total_due=800_000.0,
         late_due=600_000.0,
-        future_due=201_000.0,  # 601_000 != 800_000 → delta = 1_000 EGP
+        future_due=201_000.0,  # 601_000 != 800_000 → delta = 199_000 EGP
     )
     mc = _make_client(data)
     with _patch_today():
-        with pytest.raises(AssertionError, match="Drill-down integrity"):
-            await get_customer_drilldown(
-                partner_id=_PARTNER_ID, request_id="req-assert-fail", client=mc
-            )
+        result = await get_customer_drilldown(
+            partner_id=_PARTNER_ID, request_id="req-mismatch", client=mc
+        )
+
+    assert result["version"] == "1.0"
+    assert result["meta"]["data_quality_warning"] == "exposure_identity_mismatch"
+    # Figures still delivered as computed — total_due_egp keeps late + future.
+    assert result["data"]["exposure"]["total_due_egp"] == 801_000.0
+
+
+# ── Tests: overpaid credit (رصيد مدفوع بالزيادة, Decision 18.2) ───────────────
+
+async def test_overpaid_credit_from_negative_settled():
+    """The partner-62112 case: settled installment paid 259,450 against 259,000
+    → due_amount = -450 → overpaid_credit_egp = 450.00, no warning.
+
+    all_due includes the -450 (sum over ALL posted rows), late+future excludes
+    it, so the identity needs the settled term: 800,000 + (-450) = 799,550.
+    """
+    data = _standard_mock_data(
+        total_due=799_550.0,       # all_posted_due = 800,000 - 450
+        late_due=600_000.0,
+        future_due=200_000.0,
+        settled_neg_sum=-450.0,
+        settled_neg_count=1,
+    )
+    mc = _make_client(data)
+    with _patch_today():
+        result = await get_customer_drilldown(
+            partner_id=_PARTNER_ID, request_id="req-credit", client=mc
+        )
+
+    exposure = result["data"]["exposure"]
+    assert exposure["overpaid_credit_egp"] == 450.0
+    assert exposure["overpaid_record_count"] == 1
+    assert result["meta"]["data_quality_warning"] is None
+
+
+async def test_overpaid_credit_zero_when_no_settled_residual():
+    """No settled rows with nonzero due_amount → credit 0.0, count 0."""
+    data = _standard_mock_data(
+        total_due=800_000.0, late_due=600_000.0, future_due=200_000.0,
+    )
+    mc = _make_client(data)
+    with _patch_today():
+        result = await get_customer_drilldown(
+            partner_id=_PARTNER_ID, request_id="req-no-credit", client=mc
+        )
+
+    exposure = result["data"]["exposure"]
+    assert exposure["overpaid_credit_egp"] == 0.0
+    assert exposure["overpaid_record_count"] == 0
+    assert result["meta"]["data_quality_warning"] is None
+
+
+async def test_identity_balances_with_credit_term():
+    """The exact failure mode that used to 500: |late+future - all_due| = 450
+    >= 1.0 EGP. With the settled term the identity balances → no warning,
+    and total_due_egp KEEPS meaning late + future (not netted)."""
+    data = _standard_mock_data(
+        total_due=799_550.0,
+        late_due=600_000.0,
+        future_due=200_000.0,
+        settled_neg_sum=-450.0,
+        settled_neg_count=1,
+    )
+    mc = _make_client(data)
+    with _patch_today():
+        result = await get_customer_drilldown(
+            partner_id=_PARTNER_ID, request_id="req-identity-v2", client=mc
+        )
+
+    assert result["meta"]["data_quality_warning"] is None
+    # late + future, NOT netted against the credit:
+    assert result["data"]["exposure"]["total_due_egp"] == 800_000.0
+
+
+async def test_overpaid_record_count():
+    """overpaid_record_count reflects the count of settled rows with due < 0."""
+    data = _standard_mock_data(
+        total_due=798_765.44,      # 800,000 - 1,234.56
+        late_due=600_000.0,
+        future_due=200_000.0,
+        settled_neg_sum=-1_234.56,
+        settled_neg_count=3,
+    )
+    mc = _make_client(data)
+    with _patch_today():
+        result = await get_customer_drilldown(
+            partner_id=_PARTNER_ID, request_id="req-count", client=mc
+        )
+
+    exposure = result["data"]["exposure"]
+    assert exposure["overpaid_record_count"] == 3
+    assert exposure["overpaid_credit_egp"] == pytest.approx(1_234.56)
+
+
+async def test_settled_positive_residual_warns():
+    """A settled row with POSITIVE due_amount understates exposure — the graver
+    anomaly the split-sign design refuses to net away: warning set, no credit."""
+    data = _standard_mock_data(
+        total_due=800_500.0,       # 800,000 + 500 positive settled residual
+        late_due=600_000.0,
+        future_due=200_000.0,
+        settled_pos_sum=500.0,
+        settled_pos_count=1,
+    )
+    mc = _make_client(data)
+    with _patch_today():
+        result = await get_customer_drilldown(
+            partner_id=_PARTNER_ID, request_id="req-pos-residual", client=mc
+        )
+
+    assert result["meta"]["data_quality_warning"] == "settled_positive_residual"
+    assert result["data"]["exposure"]["overpaid_credit_egp"] == 0.0
 
 
 # ── Test: payment ratio uses actual_paid NOT paid_amount (DR1 key test) ───────
@@ -321,6 +457,7 @@ async def test_response_shape():
         "total_due_egp", "late_due_egp", "future_due_egp",
         "paid_cash_egp", "total_original_egp",
         "total_installments", "unpaid_installment_count",
+        "overpaid_credit_egp", "overpaid_record_count",
     }
     assert exposure_keys.issubset(d["exposure"].keys())
 
@@ -331,7 +468,7 @@ async def test_response_shape():
     assert inst_keys.issubset(d["installments"].keys())
 
     meta_keys = {"request_id", "as_of", "rpc_duration_ms", "today", "page_size",
-                 "sort_by", "sort_dir"}
+                 "sort_by", "sort_dir", "data_quality_warning"}
     assert meta_keys.issubset(result["meta"].keys())
     assert result["meta"]["request_id"] == "req-shape"
 

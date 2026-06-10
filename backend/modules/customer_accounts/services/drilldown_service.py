@@ -10,8 +10,14 @@ Returns a full account statement for one customer by partner_id:
 Design decisions:
   No caching — all calls hit Odoo live (same as Collections drilldown Decision 14.7).
   assert _client.is_read_only at function start (Rule R10, Decision 14.10).
-  6 concurrent RPCs via asyncio.gather after authenticate().
-  Assertion: late_due + future_due == SUM(due_amount all posted) — التصحيح المفاهيمي.
+  8 concurrent RPCs via asyncio.gather after authenticate().
+  Identity (التصحيح المفاهيمي v2, Decision 18.2):
+    late_due + future_due + settled_neg_sum + settled_pos_sum
+      == SUM(due_amount all posted).
+    Settled rows can carry nonzero due_amount (overpayment → negative residual);
+    a breach sets meta.data_quality_warning instead of raising — never HTTP 500.
+  overpaid_credit_egp = -settled_neg_sum (رصيد مدفوع بالزيادة) — NEW separate
+    field; total_due_egp keeps its meaning (late + future).
   payment_ratio_pct = SUM(x_studio_actual_paid_amount) / SUM(amount) × 100
     — cash only; NOT paid_amount which includes pending cheques. DR1 confirmed M3-S6 discovery.
   today from _cache.today_str() — same source as KPI B for consistency (see D-2).
@@ -90,7 +96,7 @@ def _serialize_installment_row(rec: dict, today: str) -> dict:
 
     timing is computed Python-side: 'late' if date < today, 'future' otherwise.
     This avoids an extra RPC and is definitionally consistent with the domains used
-    in the 6-RPC gather.
+    in the 8-RPC gather.
     """
     inst_typ = rec.get("installment_type_id")
     type_id  = (
@@ -138,21 +144,28 @@ async def get_customer_drilldown(
 ) -> dict:
     """Full account statement for one customer.
 
-    6 concurrent RPCs:
+    8 concurrent RPCs:
       1. read_group(base_all, aggregates, ["partner_id"]) → name + totals
       2. read_group(late_domain, ["due_amount"], [])      → late aggregate
       3. read_group(future_domain, ["due_amount"], [])    → future aggregate
       4. read_group(wallet_domain, ["residual_amount"],[])→ wallet balance
       5. search_count(unpaid_domain)                      → pagination total
       6. search_read(page_domain, _DRILL_FIELDS, ...)     → installment page
+      7. read_group(settled_neg_domain, ["due_amount"],[])→ overpaid credit (due < 0)
+      8. read_group(settled_pos_domain, ["due_amount"],[])→ positive settled residual (due > 0)
 
-    Assertion (التصحيح المفاهيمي):
-      late_due + future_due == SUM(due_amount for all posted installments)
-      This holds because paid installments have due_amount=0, so the sum over
-      all posted equals the sum over unpaid/partial only.
+    Identity check (التصحيح المفاهيمي v2, Decision 18.2):
+      late_due + future_due + settled_neg_sum + settled_pos_sum
+        ≈ SUM(due_amount for all posted installments)   (|delta| < 1.0 EGP)
+      Settled installments ('paid' etc.) can carry nonzero due_amount — an
+      overpayment leaves a negative residual (e.g. partner 62112: paid
+      259,450 against 259,000 → due_amount = -450). On breach: logger.error
+      + meta.data_quality_warning = "exposure_identity_mismatch" — no
+      exception, no HTTP 500. A positive settled residual alone sets
+      "settled_positive_residual" (exposure understated — graver anomaly).
 
     Raises:
-      AssertionError:  integrity check failed (delta >= 1.0 EGP).
+      AssertionError:  only the R10 read-only guard (assert _client.is_read_only).
       OdooQueryError:  any RPC failure.
     """
     _own_client = client is None
@@ -173,6 +186,12 @@ async def get_customer_drilldown(
         ("partner_id",      "=", partner_id),
         ("residual_amount", ">", 0),
     ]
+    # Settled rows (not unpaid/partial), split by residual sign — netting the
+    # two in one aggregate would let a positive row silently shrink the credit
+    # AND hide an exposure-understating anomaly (Decision 18.2 split-sign design).
+    settled_base = base_all + [("payment_state", "not in", ["unpaid", "partial"])]
+    settled_neg_domain = settled_base + [("due_amount", "<", 0)]
+    settled_pos_domain = settled_base + [("due_amount", ">", 0)]
 
     # ── Cursor clause for installment page ────────────────────────────────────
     page_domain = list(unpaid_domain)
@@ -182,7 +201,7 @@ async def get_customer_drilldown(
             page_domain += _build_keyset_clause(cur["sb"], cur["sd"], cur["sv"], cur["id"])
     order = _odoo_order(sort_by, sort_dir)
 
-    # ── 6 concurrent RPCs ─────────────────────────────────────────────────────
+    # ── 8 concurrent RPCs ─────────────────────────────────────────────────────
     t0 = time.monotonic()
     try:
         await _client.authenticate()
@@ -193,6 +212,8 @@ async def get_customer_drilldown(
             wallet_rg_rows,
             unpaid_count,
             inst_rows,
+            settled_neg_rows,
+            settled_pos_rows,
         ) = await asyncio.gather(
             _client.execute_kw(
                 _MODEL, "read_group",
@@ -223,6 +244,16 @@ async def get_customer_drilldown(
                 args=[page_domain, _DRILL_FIELDS],
                 kwargs={"limit": page_size + 1, "order": order},
             ),
+            _client.execute_kw(
+                _MODEL, "read_group",
+                args=[settled_neg_domain, ["due_amount"], []],
+                kwargs={"lazy": False},
+            ),
+            _client.execute_kw(
+                _MODEL, "read_group",
+                args=[settled_pos_domain, ["due_amount"], []],
+                kwargs={"lazy": False},
+            ),
         )
     except Exception as exc:
         raise OdooQueryError(
@@ -233,11 +264,6 @@ async def get_customer_drilldown(
             await _client.close()
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(
-        f"Customer drill-down partner_id={partner_id}: "
-        f"all_rows={len(all_rg_rows)}, unpaid={unpaid_count}, "
-        f"page={min(len(inst_rows), page_size)} in {rpc_ms}ms"
-    )
 
     # ── Extract aggregates ────────────────────────────────────────────────────
     all_row = all_rg_rows[0] if all_rg_rows else {}
@@ -261,23 +287,50 @@ async def get_customer_drilldown(
     wallet_balance  = float(wallet_row.get("residual_amount") or 0.0)
     wallet_records  = int(wallet_row.get("__count") or 0)
 
-    # ── Assertion: التصحيح المفاهيمي ──────────────────────────────────────────
-    # late + future must equal all posted due_amount.
-    # Paid installments have due_amount=0 by definition, so the equality holds
-    # when data is consistent. A delta >= 1.0 EGP indicates a data anomaly.
+    neg_row   = settled_neg_rows[0] if settled_neg_rows else {}
+    neg_sum   = float(neg_row.get("due_amount") or 0.0)   # ≤ 0 by domain
+    neg_count = int(neg_row.get("__count") or 0)
+    pos_row   = settled_pos_rows[0] if settled_pos_rows else {}
+    pos_sum   = float(pos_row.get("due_amount") or 0.0)   # ≥ 0 by domain
+    pos_count = int(pos_row.get("__count") or 0)
+
+    # overpaid credit (رصيد مدفوع بالزيادة): the customer paid more than the
+    # contractual amount on settled installments — board-useful information,
+    # kept OUT of total_due_egp which keeps meaning late + future.
+    overpaid_credit = -neg_sum if neg_sum < 0 else 0.0
+
+    # ── Identity check: التصحيح المفاهيمي v2 (Decision 18.2) ──────────────────
+    # Settled installments can carry nonzero due_amount (overpayment → negative
+    # residual), so the exposure identity includes both signed settled sums:
+    #   late + future + neg_sum + pos_sum ≈ all_posted_due
+    # A breach is a data-quality fact for the board, not a server fault:
+    # warn in meta.data_quality_warning, never raise, never HTTP 500.
     total_due = late_due + future_due
-    _delta = abs(total_due - all_due)
+    data_quality_warning: str | None = None
+    _delta = abs(total_due + neg_sum + pos_sum - all_due)
     if _delta >= 1.0:
         logger.error(
-            f"Integrity assertion FAILED (partner_id={partner_id}): "
-            f"late({late_due:.2f}) + future({future_due:.2f}) = {total_due:.2f} "
+            f"Exposure identity mismatch (partner_id={partner_id}): "
+            f"late({late_due:.2f}) + future({future_due:.2f}) "
+            f"+ settled_neg({neg_sum:.2f}) + settled_pos({pos_sum:.2f}) "
+            f"= {total_due + neg_sum + pos_sum:.2f} "
             f"but all_posted_due = {all_due:.2f}  delta={_delta:.4f}"
         )
-        raise AssertionError(
-            f"Drill-down integrity: late+future={total_due:.2f} "
-            f"!= all_posted_due={all_due:.2f}  delta={_delta:.4f} EGP "
-            f"for partner_id={partner_id}"
+        data_quality_warning = "exposure_identity_mismatch"
+    elif pos_sum >= 1.0:
+        logger.error(
+            f"Settled installments with POSITIVE residual (partner_id={partner_id}): "
+            f"pos_sum={pos_sum:.2f} over {pos_count} row(s) — exposure understated."
         )
+        data_quality_warning = "settled_positive_residual"
+
+    logger.info(
+        f"Customer drill-down partner_id={partner_id}: "
+        f"all_rows={len(all_rg_rows)}, unpaid={unpaid_count}, "
+        f"page={min(len(inst_rows), page_size)}, "
+        f"overpaid_credit={overpaid_credit:.2f} ({neg_count} rows), "
+        f"warning={data_quality_warning} — 8 RPCs in {rpc_ms}ms"
+    )
 
     # ── Payment ratio (DR1 confirmed M3-S6 discovery) ─────────────────────────
     # Numerator: x_studio_actual_paid_amount = confirmed cash received only.
@@ -308,6 +361,8 @@ async def get_customer_drilldown(
                 "total_original_egp":       total_amount,
                 "total_installments":       total_inst,
                 "unpaid_installment_count": int(unpaid_count or 0),
+                "overpaid_credit_egp":      overpaid_credit,
+                "overpaid_record_count":    neg_count,
             },
             "behavior": {
                 "payment_ratio_pct":  payment_ratio_pct,
@@ -330,5 +385,6 @@ async def get_customer_drilldown(
             "page_size":       page_size,
             "sort_by":         sort_by,
             "sort_dir":        sort_dir,
+            "data_quality_warning": data_quality_warning,
         },
     }
