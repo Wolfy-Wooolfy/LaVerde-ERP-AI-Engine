@@ -24,6 +24,7 @@
 > Treat this spec as the architectural baseline, but always cross-check `MODULE_2_IMPLEMENTATION_DECISIONS.md` Session 11+ and `docs/MODULE_2_STAGE_TRACKER.md` before acting on any specific section. A full spec refresh (v1.2) is scheduled for the post-Stage-2.5 documentation pass.
 
 ## Changelog
+- **v1.2 (2026-06-11)** — KPI 7 v2 per **Decision 19.1** (Session 19 / N3): §4 v1 definition (forward-looking `[today, period_end]` windows, unpaid/partial filter) is **superseded** by full-period `[period_start, period_end]` three-segment buckets (period_total / collected_cleared / cheques_pending / remaining). Section title becomes «مستحقات وتحصيل الفترات الحالية» / "Dues & Collections — Current Periods". §4 amendment banner added; v1 text retained for history.
 - **v1.1 (2026-05-18)** — Applied PATH C from Phase 0.5 findings. KPI 7 cheques annotation removed from frontend cards (backend response unchanged). Section 7.1 layout updated. Sections 4.5, 4.6, 7.1, 7.4, 7.6, 8.2, 8.5 amended. §11 open questions resolved. §16 cross-references added.
 - **v1.0 (2026-05-18)** — Initial draft, approved by Khaled.
 
@@ -146,6 +147,45 @@ Alongside the EGP value, each bucket reports `cheques_record_count` — the numb
 ---
 
 ## 4. KPI 7 — Expected Collections Forecast (Full Specification)
+
+> ⚠️ **SUPERSEDED — v2 amendment (2026-06-11, Decision 19.1, Session 19 / N3).**
+> The v1 definition below (forward-looking `[today, period_end]` windows with
+> `payment_state IN [unpaid, partial]`) is **no longer what production serves**.
+> It collapsed to identical values on 3 of 4 cards whenever month/quarter/half
+> shared an end date (e.g. all of June). Approved by Khaled 2026-06-11 on the
+> N3 discovery numbers (`scripts/discover_kpi7_v2_full_period.py`, commit
+> `bc0d2cd`), KPI 7 v2 is:
+>
+> - **Windows:** FULL PERIOD `[period_start, period_end]` per calendar
+>   month / quarter / half (Jan–Jun / Jul–Dec) / year. Domain:
+>   `[state=post, date>=start, date<=end]` — **no payment_state filter**.
+>   Bucket keys unchanged: `this_month`, `this_quarter`, `this_half`,
+>   `this_year`.
+> - **Per-bucket payload:** `{period_start, period_end, record_count,
+>   period_total_egp, collected_cleared_egp, cheques_pending_egp,
+>   remaining_egp}` where `period_total_egp = SUM(amount)`,
+>   `collected_cleared_egp = SUM(x_studio_actual_paid_amount)`,
+>   `cheques_pending_egp = SUM(paid_amount) − SUM(x_studio_actual_paid_amount)`,
+>   `remaining_egp = SUM(due_amount)`. Invariant: cleared + pending +
+>   remaining == period_total. The v1 fields (`amount`, `due_amount`,
+>   `cheques_in_pipeline`, `cheques_record_count`, `drill_down_domain`,
+>   `cheques_drill_down_domain`, `type_breakdown`) are removed from the card
+>   payload.
+> - **The old forward-looking number is removed entirely** — that story
+>   belongs to KPI 2.
+> - **RPCs:** one `read_group` per bucket (4 total). Cache key:
+>   `kpi:dues_collections_v2:<YYYY-MM-DD>` (Cairo-local). Guards warn via
+>   `data_quality_warning`, never 500 (Decision 18.2 pattern).
+> - **UI:** section title «مستحقات وتحصيل الفترات الحالية» / "Dues &
+>   Collections — Current Periods"; each card = period_total prominent +
+>   flat stacked bar (cleared / cheques pending / remaining) + 3 legend rows.
+> - **Note:** the forecast drill-down endpoint
+>   (`GET /drilldown/forecast/{bucket}`) still serves the v1 forward-looking
+>   window; its redefinition is a separate product decision.
+>
+> §§4.1–4.8 below are the v1 historical record. See
+> `MODULE_2_IMPLEMENTATION_DECISIONS.md` Decision 19.1 for the authoritative
+> v2 specification.
 
 ### 4.1 Definition
 
@@ -404,6 +444,15 @@ The dashboard is reorganized into 4 visually distinct sections, each with a sect
 └─────────────────────────────────────────────────────────┘
 
 > **Amendment v1.1:** The amber cheques annotation previously shown on each KPI 7 forecast card is removed per Phase 0.5 PATH C. Each card now displays: bucket label, amount, and record count subtitle. The section header is amended from "المتوقع تحصيله" to "التحصيل المتوقع" per Q5 resolution (2026-05-18). The cheques annotation on KPI 2 (Late) card remains unchanged.
+
+> **Amendment v1.2 (2026-06-11, Decision 19.1 — KPI 7 v2):** Section 3 is
+> retitled «مستحقات وتحصيل الفترات الحالية» / "Dues & Collections — Current
+> Periods". Each of the 4 cards now shows the FULL-PERIOD picture:
+> `period_total_egp` prominent, a flat stacked bar with 3 segments
+> (collected cleared / cheques pending clearance / remaining), and 3 legend
+> rows with EGP values. The forward-looking amount and the card drill-down
+> trigger of the v1 layout above are removed (the v1 forecast story belongs
+> to KPI 2). The mockup above is the v1 historical record.
 
 ┌─────────────────────────────────────────────────────────┐
 │ Section 4 — الأداء والاتجاه / Performance & Trend       │

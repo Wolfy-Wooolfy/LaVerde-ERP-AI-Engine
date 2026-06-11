@@ -572,6 +572,16 @@ Four additional fields on `rs.installment` (all stored, all computed from `check
 
 **Implication:** La Verde's cheque workflow does not attach check records to installments before their due date. `paid_amount` on future-dated installments is structurally 0. The `cheques_in_pipeline` annotation on KPI 7 forecast buckets shows 0 EGP for 3 of 4 buckets — this is correct behaviour, not a formula error.
 
+> **Amendment (2026-06-11, Decision 19.1 — KPI 7 v2):** KPI 7 no longer uses
+> forward-looking `[today, period_end]` unpaid/partial windows. The v2 cards
+> aggregate the FULL calendar period `[period_start, period_end]` with no
+> payment_state filter, so the cheques segment
+> (`SUM(paid_amount) − SUM(x_studio_actual_paid_amount)`) is now materially
+> non-zero (discovery 2026-06-11: month window carried ≈15.4M EGP of received
+> cheques pending clearance). The paragraph above remains true for the v1
+> forward-looking windows, which survive only in the forecast drill-down
+> endpoint.
+
 ### 18.2 rs.account.check — Key Fields
 
 The `rs.account.check` model (5,224 records as of 2026-05-18) tracks the full check lifecycle:

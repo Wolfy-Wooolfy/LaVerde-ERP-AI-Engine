@@ -3148,3 +3148,85 @@ zero OpenAI calls, no git push/tags, no KPI A/B/C or refunds-panel changes.
 
 **Commits:** `e4f4a12` (C1 auth) · `9c3848b` (C2 backend + tests) ·
 `73eda07` (C3 frontend + i18n + CSS) · C4 = verify script + this doc.
+
+---
+
+## Session 19 — 2026-06-11 — KPI 7 v2 (N3): Full-Period "Dues & Collections" Cards
+
+### Decision 19.1 — KPI 7 redefined to full-period three-segment buckets (v2)
+
+**Background:** Production KPI 7 windows were `[today, period_end]` with
+`payment_state IN [unpaid, partial]` (Decision 9.2 domain; Decision 11.9
+collapse note). In June, this_month / this_quarter / this_half all end
+Jun 30, so three of the four forecast cards collapse to identical values
+(live 2026-06-11: 126 records / 21,014,883.00 EGP each — D-8 #1 run).
+N3 discovery (`scripts/discover_kpi7_v2_full_period.py`, commit `bc0d2cd`)
+produced the full-period OLD-vs-NEW window aggregates. **Approved by Khaled
+2026-06-11 on the N3 discovery numbers (bc0d2cd).**
+
+**Choice (locked, items 1–4):**
+
+1. **Windows become FULL PERIOD `[period_start, period_end]`**, domain
+   `[state=post, date>=start, date<=end]` — NO payment_state filter.
+   Periods: month (1st → last day), quarter, half (Jan–Jun / Jul–Dec),
+   year (Jan 1 → Dec 31). The 4 bucket keys keep their names:
+   `this_month`, `this_quarter`, `this_half`, `this_year`.
+2. **Each card shows the three-segment breakdown** (locked Module 2 field
+   semantics — `paid_amount` = cash + cleared cheques + postdated received;
+   `x_studio_actual_paid_amount` = cash + cleared cheques only;
+   `due_amount` = amount − paid_amount):
+   - `period_total_egp`      = SUM(amount) — إجمالي مستحقات الفترة
+   - `collected_cleared_egp` = SUM(x_studio_actual_paid_amount) — محصّل فعلياً
+   - `cheques_pending_egp`   = SUM(paid_amount) − SUM(x_studio_actual_paid_amount) — شيكات مستلمة قيد التحصيل
+   - `remaining_egp`         = SUM(due_amount) — متبقي
+
+   Invariant: `collected_cleared + cheques_pending + remaining ==
+   period_total` (per-record identity `due = amount − paid`).
+3. **The old forward-looking number (`[today → end]`, unpaid/partial) is
+   REMOVED entirely** — no secondary line. That story belongs to KPI 2.
+4. **Section title:** AR «مستحقات وتحصيل الفترات الحالية», EN "Dues &
+   Collections — Current Periods". Segment labels AR: «إجمالي مستحقات
+   الفترة» / «محصّل فعلياً» / «شيكات مستلمة قيد التحصيل» / «متبقي». EN:
+   "Total period dues" / "Collected (cleared)" / "Cheques pending
+   clearance" / "Remaining". Card titles keep the existing
+   this-month/quarter/half/year labels.
+
+**Discovery anchors (2026-06-11, intraday drift acceptable):**
+
+| Window  | Records | period_total (EGP) | collected_cleared (EGP) | incl-cheques (EGP) | remaining (EGP) |
+|---------|---------|--------------------|-------------------------|--------------------|-----------------|
+| month   | 390     | 48,792,323.00      | 580,500.00              | 16,025,985.00      | 32,766,338.00   |
+| quarter | 1,200   | 179,288,988.00     | —                       | —                  | —               |
+| half    | 2,418   | 379,103,871.00     | —                       | —                  | —               |
+| year    | 4,704   | 733,782,299.50     | —                       | —                  | —               |
+
+Identity `SUM(amount) = SUM(paid_amount) + SUM(due_amount)` held with
+delta 0.00 EGP on all four windows.
+
+**Implementation notes (Session 19 implementation pass):**
+
+- `_compute_period_bounds()` ported from the discovery script into
+  `backend/modules/collections/services/kpi_service.py`; returns
+  `(period_start, period_end)` per bucket. `_compute_bucket_ends()` is
+  retained as a thin derivation (`bounds[name][1]`) because the forecast
+  drill-down (`drilldown_service.get_forecast_drilldown`, Decision 14.x)
+  still serves the v1 forward-looking window — its redefinition is a
+  separate product decision, out of this session's locked scope.
+- One `read_group` per bucket, fields `[amount, paid_amount,
+  x_studio_actual_paid_amount, due_amount]`, no groupby → **4 RPCs** per
+  uncached call (was 16). `type_breakdown` (Stage 7, Decisions 16.2–16.7)
+  and `cheques_record_count` (Stage 5, Decision 14.6) are removed with the
+  v1 card payload.
+- Guards follow the Decision 18.2 warn-not-raise pattern — never HTTP 500:
+  `|period_total − (cleared + pending + remaining)| ≥ 1.0 EGP` →
+  `data_quality_warning = "kpi7_identity_mismatch"`;
+  `cheques_pending < 0` → `"negative_cheques"` (priority over identity).
+  Values are reported unclamped so the invariant stays auditable.
+- New cache key literal `kpi:dues_collections_v2:<YYYY-MM-DD>` (Cairo-local
+  date, Decision 9.3 pattern) so a stale v1 `kpi:expected_forecast:*` entry
+  can never serve the v2 endpoint.
+- Endpoint URL unchanged: `GET /api/v1/collections/kpi/expected-forecast`.
+- D-4 honored: collected derives from installment state (read_group sums),
+  never payment-event dates. Timezone: today + all boundaries Cairo-local
+  via `ZoneInfo("Africa/Cairo")`, ISO date strings computed Python-side;
+  never `read_group date:month` (Decision 9.2 / D0.3).
