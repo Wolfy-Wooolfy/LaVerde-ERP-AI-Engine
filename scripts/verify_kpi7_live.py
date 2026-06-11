@@ -1,23 +1,31 @@
 """
-Live verification for KPI 7 — Expected Collections Forecast.
+Live verification for KPI 7 v2 — Dues & Collections — Current Periods (Decision 19.1).
 
-Session 19 (D-8 migration #1, Decision 18.1): HTTP Basic auth replaced with
-session-cookie login via scripts/_lib/api_session.py. Also adds Step 8b —
-window arithmetic cross-check mirroring _compute_bucket_ends()
-(backend/modules/collections/services/kpi_service.py:1182-1217), including
-the June-2026 triple nesting collapse (this_month = this_quarter = this_half
-= 2026-06-30 — correct calendar nesting, not a bug).
+Session 19 (N3 implementation): rewritten for the v2 full-period three-segment
+buckets. The v1 checks (forward-looking [today, period_end] windows, June
+collapse groups, type_breakdown, cheques_record_count, drill_down_domain) are
+gone with the v1 payload.
 
-READ-ONLY: GET requests against the FastAPI app only. No direct Odoo RPC.
-No create/write/unlink. No OpenAI. AI cost = $0.00.
+Per bucket, TRIPLE AGREEMENT:
+  (a) endpoint values (GET /api/v1/collections/kpi/expected-forecast,
+      session-cookie auth via scripts/_lib/api_session.py — Decision 18.1), vs
+  (b) direct read_group over the SAME full-period domain
+      [state=post, date>=period_start, date<=period_end] via OdooClient, vs
+  (c) direct search_count over the same domain for record_count.
 
-AUTH EVIDENCE (verbatim sources):
-  FastAPI session-cookie auth (post-A2, Decision 18.1):
-    scripts/_lib/api_session.py login() — POST /login {username, password,
-    next} → 303 + cookie; ONE login per process (limiter 10/minute).
-    get_current_user() (backend/api/deps.py:16-21) reads
-    request.session.get("username") → 401 otherwise. No HTTP Basic path
-    exists anywhere in the app.
+Plus:
+  - Internal sum invariant per bucket:
+      |period_total − (collected_cleared + cheques_pending + remaining)| < 1.0 EGP
+  - Window arithmetic cross-check — independent mirror of
+    _compute_period_bounds() (kpi_service.py, ported from N3 discovery bc0d2cd)
+  - Nesting: month ≤ quarter ≤ half ≤ year on period_total and record_count
+    (strict < expected today; equality → WARN, violation → FAIL)
+  - Drift vs the N3 discovery anchors (2026-06-11) FLAGGED if structural (>10%)
+  - Cache-hit second call, response headers
+
+READ-ONLY: GET requests + read_group/search_count direct RPCs only
+(ALLOWED_METHODS enforced by OdooClient). No create/write/unlink.
+No OpenAI. AI cost = $0.00.
 
 Usage:
     python scripts/verify_kpi7_live.py [--url http://localhost:8000]
@@ -26,30 +34,29 @@ Requires the FastAPI server to be running and reachable.
 Set VERIFY_USERNAME / VERIFY_PASSWORD env vars to override the default
 admin credentials.
 
-Exit 0  — all assertions passed
+Exit 0  — all assertions passed (FLAGs allowed)
 Exit 1  — at least one assertion failed or the server was unreachable
 Exit 2  — Decision 6.4 ritual not confirmed (KPI7_VERIFY_CONFIRMED != "1")
 
 Appends one tab-separated row to logs/kpi7_verification.log on each run.
 
 NOTE — Decision 6.4 restart ritual REQUIRED before running:
-    1. Kill any uvicorn --reload server
-    2. Purge __pycache__:  find . -type d -name __pycache__ | xargs rm -rf
-    3. Start clean:        uvicorn backend.main:app --host 0.0.0.0 --port 8000
-    4. Run this script immediately (no warm-up call needed)
+    1. Kill any uvicorn --reload server (and all python processes)
+    2. Confirm port 8000 is free
+    3. Purge __pycache__ everywhere
+    4. Start clean: python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+       (scripts/start_server.bat encodes steps 1-4)
+    5. Run this script immediately (no warm-up call needed)
 
-EGP amounts are forward-looking and change daily — no fixed EGP baseline is
-asserted. Structural checks (nesting, nulls, field types, period boundaries,
-window arithmetic) are deterministic and always pass on correct data.
-
-Phase 0 Discovery baseline (2026-05-18, for reference only):
-  this_month   : 133 records / 22,719,871.00 EGP
-  this_quarter : 355 records / 55,527,209.00 EGP
-  this_half    : 355 records / 55,527,209.00 EGP  (Q2/H1 collapse in May 2026)
-  this_year    : 1934 records / 337,946,411.00 EGP
+N3 discovery anchors (2026-06-11, intraday drift acceptable, commit bc0d2cd):
+  month   : 390   records / 48,792,323.00  EGP period_total
+  quarter : 1,200 records / 179,288,988.00 EGP
+  half    : 2,418 records / 379,103,871.00 EGP
+  year    : 4,704 records / 733,782,299.50 EGP
 """
 
 import argparse
+import asyncio
 import calendar
 import io
 import os
@@ -61,7 +68,14 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+# Run from the PROJECT ROOT (python scripts/verify_kpi7_live.py): backend
+# Settings resolves .env relative to CWD. Both the repo root (backend.*) and
+# scripts/ (_lib.*) go on sys.path so imports work either way.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from _lib.api_session import ApiLoginError, login as api_login
+from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
@@ -91,12 +105,22 @@ DEFAULT_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 ENDPOINT    = "/api/v1/collections/kpi/expected-forecast"
 LOG_FILE    = "logs/kpi7_verification.log"
 
+_MODEL = "rs.installment"
+
 _BUCKET_NAMES = ("this_month", "this_quarter", "this_half", "this_year")
 _BUCKET_FIELDS = (
-    "bucket", "period_start", "period_end", "amount", "record_count",
-    "due_amount", "cheques_in_pipeline", "cheques_record_count",
-    "drill_down_domain", "cheques_drill_down_domain", "type_breakdown",
+    "period_start", "period_end", "record_count", "period_total_egp",
+    "collected_cleared_egp", "cheques_pending_egp", "remaining_egp",
 )
+
+# N3 discovery anchors (2026-06-11, commit bc0d2cd). Drift >10% = structural FLAG.
+_ANCHORS = {
+    "this_month":   (390,   48_792_323.00),
+    "this_quarter": (1_200, 179_288_988.00),
+    "this_half":    (2_418, 379_103_871.00),
+    "this_year":    (4_704, 733_782_299.50),
+}
+_DRIFT_PCT_STRUCTURAL = 10.0
 
 _SEP  = "═" * 72
 _SEP2 = "─" * 70
@@ -104,6 +128,7 @@ _PASS = "[PASS]"
 _FAIL = "[FAIL]"
 _INFO = "[INFO]"
 _WARN = "[WARN]"
+_FLAG = "[FLAG]"
 
 
 def _log(prefix: str, msg: str) -> None:
@@ -116,41 +141,78 @@ def _check(label: str, condition: bool, detail: str = "") -> bool:
     return condition
 
 
-def _expected_bucket_ends(today: date) -> "dict[str, date]":
-    """Independent mirror of _compute_bucket_ends()
-    (backend/modules/collections/services/kpi_service.py:1182-1217).
-
-    Recomputed here from the API's own today_cairo so each bucket's
-    period_end is checked against the window arithmetic, not against itself.
-    Pure calendar math on plain date objects — no ZoneInfo (Decision 9.2).
-    """
+def _expected_period_bounds(today: date) -> "dict[str, tuple[date, date]]":
+    """Independent mirror of kpi_service._compute_period_bounds() (v2,
+    Decision 19.1 — ported from N3 discovery bc0d2cd). Recomputed here from
+    the API's own today_cairo so each bucket's window is checked against the
+    calendar arithmetic, not against itself."""
     _, last_day = calendar.monthrange(today.year, today.month)
-    end_of_month = date(today.year, today.month, last_day)
+    month = (date(today.year, today.month, 1),
+             date(today.year, today.month, last_day))
 
-    quarter_idx = (today.month - 1) // 3          # 0=Q1, 1=Q2, 2=Q3, 3=Q4
-    end_q_month = (quarter_idx + 1) * 3           # 3, 6, 9, or 12
-    _, end_q_day = calendar.monthrange(today.year, end_q_month)
-    end_of_quarter = date(today.year, end_q_month, end_q_day)
+    quarter_idx   = (today.month - 1) // 3
+    q_start_month = quarter_idx * 3 + 1
+    q_end_month   = (quarter_idx + 1) * 3
+    _, q_last_day = calendar.monthrange(today.year, q_end_month)
+    quarter = (date(today.year, q_start_month, 1),
+               date(today.year, q_end_month, q_last_day))
 
-    end_h_month = 6 if today.month <= 6 else 12
-    _, end_h_day = calendar.monthrange(today.year, end_h_month)
-    end_of_half = date(today.year, end_h_month, end_h_day)
+    if today.month <= 6:
+        half = (date(today.year, 1, 1), date(today.year, 6, 30))
+    else:
+        half = (date(today.year, 7, 1), date(today.year, 12, 31))
 
-    end_of_year = date(today.year, 12, 31)
+    year = (date(today.year, 1, 1), date(today.year, 12, 31))
 
     return {
-        "this_month":   end_of_month,
-        "this_quarter": end_of_quarter,
-        "this_half":    end_of_half,
-        "this_year":    end_of_year,
+        "this_month":   month,
+        "this_quarter": quarter,
+        "this_half":    half,
+        "this_year":    year,
     }
+
+
+def _domain(start_str: str, end_str: str) -> list:
+    """Full-period v2 domain — NO payment_state filter (Decision 19.1)."""
+    return [
+        ("state", "=", "post"),
+        ("date", ">=", start_str),
+        ("date", "<=", end_str),
+    ]
+
+
+async def _fetch_direct(windows: "dict[str, tuple[str, str]]") -> "dict[str, dict]":
+    """Direct Odoo cross-check: per bucket, one read_group (4 sum fields) +
+    one search_count over the same domain. 8 RPCs total. READ-ONLY."""
+    out: dict = {}
+    async with OdooClient() as client:
+        for bname, (start_str, end_str) in windows.items():
+            dom = _domain(start_str, end_str)
+            rows = await client.execute_kw(
+                _MODEL, "read_group",
+                args=[dom, ["amount", "paid_amount", "x_studio_actual_paid_amount", "due_amount"], []],
+                kwargs={"lazy": False},
+            )
+            row = rows[0] if rows else {}
+            count = await client.execute_kw(_MODEL, "search_count", args=[dom])
+            paid   = float(row.get("paid_amount") or 0.0)
+            actual = float(row.get("x_studio_actual_paid_amount") or 0.0)
+            out[bname] = {
+                "period_total":      float(row.get("amount") or 0.0),
+                "collected_cleared": actual,
+                "cheques_pending":   paid - actual,
+                "remaining":         float(row.get("due_amount") or 0.0),
+                "record_count":      int(count),
+                "rg_count":          int(row.get("__count") or 0),
+            }
+    return out
 
 
 def _append_log(
     run_at: str,
     today_cairo: str,
     year_records: "int | str",
-    year_amount: "float | str",
+    year_total: "float | str",
     cache_status: str,
     rpc_ms: "int | str",
     data_quality_warning: "str | None",
@@ -165,7 +227,7 @@ def _append_log(
                 "cache_status\trpc_ms\tdata_quality_warning\tfailures\n"
             )
         f.write(
-            f"{run_at}\t{today_cairo}\t{year_records}\t{year_amount}\t"
+            f"{run_at}\t{today_cairo}\t{year_records}\t{year_total}\t"
             f"{cache_status}\t{rpc_ms}\t{data_quality_warning or 'none'}\t"
             f"{','.join(failures) if failures else 'none'}\n"
         )
@@ -187,9 +249,10 @@ def main() -> int:
     base_url: str = args.url.rstrip("/")
     run_at = datetime.now(timezone.utc).isoformat()
 
-    _log(_INFO, f"Target : GET {base_url}{ENDPOINT}")
+    _log(_INFO, f"Target : GET {base_url}{ENDPOINT}   (KPI 7 v2 — Decision 19.1)")
     _log(_INFO, f"Auth   : session-cookie (Decision 18.1) — "
                 f"user {os.environ.get('VERIFY_USERNAME', 'admin')!r}")
+    _log(_INFO, f"ALLOWED_METHODS : {sorted(ALLOWED_METHODS)}  (read-only direct RPC for triple agreement)")
 
     failures: list[str] = []
 
@@ -230,164 +293,107 @@ def main() -> int:
             _append_log(run_at, "", "", "", "", "", None, failures)
             return 1
 
-        # ── Step 4: Extract top-level values ─────────────────────────────────
-        buckets             = body["buckets"]
-        currency            = body["currency"]
-        today_cairo_str     = body["today_cairo"]
-        cache_status        = body["cache_status"]
-        rpc_ms              = body["rpc_duration_ms"]
+        buckets              = body["buckets"]
+        currency             = body["currency"]
+        today_cairo_str      = body["today_cairo"]
+        cache_status         = body["cache_status"]
+        rpc_ms               = body["rpc_duration_ms"]
         data_quality_warning = body.get("data_quality_warning")
 
-        # ── Step 5: Scalar top-level checks ──────────────────────────────────
+        # ── Step 4: Scalar top-level checks ──────────────────────────────────
         if not _check("currency == 'EGP'", currency == "EGP", f"got {currency!r}"):
             failures.append("wrong_currency")
-
         if not _check(
             "today_cairo is YYYY-MM-DD",
             bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", today_cairo_str)),
             f"got {today_cairo_str!r}",
         ):
             failures.append("bad_today_cairo_format")
-
         if not _check(
             "cache_status in {fresh, cached}",
             cache_status in {"fresh", "cached"},
             f"got {cache_status!r}",
         ):
             failures.append("bad_cache_status")
-
         if data_quality_warning is not None:
             _log(_WARN, f"data_quality_warning: {data_quality_warning!r} "
-                        f"(negative cheques_raw in one or more buckets — data anomaly in Odoo Studio fields)")
+                        "(negative_cheques or kpi7_identity_mismatch — Decision 18.2 pattern)")
 
-        # ── Step 6: All 4 bucket keys present ────────────────────────────────
+        # ── Step 5: All 4 bucket keys + v2 field sets ────────────────────────
         if not _check("buckets is a dict", isinstance(buckets, dict)):
             failures.append("buckets_not_dict")
             _append_log(run_at, today_cairo_str, "", "", cache_status, rpc_ms, data_quality_warning, failures)
             return 1
-
         for bname in _BUCKET_NAMES:
             if not _check(f"bucket key '{bname}' present", bname in buckets):
                 failures.append(f"missing_bucket_{bname}")
-
         if any(f.startswith("missing_bucket_") for f in failures):
             _append_log(run_at, today_cairo_str, "", "", cache_status, rpc_ms, data_quality_warning, failures)
             return 1
 
-        # ── Step 7: Per-bucket field checks ──────────────────────────────────
         print()
-        _log(_INFO, "Per-bucket field verification:")
+        _log(_INFO, "Per-bucket v2 field verification:")
         for bname in _BUCKET_NAMES:
             b = buckets[bname]
             for field in _BUCKET_FIELDS:
                 if not _check(f"  {bname}.{field} present", field in b):
                     failures.append(f"{bname}_missing_{field}")
+            for legacy in ("bucket", "amount", "due_amount", "cheques_in_pipeline",
+                           "cheques_record_count", "drill_down_domain",
+                           "cheques_drill_down_domain", "type_breakdown"):
+                if not _check(f"  {bname}: v1 field '{legacy}' absent", legacy not in b,
+                              "v1 payload leaked into v2"):
+                    failures.append(f"{bname}_v1_leak_{legacy}")
 
-            # bucket name self-consistency
-            if not _check(f"  {bname}.bucket == '{bname}'", b.get("bucket") == bname,
-                          f"got {b.get('bucket')!r}"):
-                failures.append(f"{bname}_bucket_name_wrong")
-
-            # period_start == today_cairo
-            if not _check(f"  {bname}.period_start == today_cairo",
-                          b.get("period_start") == today_cairo_str,
-                          f"got {b.get('period_start')!r}"):
-                failures.append(f"{bname}_period_start_wrong")
-
-            # period_end >= today_cairo (forward-looking: end is same day or later)
-            period_end = b.get("period_end", "")
-            if not _check(f"  {bname}.period_end is YYYY-MM-DD",
-                          bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", period_end)),
-                          f"got {period_end!r}"):
-                failures.append(f"{bname}_period_end_format")
-            elif not _check(f"  {bname}.period_end >= today_cairo",
-                            period_end >= today_cairo_str,
-                            f"{period_end} < {today_cairo_str}"):
-                failures.append(f"{bname}_period_end_in_past")
-
-            # numeric fields >= 0
-            for num_field in ("amount", "due_amount", "cheques_in_pipeline"):
-                val = b.get(num_field)
-                if not _check(f"  {bname}.{num_field} >= 0.0",
-                              isinstance(val, (int, float)) and val >= 0.0,
+            for dfield in ("period_start", "period_end"):
+                val = b.get(dfield, "")
+                if not _check(f"  {bname}.{dfield} is YYYY-MM-DD",
+                              bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(val))),
                               f"got {val!r}"):
-                    failures.append(f"{bname}_{num_field}_negative")
+                    failures.append(f"{bname}_{dfield}_format")
 
-            if not _check(f"  {bname}.record_count >= 0",
+            for nfield in ("period_total_egp", "collected_cleared_egp",
+                           "cheques_pending_egp", "remaining_egp"):
+                val = b.get(nfield)
+                if not _check(f"  {bname}.{nfield} is numeric",
+                              isinstance(val, (int, float)), f"got {val!r}"):
+                    failures.append(f"{bname}_{nfield}_not_numeric")
+            if not _check(f"  {bname}.record_count is int >= 0",
                           isinstance(b.get("record_count"), int) and b["record_count"] >= 0,
                           f"got {b.get('record_count')!r}"):
-                failures.append(f"{bname}_record_count_negative")
+                failures.append(f"{bname}_record_count_invalid")
 
-            # cheques_record_count — int >= 0 from Stage 5 (Decision 14.6)
-            _cr = b.get("cheques_record_count")
-            if not _check(
-                f"  {bname}.cheques_record_count is int >= 0 (Stage 5, Decision 14.6)",
-                isinstance(_cr, int) and _cr >= 0,
-                f"got {_cr!r}",
-            ):
-                failures.append(f"{bname}_cheques_record_count_not_int")
+            # cheques_pending < 0 is a data anomaly → must be accompanied by the warning
+            if float(b.get("cheques_pending_egp") or 0.0) < 0:
+                _log(_WARN, f"  {bname}.cheques_pending_egp < 0 (unclamped anomaly)")
+                if not _check(f"  {bname}: negative cheques flagged in data_quality_warning",
+                              data_quality_warning == "negative_cheques",
+                              f"warning is {data_quality_warning!r}"):
+                    failures.append(f"{bname}_negative_cheques_unflagged")
 
-            if not _check(f"  {bname}.cheques_drill_down_domain is null (Alt B)",
-                          b.get("cheques_drill_down_domain") is None,
-                          f"got {b.get('cheques_drill_down_domain')!r}"):
-                failures.append(f"{bname}_cheques_drill_down_domain_not_null")
-
-            # type_breakdown: list, identity-equal to bucket amount (Stage 7)
-            tb = b.get("type_breakdown")
-            if not _check(f"  {bname}.type_breakdown is a list",
-                          isinstance(tb, list),
-                          f"got {type(tb).__name__}"):
-                failures.append(f"{bname}_type_breakdown_not_list")
-            else:
-                tb_sum = sum(float(e.get("amount", 0)) for e in tb)
-                if not _check(
-                    f"  {bname}.type_breakdown sums to bucket amount (±0.01)",
-                    abs(tb_sum - float(b.get("amount", 0))) < 0.01,
-                    f"breakdown {tb_sum:,.2f} vs bucket {float(b.get('amount', 0)):,.2f}",
-                ):
-                    failures.append(f"{bname}_type_breakdown_sum_mismatch")
-
-            # drill_down_domain: 4-clause list
-            domain = b.get("drill_down_domain", [])
-            if not _check(f"  {bname}.drill_down_domain has 4 clauses",
-                          isinstance(domain, list) and len(domain) == 4,
-                          f"got {len(domain) if isinstance(domain, list) else type(domain).__name__}"):
-                failures.append(f"{bname}_domain_clause_count")
-            else:
-                _check(f"  {bname}.domain[0] == state=post", domain[0] == ["state", "=", "post"])
-                _check(f"  {bname}.domain[1] == payment_state IN [unpaid,partial]",
-                       domain[1] == ["payment_state", "in", ["unpaid", "partial"]])
-                _check(f"  {bname}.domain[2] == date >= today_cairo",
-                       domain[2] == ["date", ">=", today_cairo_str])
-                _check(f"  {bname}.domain[3] == date <= period_end",
-                       domain[3] == ["date", "<=", period_end])
-
-        # ── Step 8: Nesting invariant ────────────────────────────────────────
+        # ── Step 6: Internal sum invariant (< 1.0 EGP per bucket) ────────────
         print()
-        _log(_INFO, "Nesting invariant (this_month ⊆ this_quarter ⊆ this_half ⊆ this_year):")
-        for metric in ("amount", "record_count", "due_amount", "cheques_in_pipeline"):
-            vals = [buckets[n].get(metric, 0) for n in _BUCKET_NAMES]
-            ok = all(vals[i] <= vals[i + 1] for i in range(3))
-            detail = " → ".join(
-                f"{n.split('_')[1][:2]}={v:,.0f}" for n, v in zip(_BUCKET_NAMES, vals)
-            )
-            if not _check(f"  {metric} nests correctly", ok, detail):
-                failures.append(f"nesting_violation_{metric}")
+        _log(_INFO, "Internal sum invariant: cleared + pending + remaining == period_total (< 1.0 EGP):")
+        for bname in _BUCKET_NAMES:
+            b = buckets[bname]
+            total   = float(b.get("period_total_egp") or 0.0)
+            cleared = float(b.get("collected_cleared_egp") or 0.0)
+            pending = float(b.get("cheques_pending_egp") or 0.0)
+            remain  = float(b.get("remaining_egp") or 0.0)
+            delta   = total - (cleared + pending + remain)
+            ok = abs(delta) < 1.0
+            if not _check(f"  {bname}: invariant holds", ok,
+                          f"delta = {delta:,.4f} EGP"):
+                failures.append(f"{bname}_invariant_broken")
+                if not _check(f"  {bname}: invariant breach flagged in data_quality_warning",
+                              data_quality_warning in {"kpi7_identity_mismatch", "negative_cheques"},
+                              f"warning is {data_quality_warning!r}"):
+                    failures.append(f"{bname}_invariant_unflagged")
 
-        # period_end nesting
-        ends = [buckets[n].get("period_end", "") for n in _BUCKET_NAMES]
-        ok_ends = all(ends[i] <= ends[i + 1] for i in range(3))
-        if not _check(
-            "  period_end nests correctly",
-            ok_ends,
-            " → ".join(f"{n.split('_')[1][:2]}={e}" for n, e in zip(_BUCKET_NAMES, ends)),
-        ):
-            failures.append("nesting_violation_period_end")
-
-        # ── Step 8b: Window arithmetic cross-check ───────────────────────────
+        # ── Step 7: Window arithmetic cross-check ────────────────────────────
         print()
         _log(_INFO, "Window arithmetic cross-check — independent mirror of "
-                    "_compute_bucket_ends (kpi_service.py:1182-1217):")
+                    "_compute_period_bounds (v2, Decision 19.1):")
         today_d: "date | None"
         try:
             today_d = date.fromisoformat(today_cairo_str)
@@ -397,34 +403,94 @@ def main() -> int:
             failures.append("today_cairo_unparseable")
 
         if today_d is not None:
-            expected_ends = _expected_bucket_ends(today_d)
+            expected = _expected_period_bounds(today_d)
             for bname in _BUCKET_NAMES:
-                exp = expected_ends[bname].isoformat()
-                got = buckets[bname].get("period_end", "")
-                if not _check(f"  {bname}.period_end == window arithmetic ({exp})",
-                              got == exp, f"got {got!r}"):
-                    failures.append(f"{bname}_window_mismatch")
+                exp_start, exp_end = expected[bname]
+                got_start = buckets[bname].get("period_start", "")
+                got_end   = buckets[bname].get("period_end", "")
+                if not _check(f"  {bname}.period_start == calendar arithmetic ({exp_start.isoformat()})",
+                              got_start == exp_start.isoformat(), f"got {got_start!r}"):
+                    failures.append(f"{bname}_period_start_mismatch")
+                if not _check(f"  {bname}.period_end == calendar arithmetic ({exp_end.isoformat()})",
+                              got_end == exp_end.isoformat(), f"got {got_end!r}"):
+                    failures.append(f"{bname}_period_end_mismatch")
+            windows_set = {(buckets[n].get("period_start"), buckets[n].get("period_end"))
+                           for n in _BUCKET_NAMES}
+            if not _check("all four v2 windows are DISTINCT (no June collapse)",
+                          len(windows_set) == 4, f"got {sorted(windows_set)}"):
+                failures.append("windows_not_distinct")
 
-            # Collapse groups: buckets whose calendar windows coincide must
-            # return identical aggregates (same domain ⇒ same numbers).
-            groups: "dict[str, list[str]]" = {}
-            for bname in _BUCKET_NAMES:
-                groups.setdefault(expected_ends[bname].isoformat(), []).append(bname)
-            for end_iso, members in groups.items():
-                if len(members) > 1:
-                    _log(_INFO, f"  Collapse group: {', '.join(members)} all end "
-                                f"{end_iso} (correct calendar nesting, not a bug)")
-                    for metric in ("record_count", "amount", "due_amount",
-                                   "cheques_in_pipeline", "cheques_record_count"):
-                        vals = {buckets[m].get(metric) for m in members}
-                        if not _check(
-                            f"  collapsed buckets identical on {metric}",
-                            len(vals) == 1,
-                            str({m: buckets[m].get(metric) for m in members}),
-                        ):
-                            failures.append(f"collapse_mismatch_{metric}")
+        # ── Step 8: Nesting month ≤ quarter ≤ half ≤ year ────────────────────
+        print()
+        _log(_INFO, "Nesting (full periods nest ⇒ totals/counts nest; strict < expected today):")
+        for metric in ("period_total_egp", "record_count"):
+            vals = [buckets[n].get(metric, 0) for n in _BUCKET_NAMES]
+            detail = " → ".join(
+                f"{n.split('_')[1][:2]}={v:,.0f}" for n, v in zip(_BUCKET_NAMES, vals)
+            )
+            ok_le = all(vals[i] <= vals[i + 1] for i in range(3))
+            if not _check(f"  {metric}: month ≤ quarter ≤ half ≤ year", ok_le, detail):
+                failures.append(f"nesting_violation_{metric}")
+            else:
+                strict = all(vals[i] < vals[i + 1] for i in range(3))
+                if not strict:
+                    _log(_WARN, f"  {metric}: not strictly increasing ({detail}) — "
+                                "equality is unexpected mid-year; review.")
 
-        # ── Step 9: Response headers ─────────────────────────────────────────
+        # ── Step 9: TRIPLE AGREEMENT — endpoint vs read_group vs search_count ─
+        print()
+        _log(_INFO, "Triple agreement — endpoint vs direct read_group vs search_count (8 RPCs):")
+        windows = {n: (buckets[n]["period_start"], buckets[n]["period_end"])
+                   for n in _BUCKET_NAMES}
+        direct = asyncio.run(_fetch_direct(windows))
+        for bname in _BUCKET_NAMES:
+            b, d = buckets[bname], direct[bname]
+            for api_field, d_field in (
+                ("period_total_egp",      "period_total"),
+                ("collected_cleared_egp", "collected_cleared"),
+                ("cheques_pending_egp",   "cheques_pending"),
+                ("remaining_egp",         "remaining"),
+            ):
+                a_val = float(b.get(api_field) or 0.0)
+                d_val = d[d_field]
+                if not _check(
+                    f"  {bname}.{api_field}: endpoint == direct read_group (±1.0)",
+                    abs(a_val - d_val) < 1.0,
+                    f"endpoint {a_val:,.2f} vs direct {d_val:,.2f} "
+                    f"(delta {a_val - d_val:,.2f})",
+                ):
+                    failures.append(f"{bname}_{api_field}_direct_mismatch")
+            if not _check(
+                f"  {bname}.record_count: endpoint == search_count",
+                int(b.get("record_count") or 0) == d["record_count"],
+                f"endpoint {b.get('record_count')} vs search_count {d['record_count']}",
+            ):
+                failures.append(f"{bname}_record_count_direct_mismatch")
+            if not _check(
+                f"  {bname}: read_group __count == search_count",
+                d["rg_count"] == d["record_count"],
+                f"rg {d['rg_count']} vs sc {d['record_count']}",
+            ):
+                failures.append(f"{bname}_rg_sc_count_mismatch")
+
+        # ── Step 10: Drift vs N3 discovery anchors (FLAG if structural) ──────
+        print()
+        _log(_INFO, f"Drift vs N3 discovery anchors (2026-06-11, bc0d2cd) — FLAG if > {_DRIFT_PCT_STRUCTURAL:.0f}%:")
+        for bname in _BUCKET_NAMES:
+            anchor_cnt, anchor_total = _ANCHORS[bname]
+            got_cnt   = int(buckets[bname].get("record_count") or 0)
+            got_total = float(buckets[bname].get("period_total_egp") or 0.0)
+            cnt_pct   = abs(got_cnt - anchor_cnt) / anchor_cnt * 100 if anchor_cnt else 0.0
+            tot_pct   = abs(got_total - anchor_total) / anchor_total * 100 if anchor_total else 0.0
+            structural = cnt_pct > _DRIFT_PCT_STRUCTURAL or tot_pct > _DRIFT_PCT_STRUCTURAL
+            lbl = _FLAG if structural else _PASS
+            _log(lbl, f"  {bname}: count {got_cnt:,} vs {anchor_cnt:,} ({cnt_pct:.2f}%) | "
+                      f"total {got_total:,.2f} vs {anchor_total:,.2f} ({tot_pct:.2f}%)")
+            if structural:
+                _log(_FLAG, f"  {bname}: drift exceeds {_DRIFT_PCT_STRUCTURAL:.0f}% — structural; "
+                            "investigate before trusting the anchors (data entry may have moved).")
+
+        # ── Step 11: Response headers ─────────────────────────────────────────
         print()
         _log(_INFO, "Response headers:")
         cc = r.headers.get("cache-control", "")
@@ -436,7 +502,7 @@ def main() -> int:
         if not _check("X-Cache-Status present", bool(xcs), f"got {xcs!r}"):
             failures.append("header_no_x_cache_status")
 
-        # ── Step 10: Second request — cache hit (same client, NO re-login) ───
+        # ── Step 12: Second request — cache hit (same client, NO re-login) ───
         print()
         _log(_INFO, "Second request — verifying cache hit ...")
         r2 = client.get(ENDPOINT, timeout=30)
@@ -459,59 +525,34 @@ def main() -> int:
     # ── Structured output ─────────────────────────────────────────────────────
     print()
     print(_SEP)
-    print("KPI 7 — Expected Collections Forecast Verification")
+    print("KPI 7 v2 — Dues & Collections — Current Periods — Verification")
     print(f"Run timestamp : {run_at}")
     print(f"today_cairo   : {today_cairo_str}  (Cairo-local date, cache key boundary)")
     print(_SEP)
-    print(f"  {'Bucket':<16} {'Start':<12} {'End':<12} {'Records':>8}  "
-          f"{'Amount (EGP)':>22}  {'Due Amt (EGP)':>22}  {'Cheques EGP':>14}")
+    print(f"  {'Bucket':<14} {'Start':<12} {'End':<12} {'Records':>8}  "
+          f"{'Total (EGP)':>18}  {'Cleared (EGP)':>16}  {'Cheques (EGP)':>16}  {'Remaining (EGP)':>18}")
     print(f"  {_SEP2}")
-    all_ends = [buckets.get(n, {}).get("period_end", "") for n in _BUCKET_NAMES]
     for bname in _BUCKET_NAMES:
-        b    = buckets.get(bname, {})
-        strt = b.get("period_start", "")
-        end  = b.get("period_end",   "")
-        cnt  = int(b.get("record_count", 0))
-        amt  = float(b.get("amount", 0))
-        due  = float(b.get("due_amount", 0))
-        chq  = float(b.get("cheques_in_pipeline", 0))
-        collapse_note = " ← collapse" if all_ends.count(end) > 1 else ""
-        print(f"  {bname:<16} {strt:<12} {end:<12} {cnt:>8,}  "
-              f"{amt:>22,.2f}  {due:>22,.2f}  {chq:>14,.2f}{collapse_note}")
+        b = buckets.get(bname, {})
+        print(f"  {bname:<14} {b.get('period_start',''):<12} {b.get('period_end',''):<12} "
+              f"{int(b.get('record_count', 0)):>8,}  "
+              f"{float(b.get('period_total_egp', 0)):>18,.2f}  "
+              f"{float(b.get('collected_cleared_egp', 0)):>16,.2f}  "
+              f"{float(b.get('cheques_pending_egp', 0)):>16,.2f}  "
+              f"{float(b.get('remaining_egp', 0)):>18,.2f}")
     print(f"  {_SEP2}")
-    year_b   = buckets.get("this_year", {})
-    year_amt = float(year_b.get("amount", 0))
-    year_cnt = int(year_b.get("record_count", 0))
+    year_b     = buckets.get("this_year", {})
+    year_total = float(year_b.get("period_total_egp", 0))
+    year_cnt   = int(year_b.get("record_count", 0))
     print()
     print(f"  data_quality_warning : {data_quality_warning!r}")
     print(f"  cache_status         : {cache_status}")
-    print(f"  rpc_duration_ms      : {rpc_ms}  (16 RPCs expected on cache miss: "
-          f"8 bucket read_group + 4 cheques search_count + 4 type-breakdown read_group)")
+    print(f"  rpc_duration_ms      : {rpc_ms}  (4 RPCs expected on cache miss — one read_group per bucket)")
     print()
-
-    print("  ─── MANUAL CROSS-CHECK (optional — structural checks above are the gate) ─")
-    print()
-    print("  Open: Collections Mgmt → All Installments")
-    print("  Filters: State = Posted  AND  Payment Status IN [Unpaid, Partially Paid]")
-    print("  Switch to Pivot view, measure = Amount.  Add date range per bucket:")
-    print()
-    print(f"  {'Bucket':<16} {'Start':<12} {'End':<12}  "
-          f"{'Records (API)':>14}  {'Amount (API)':>22}  {'Odoo UI':>10}  {'Delta':>10}")
-    print(f"  {'─'*16} {'─'*12} {'─'*12}  {'─'*14}  {'─'*22}  {'─'*10}  {'─'*10}")
-    for bname in _BUCKET_NAMES:
-        b   = buckets.get(bname, {})
-        strt = b.get("period_start", "")
-        end  = b.get("period_end",   "")
-        cnt  = int(b.get("record_count", 0))
-        amt  = float(b.get("amount", 0))
-        print(f"  {bname:<16} {strt:<12} {end:<12}  {cnt:>14,}  {amt:>22,.2f}  "
-              f"{'[  ?  ]':>10}  {'[  ?  ]':>10}")
-    print()
-    print("  If all buckets match Odoo UI (±1 EGP) → KPI 7 live-verified.")
-    print("  Note: buckets whose end dates coincide return identical results —")
-    print("        e.g. Jun 2026: this_month = this_quarter = this_half all end")
-    print("        2026-06-30 (triple collapse). Correct calendar nesting, not a bug.")
-    print()
+    print("  ─── MANUAL CROSS-CHECK (optional — triple agreement above is the gate) ─")
+    print("  Odoo: Collections Mgmt → All Installments, filter State = Posted only")
+    print("  (NO payment-status filter), date range per bucket window, Pivot")
+    print("  measures: Amount / Paid Amount / Actual Paid Amount / Due Amount.")
     print(_SEP)
 
     # ── Log row ───────────────────────────────────────────────────────────────
@@ -519,7 +560,7 @@ def main() -> int:
         run_at=run_at,
         today_cairo=today_cairo_str,
         year_records=year_cnt,
-        year_amount=f"{year_amt:.2f}",
+        year_total=f"{year_total:.2f}",
         cache_status=cache_status,
         rpc_ms=rpc_ms,
         data_quality_warning=data_quality_warning,
