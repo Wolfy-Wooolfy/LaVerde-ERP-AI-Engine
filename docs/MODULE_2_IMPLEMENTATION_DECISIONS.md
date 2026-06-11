@@ -3230,3 +3230,123 @@ delta 0.00 EGP on all four windows.
   never payment-event dates. Timezone: today + all boundaries Cairo-local
   via `ZoneInfo("Africa/Cairo")`, ISO date strings computed Python-side;
   never `read_group date:month` (Decision 9.2 / D0.3).
+
+---
+
+## Session 20 — 2026-06-11 — CRM Dashboard (N4): Data-Quality Detail Pages + Overdue Distribution Tables Redesign
+
+### Decision 20.1 — Missing Stage & Missing Salesperson detail pages (ITEM A)
+
+**Background:** On /dashboard, the Data Quality card "Missing Contact Info"
+links to /data-quality/missing-contact, but "Missing Stage" (152 live on
+2026-06-11) and "Missing Salesperson" (0) showed counts with no detail view.
+**Approved by Khaled 2026-06-11.**
+
+**Choice (locked):**
+
+1. Two siblings mirroring the missing-contacts implementation 1:1 — same
+   page chrome, stats cards, filters, DataTables, CSV export, pagination,
+   empty state; NO new features. Routes: `/data-quality/missing-stage` and
+   `/data-quality/missing-salesperson` (HTML, `require_module_html("crm")`)
+   plus `/api/v1/data-quality/missing-stage` and
+   `/api/v1/data-quality/missing-salesperson` (JSON — same envelope
+   `PaginatedMissingContactResponse`, same params, same 30/minute limit,
+   same crm-gated `data_quality` router).
+2. **"New X Leads" is explicitly EXCLUDED** (Khaled decision) — that card
+   gets no link. **No sidebar entries** — the new pages are reachable from
+   the dashboard cards only.
+3. **IDENTITY RULE (card == list by construction):** each list endpoint uses
+   the VERBATIM domain that produces its dashboard card count. Implemented
+   as single-source builders `build_missing_stage_domain()` /
+   `build_missing_salesperson_domain()` in `backend/modules/crm/domain.py`,
+   consumed by BOTH `data_quality_summary()` (card counts, via the
+   `_missing_*_extra()` pattern) and the list queries (shared
+   `_dq_lead_details()`). Unit tests assert domain equality; the live
+   script proves it against Odoo (`search_count` on the same builders).
+   Domains: `BASE_DOMAIN + [["stage_id", "=", False]]` and
+   `BASE_DOMAIN + [["user_id", "=", False]]`.
+4. **Missing-attribute column OMITTED** on its own page (Stage column
+   dropped on missing-stage; Salesperson column dropped on
+   missing-salesperson) — a by-definition-empty column adds no information,
+   and omission is what the copied template makes trivial.
+5. "View details →" added to the two cards with markup/styling identical to
+   the Missing Contact Info link (raw text, as the existing link has no
+   i18n key). The render condition changed from `value > 0` to href
+   presence so the 0-count missing-salesperson card still links to its
+   clean "No records found" empty state (browser-checklist requirement);
+   consequence: the Missing Contact Info link is now also visible at 0.
+
+### Decision 20.2 — Overdue distribution tables redesign (ITEM B — frontend only)
+
+**Background:** The tabbed By Salesperson / By Team / By Stage / Matrix
+tables rendered inconsistently — By Salesperson (initialized while visible
+at page load) filled the card; tabs initialized while hidden got a narrow
+inline width pinned by DataTables `autoWidth`, centered in an empty card
+with names wrapping to 3 lines; the card had no title or description.
+Data was CORRECT — presentation only. Endpoints and fetchers untouched.
+
+**Choice (locked):**
+
+1. Card header with new i18n keys (AR + EN):
+   `crm_dist_title` — AR «توزيع المتابعات المتأخرة», EN "Overdue follow-ups
+   distribution"; `crm_dist_description` — AR «المتابعات المتأخرة موزعة حسب
+   موظف المبيعات والفريق والمرحلة», EN "Overdue follow-ups broken down by
+   salesperson, team, and stage". NEVER «مندوب» — always «موظف مبيعات».
+2. All four tabs unified to full-width tables (`w-full` inside
+   `overflow-x-auto`); root cause fixed via `autoWidth: false` in
+   tables.js. Name columns start-aligned with `whitespace-nowrap`
+   (no 3-line wrapping); count columns end-aligned, tabular numerals.
+3. By Salesperson / By Team / By Stage rows: % of tab total
+   (`row_count / tab_total * 100`, one decimal) + inline proportional bar
+   in the KPI 7 v2 idiom — thin rounded track `h-2 rounded-full
+   bg-neutral-200 dark:bg-neutral-700`, fill `bg-danger-500` (the overdue
+   red already used for the counts), width = pct%. `tab_total == 0`
+   guarded (pct = 0).
+4. Matrix tab: full-width, sticky first column (logical `start-0`),
+   `whitespace-nowrap` headers/cells, horizontal scroll on overflow.
+5. The DataTables search box moved into the card header row (end-aligned)
+   via an opt-in `data-filter-slot="#slot-id"` table attribute in
+   tables.js + four per-tab header slots shown/hidden with the active
+   Alpine tab. Search, sorting and pagination behavior unchanged — only
+   the element's position moves.
+6. RTL-correct throughout: logical utilities (`text-start` / `text-end` /
+   `ms-2` / `start-0`); bars fill from the inline start (block-flow
+   default). `app.css` rebuilt (`npm run build:css`) because `start-0`
+   was not previously in the built file; grep-proofed:
+   `.start-0{inset-inline-start:0}`, `.text-end{text-align:end}`,
+   `.ms-2{margin-inline-start:.5rem}`.
+
+### Decision 20.3 — Evidence-policy ruling (Khaled, 2026-06-11)
+
+Standing policy, recorded: full-file paste via Bash `cat` for EVERY
+modified/created code file BEFORE its commit (paste and continue, don't
+wait for approval). Generated files (built CSS) → grep proof, never a
+paste. Large pre-existing docs with append-only edits (e.g. this decisions
+log) → COMPLETE `git diff` via Bash is acceptable evidence, with explicit
+disclosure. Read-tool renders are REJECTED as evidence.
+
+**Tests (touched files only — the full suite has known Playwright-fixture
+baseline pollution, not chased):**
+`tests/unit/modules/crm/test_service.py` + `tests/integration/test_api_v1.py`
+— **45/45 passed** (18 unit + 27 integration; 15 of them new: domain
+identity assertions, field mapping, clean-empty path, 200 shape,
+pagination params, 422 page_size, 401 unauthenticated for both endpoints).
+
+**Live verification (scripts/verify_dq_details_live.py, after the Decision
+6.4 ritual — kill python / port 8000 free / 26 __pycache__ purged / uvicorn
+without --reload): ALL PASS.**
+- TRIPLE AGREEMENT exact: missing_stage card=152 list=152 direct=152;
+  missing_salesperson card=0 list=0 direct=0 (zero == valid PASS, clean
+  empty envelope: data=[], total_pages=0, has_next=false).
+- HTTP 200 on both JSON endpoints and both HTML pages; page-1 pagination
+  sanity green (total_pages == ceil(total/50), len(data) == min(50, total),
+  has_prev/has_next correct); page-1 rows carry all 12 envelope keys.
+
+**Constraints honored:** Odoo strictly read-only (ALLOWED_METHODS
+untouched; verify uses search_count only), zero OpenAI calls ($0.00),
+no git push/tags (Khaled only), app/ tree untouched, New X card and
+sidebar untouched, no backend change for ITEM B.
+
+**Commits:** `f41abde` (C1 list endpoints + tests) · `4e0670a` (C2 pages +
+card links) · `43c5908` (C3 distribution tables redesign + i18n + CSS) ·
+C4 = verify script + live PASS + this entry.
