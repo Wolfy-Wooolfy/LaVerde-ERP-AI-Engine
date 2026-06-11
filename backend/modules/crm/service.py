@@ -4,6 +4,7 @@ All Odoo calls are async; summary() fires 8 concurrent requests via asyncio.gath
 """
 
 import asyncio
+import math
 from typing import Optional, cast
 
 from loguru import logger
@@ -13,6 +14,8 @@ from backend.shared.odoo.client import OdooClient
 from backend.modules.crm.domain import (
     BASE_DOMAIN,
     build_missing_contact_domain,
+    build_missing_salesperson_domain,
+    build_missing_stage_domain,
     get_closed_excluded_stage_ids,
     get_critical_stage_ids,
     get_data_quality_stage_ids,
@@ -258,9 +261,9 @@ class CrmService:
         """Run 4 Odoo count queries in parallel."""
         new_x, missing_stage, missing_contact, missing_sp = await asyncio.gather(
             self._count_domain([["stage_id", "in", get_data_quality_stage_ids()]]),
-            self._count_domain([["stage_id", "=", False]]),
+            self._count_domain(self._missing_stage_extra()),
             self._count_domain(self._missing_contact_extra()),
-            self._count_domain([["user_id", "=", False]]),
+            self._count_domain(self._missing_salesperson_extra()),
         )
         return DataQuality(
             new_x_count=new_x,
@@ -275,6 +278,16 @@ class CrmService:
         full = build_missing_contact_domain()
         return full[len(BASE_DOMAIN) :]
 
+    def _missing_stage_extra(self) -> list:
+        """Return the no-stage condition without the BASE_DOMAIN prefix."""
+        full = build_missing_stage_domain()
+        return full[len(BASE_DOMAIN) :]
+
+    def _missing_salesperson_extra(self) -> list:
+        """Return the no-salesperson condition without the BASE_DOMAIN prefix."""
+        full = build_missing_salesperson_domain()
+        return full[len(BASE_DOMAIN) :]
+
     async def missing_contact_details(
         self,
         page: int = 1,
@@ -284,7 +297,70 @@ class CrmService:
         sort: str = "create_date desc",
     ) -> tuple[list[MissingContactRow], int]:
         """Return paginated missing-contact rows and the total count."""
-        domain = build_missing_contact_domain()
+        return await self._dq_lead_details(
+            build_missing_contact_domain(),
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
+        )
+
+    async def missing_stage_details(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> tuple[list[MissingContactRow], int]:
+        """Return paginated missing-stage rows and the total count.
+
+        Domain is build_missing_stage_domain() — the VERBATIM domain behind the
+        dashboard card count (identity card == list by construction).
+        """
+        return await self._dq_lead_details(
+            build_missing_stage_domain(),
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
+        )
+
+    async def missing_salesperson_details(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> tuple[list[MissingContactRow], int]:
+        """Return paginated missing-salesperson rows and the total count.
+
+        Domain is build_missing_salesperson_domain() — the VERBATIM domain behind
+        the dashboard card count (identity card == list by construction).
+        """
+        return await self._dq_lead_details(
+            build_missing_salesperson_domain(),
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
+        )
+
+    async def _dq_lead_details(
+        self,
+        domain: list,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> tuple[list[MissingContactRow], int]:
+        """Shared paginated lead fetch for the data-quality detail lists."""
         if team_id is not None:
             domain = domain + [["team_id", "=", team_id]]
         if salesperson_id is not None:
@@ -439,8 +515,49 @@ class CrmService:
             salesperson_id=salesperson_id,
             sort=sort,
         )
-        import math
+        return self._paginated_dq_response(rows, total, page, page_size)
 
+    async def missing_stage_response(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> PaginatedMissingContactResponse:
+        rows, total = await self.missing_stage_details(
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
+        )
+        return self._paginated_dq_response(rows, total, page, page_size)
+
+    async def missing_salesperson_response(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> PaginatedMissingContactResponse:
+        rows, total = await self.missing_salesperson_details(
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
+        )
+        return self._paginated_dq_response(rows, total, page, page_size)
+
+    @staticmethod
+    def _paginated_dq_response(
+        rows: list[MissingContactRow],
+        total: int,
+        page: int,
+        page_size: int,
+    ) -> PaginatedMissingContactResponse:
         total_pages = math.ceil(total / page_size) if page_size > 0 else 1
         return PaginatedMissingContactResponse(
             ok=True,

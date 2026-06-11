@@ -8,6 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.core.cache import clear_cache, init_cache
+from backend.modules.crm.domain import (
+    BASE_DOMAIN,
+    build_missing_contact_domain,
+    build_missing_salesperson_domain,
+    build_missing_stage_domain,
+)
 from backend.modules.crm.service import CrmService
 
 
@@ -110,6 +116,117 @@ async def test_missing_contact_details_maps_fields(mock_client: MagicMock) -> No
     assert row.salesperson_name == "Ahmed"
     assert row.source_name == "No Source"
     assert row.stage_name == "New Lead"
+
+
+# ── missing_stage_details / missing_salesperson_details (N4) ─────────────────
+
+
+async def test_missing_stage_details_uses_card_count_domain(mock_client: MagicMock) -> None:
+    """List domain must be VERBATIM the dashboard-card domain (N4 identity rule)."""
+    mock_client.execute_kw.side_effect = [[], [{"__count": 0}]]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_stage_details()
+    assert rows == []
+    assert total == 0
+    expected = BASE_DOMAIN + [["stage_id", "=", False]]
+    assert build_missing_stage_domain() == expected
+    search_domain = mock_client.execute_kw.call_args_list[0].kwargs["args"][0]
+    count_domain = mock_client.execute_kw.call_args_list[1].kwargs["args"][0]
+    assert search_domain == expected, f"search_read domain diverged: {search_domain}"
+    assert count_domain == expected, f"read_group domain diverged: {count_domain}"
+
+
+async def test_missing_salesperson_details_uses_card_count_domain(mock_client: MagicMock) -> None:
+    """List domain must be VERBATIM the dashboard-card domain (N4 identity rule)."""
+    mock_client.execute_kw.side_effect = [[], [{"__count": 0}]]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_salesperson_details()
+    assert rows == []
+    assert total == 0
+    expected = BASE_DOMAIN + [["user_id", "=", False]]
+    assert build_missing_salesperson_domain() == expected
+    search_domain = mock_client.execute_kw.call_args_list[0].kwargs["args"][0]
+    count_domain = mock_client.execute_kw.call_args_list[1].kwargs["args"][0]
+    assert search_domain == expected, f"search_read domain diverged: {search_domain}"
+    assert count_domain == expected, f"read_group domain diverged: {count_domain}"
+
+
+async def test_missing_stage_details_maps_fields(mock_client: MagicMock) -> None:
+    mock_client.execute_kw.side_effect = [
+        # search_read result — stage_id is False by definition on this list
+        [
+            {
+                "id": 101,
+                "name": "Stageless Opp",
+                "contact_name": "Mona",
+                "user_id": [10, "Ahmed"],
+                "team_id": [1, "Alpha"],
+                "stage_id": False,
+                "source_id": [3, "Facebook"],
+                "create_date": "2026-06-01 09:00:00",
+            }
+        ],
+        # read_group count
+        [{"__count": 152}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_stage_details()
+    assert total == 152
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.lead_id == 101
+    assert row.stage_name == "No Stage"
+    assert row.salesperson_name == "Ahmed"
+    assert row.source_name == "Facebook"
+
+
+async def test_missing_salesperson_details_maps_fields(mock_client: MagicMock) -> None:
+    mock_client.execute_kw.side_effect = [
+        # search_read result — user_id is False by definition on this list
+        [
+            {
+                "id": 202,
+                "name": "Orphan Opp",
+                "contact_name": "Hany",
+                "user_id": False,
+                "team_id": [1, "Alpha"],
+                "stage_id": [28, "New Lead"],
+                "source_id": False,
+                "create_date": "2026-06-02 10:00:00",
+            }
+        ],
+        # read_group count
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_salesperson_details()
+    assert total == 1
+    row = rows[0]
+    assert row.lead_id == 202
+    assert row.salesperson_name == "Unassigned"
+    assert row.stage_name == "New Lead"
+
+
+async def test_missing_salesperson_details_empty_is_clean(mock_client: MagicMock) -> None:
+    """missing-salesperson is 0 today — the empty path must be well-formed."""
+    mock_client.execute_kw.side_effect = [[], [{"__count": 0}]]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_salesperson_details()
+    assert rows == []
+    assert total == 0
+
+
+async def test_data_quality_summary_counts_use_list_domains(mock_client: MagicMock) -> None:
+    """Card counts and detail lists must share the exact same domains (N4 identity rule)."""
+    mock_client.execute_kw.return_value = [{"__count": 0}]
+    svc = CrmService(client=mock_client)
+    await svc.data_quality_summary()
+    counted_domains = [
+        call.kwargs["args"][0] for call in mock_client.execute_kw.call_args_list
+    ]
+    assert build_missing_stage_domain() in counted_domains
+    assert build_missing_salesperson_domain() in counted_domains
+    assert build_missing_contact_domain() in counted_domains
 
 
 # ── summary caching ───────────────────────────────────────────────────────────

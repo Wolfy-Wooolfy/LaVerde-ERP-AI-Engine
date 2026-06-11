@@ -50,3 +50,21 @@ def build_missing_contact_domain() -> list:
     for field in CONTACT_PHONE_FIELDS:
         domain.append([field, "=", False])
     return domain
+
+
+def build_missing_stage_domain() -> list:
+    """Return a domain that matches leads with no stage set.
+
+    Single source for BOTH the dashboard card count and the
+    /data-quality/missing-stage list — identity card == list by construction.
+    """
+    return list(BASE_DOMAIN) + [["stage_id", "=", False]]
+
+
+def build_missing_salesperson_domain() -> list:
+    """Return a domain that matches leads with no salesperson assigned.
+
+    Single source for BOTH the dashboard card count and the
+    /data-quality/missing-salesperson list — identity card == list by construction.
+    """
+    return list(BASE_DOMAIN) + [["user_id", "=", False]]
