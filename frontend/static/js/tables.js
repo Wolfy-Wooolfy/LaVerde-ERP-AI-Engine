@@ -32,6 +32,9 @@ window.initDataTables = function() {
       info: true,
       ordering: true,
       responsive: false,
+      // Never let DataTables pin an inline width measured while the table is
+      // hidden (Alpine tab) — w-full on the table must govern.
+      autoWidth: false,
       language: {
         search: '',
         searchPlaceholder: 'Search…',
@@ -50,7 +53,7 @@ window.initDataTables = function() {
       drawCallback() {
         // Apply Tailwind classes to DataTables-generated DOM
         const wrapper = $table.closest('.dataTables_wrapper');
-        wrapper.find('.dataTables_filter input').addClass('form-input ml-2 w-48 text-sm');
+        wrapper.find('.dataTables_filter input').addClass('form-input ms-2 w-48 text-sm');
         wrapper.find('.dataTables_paginate .paginate_button')
           .addClass('px-3 py-1 rounded-lg text-sm cursor-pointer mx-0.5 transition-colors');
         wrapper.find('.paginate_button.current')
@@ -62,6 +65,17 @@ window.initDataTables = function() {
           .addClass('text-sm text-neutral-500 dark:text-neutral-400');
       },
     });
+
+    // Opt-in: move this table's search box into a designated slot
+    // (data-filter-slot="#slot-id"), e.g. the distribution card header.
+    // Search behavior is unchanged — only the element's position moves.
+    const filterSlot = $table.data('filter-slot');
+    if (filterSlot) {
+      const slot = document.querySelector(filterSlot);
+      if (slot) {
+        $table.closest('.dataTables_wrapper').find('.dataTables_filter').appendTo(slot);
+      }
+    }
   });
 };
 

@@ -49,6 +49,8 @@
   "Stage": "Stage",
   "Count": "Count",
   "Overdue Count": "Overdue Count",
+  "crm_dist_title": "Overdue follow-ups distribution",
+  "crm_dist_description": "Overdue follow-ups broken down by salesperson, team, and stage",
 
   "Good morning": "Good morning",
   "Good afternoon": "Good afternoon",

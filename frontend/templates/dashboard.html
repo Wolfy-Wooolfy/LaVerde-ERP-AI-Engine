@@ -335,8 +335,25 @@
   </div>
 </div>
 
-<!-- ── Tables Section ─────────────────────────────────────────────────────────── -->
+<!-- ── Tables Section — Overdue follow-ups distribution ───────────────────────── -->
 <div class="chart-panel" x-data="{ tab: 'salesperson' }">
+
+  <!-- Card header: title + description + per-tab search slot (end-aligned) -->
+  <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-4">
+    <div>
+      <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("crm_dist_title") }}</h3>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{{ _t("crm_dist_description") }}</p>
+    </div>
+    {# DataTables search boxes are relocated here by tables.js (data-filter-slot);
+       only the active tab's box is visible. Behavior unchanged. #}
+    <div class="shrink-0">
+      <div id="dist-filter-salesperson" x-show="tab === 'salesperson'"></div>
+      <div id="dist-filter-team" x-show="tab === 'team'" x-cloak></div>
+      <div id="dist-filter-stage" x-show="tab === 'stage'" x-cloak></div>
+      <div id="dist-filter-matrix" x-show="tab === 'matrix'" x-cloak></div>
+    </div>
+  </div>
+
   <!-- Tabs -->
   <div class="flex gap-1 border-b border-neutral-200 dark:border-neutral-700 mb-4 -mx-5 px-5 overflow-x-auto scrollbar-hide">
     {% for tab_id, tab_label in [
@@ -355,27 +372,45 @@
     {% endfor %}
   </div>
 
+  {# Single-dimension tabs share one layout: name (start, no wrap) /
+     %-share with KPI 7 v2-style bar / count (end, tabular). #}
+  {% macro dist_row(name, count, total) %}
+    {% set pct = (count / total * 100) if total > 0 else 0 %}
+    <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
+      <td class="px-4 py-3 text-start whitespace-nowrap text-neutral-800 dark:text-neutral-200">{{ name }}</td>
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <div class="h-2 flex-1 min-w-[80px] rounded-full overflow-hidden bg-neutral-200 dark:bg-neutral-700" aria-hidden="true">
+            <div class="h-full rounded-full bg-danger-500" style="width: {{ pct | round(1) }}%"></div>
+          </div>
+          <span class="tabular text-xs text-neutral-500 dark:text-neutral-400 shrink-0 whitespace-nowrap">{{ "%.1f" | format(pct) }}%</span>
+        </div>
+      </td>
+      <td class="px-4 py-3 text-end whitespace-nowrap">
+        <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if count > 5 else 'text-warning-600 dark:text-warning-400' if count > 0 else 'text-neutral-400' }}">
+          {{ count }}
+        </span>
+      </td>
+    </tr>
+  {% endmacro %}
+
   <!-- By Salesperson -->
   <div x-show="tab === 'salesperson'" x-cloak>
     {% if followup_risk.overdue_by_salesperson %}
+    {% set sp_rows = followup_risk.overdue_by_salesperson | sort(attribute='overdue_count', reverse=True) %}
+    {% set sp_total = sp_rows | sum(attribute='overdue_count') %}
     <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
-      <table id="spTable" class="w-full text-sm">
+      <table id="spTable" class="w-full text-sm" data-filter-slot="#dist-filter-salesperson">
         <thead>
           <tr class="bg-neutral-50 dark:bg-neutral-900">
-            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Salesperson") }}</th>
-            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+            <th class="px-4 py-3 text-start whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Salesperson") }}</th>
+            <th class="px-4 py-3 text-start text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide w-full">%</th>
+            <th class="px-4 py-3 text-end whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in followup_risk.overdue_by_salesperson | sort(attribute='overdue_count', reverse=True) %}
-          <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
-            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.salesperson_name }}</td>
-            <td class="px-4 py-3 text-right">
-              <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
-                {{ row.overdue_count }}
-              </span>
-            </td>
-          </tr>
+          {% for row in sp_rows %}
+          {{ dist_row(row.salesperson_name, row.overdue_count, sp_total) }}
           {% endfor %}
         </tbody>
       </table>
@@ -388,24 +423,20 @@
   <!-- By Team -->
   <div x-show="tab === 'team'" x-cloak>
     {% if followup_risk.overdue_by_team %}
+    {% set team_rows = followup_risk.overdue_by_team | sort(attribute='overdue_count', reverse=True) %}
+    {% set team_total = team_rows | sum(attribute='overdue_count') %}
     <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
-      <table id="teamTable" class="w-full text-sm">
+      <table id="teamTable" class="w-full text-sm" data-filter-slot="#dist-filter-team">
         <thead>
           <tr class="bg-neutral-50 dark:bg-neutral-900">
-            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Team") }}</th>
-            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+            <th class="px-4 py-3 text-start whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Team") }}</th>
+            <th class="px-4 py-3 text-start text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide w-full">%</th>
+            <th class="px-4 py-3 text-end whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in followup_risk.overdue_by_team | sort(attribute='overdue_count', reverse=True) %}
-          <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
-            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.team_name }}</td>
-            <td class="px-4 py-3 text-right">
-              <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
-                {{ row.overdue_count }}
-              </span>
-            </td>
-          </tr>
+          {% for row in team_rows %}
+          {{ dist_row(row.team_name, row.overdue_count, team_total) }}
           {% endfor %}
         </tbody>
       </table>
@@ -418,24 +449,20 @@
   <!-- By Stage -->
   <div x-show="tab === 'stage'" x-cloak>
     {% if followup_risk.overdue_by_stage %}
+    {% set stage_rows = followup_risk.overdue_by_stage | sort(attribute='overdue_count', reverse=True) %}
+    {% set stage_total = stage_rows | sum(attribute='overdue_count') %}
     <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
-      <table id="stageTable" class="w-full text-sm">
+      <table id="stageTable" class="w-full text-sm" data-filter-slot="#dist-filter-stage">
         <thead>
           <tr class="bg-neutral-50 dark:bg-neutral-900">
-            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Stage") }}</th>
-            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+            <th class="px-4 py-3 text-start whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Stage") }}</th>
+            <th class="px-4 py-3 text-start text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide w-full">%</th>
+            <th class="px-4 py-3 text-end whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in followup_risk.overdue_by_stage | sort(attribute='overdue_count', reverse=True) %}
-          <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
-            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.stage_name }}</td>
-            <td class="px-4 py-3 text-right">
-              <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
-                {{ row.overdue_count }}
-              </span>
-            </td>
-          </tr>
+          {% for row in stage_rows %}
+          {{ dist_row(row.stage_name, row.overdue_count, stage_total) }}
           {% endfor %}
         </tbody>
       </table>
@@ -449,22 +476,22 @@
   <div x-show="tab === 'matrix'" x-cloak>
     {% if followup_risk.overdue_matrix_by_team_salesperson_stage %}
     <div class="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-700">
-      <table id="matrixTable" class="w-full text-sm">
+      <table id="matrixTable" class="w-full text-sm" data-filter-slot="#dist-filter-matrix">
         <thead>
           <tr class="bg-neutral-50 dark:bg-neutral-900">
-            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Team") }}</th>
-            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Salesperson") }}</th>
-            <th class="px-4 py-3 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Stage") }}</th>
-            <th class="px-4 py-3 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
+            <th class="px-4 py-3 text-start whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide sticky start-0 z-10 bg-neutral-50 dark:bg-neutral-900">{{ _t("Team") }}</th>
+            <th class="px-4 py-3 text-start whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Salesperson") }}</th>
+            <th class="px-4 py-3 text-start whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Stage") }}</th>
+            <th class="px-4 py-3 text-end whitespace-nowrap text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Overdue Count") }}</th>
           </tr>
         </thead>
         <tbody>
           {% for row in followup_risk.overdue_matrix_by_team_salesperson_stage | sort(attribute='overdue_count', reverse=True) %}
           <tr class="border-t border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
-            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.team_name }}</td>
-            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.salesperson_name }}</td>
-            <td class="px-4 py-3 text-neutral-800 dark:text-neutral-200">{{ row.stage_name }}</td>
-            <td class="px-4 py-3 text-right">
+            <td class="px-4 py-3 text-start whitespace-nowrap text-neutral-800 dark:text-neutral-200 sticky start-0 z-10 bg-white dark:bg-neutral-800">{{ row.team_name }}</td>
+            <td class="px-4 py-3 text-start whitespace-nowrap text-neutral-800 dark:text-neutral-200">{{ row.salesperson_name }}</td>
+            <td class="px-4 py-3 text-start whitespace-nowrap text-neutral-800 dark:text-neutral-200">{{ row.stage_name }}</td>
+            <td class="px-4 py-3 text-end whitespace-nowrap">
               <span class="tabular font-semibold {{ 'text-danger-600 dark:text-danger-400' if row.overdue_count > 5 else 'text-warning-600 dark:text-warning-400' if row.overdue_count > 0 else 'text-neutral-400' }}">
                 {{ row.overdue_count }}
               </span>
