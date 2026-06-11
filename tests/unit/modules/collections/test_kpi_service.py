@@ -23,9 +23,10 @@ from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX_KPI1,
     _CACHE_KEY_PREFIX_KPI4,
     _CACHE_KEY_PREFIX_KPI6,
-    _CACHE_KEY_PREFIX_KPI7,
+    _CACHE_KEY_PREFIX_KPI7_V2,
     _PAYMENT_HEADER_MODEL,
-    _fetch_bucket_type_breakdown,
+    _compute_bucket_ends,
+    _compute_period_bounds,
     get_collection_rate_mtd_ytd,
     get_collection_trend_6m,
     get_expected_collections_forecast,
@@ -2219,219 +2220,425 @@ async def test_kpi5b_project_names_are_clean_without_project_prefix(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# KPI 7 — Expected Collections Forecast (get_expected_collections_forecast)
+# KPI 7 v2 — Dues & Collections — Current Periods (Decision 19.1)
+# Full-period three-segment buckets, one read_group per bucket (4 RPCs).
+# The v1 collapse-era tests (June triple collapse, Dec-31 full collapse,
+# forward-looking [today, end] windows, type_breakdown, cheques_record_count)
+# were removed with the v1 semantics — see Decision 19.1.
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Default per-bucket 5-tuple: (amount, count, due_amount, cheques_clamped, cheques_raw)
-_RPC_TUPLE_KPI7 = (22_719_871.0, 133, 22_693_463.0, 0.0, 0.0)
+_KPI7_BUCKET_NAMES = ("this_month", "this_quarter", "this_half", "this_year")
 
-# RPC 1 returns amount+due_amount aggregate; RPC 2 returns cheque fields.
-# 8 responses total: 2 per bucket × 4 buckets.
-_KPI7_RPC1 = [{"amount": 22_719_871.0, "due_amount": 22_693_463.0, "__count": 133}]
-_KPI7_RPC2 = [{"paid_amount": 26_408.0, "x_studio_actual_paid_amount": 26_408.0}]
+_KPI7_V2_FIELDS = (
+    "period_start", "period_end", "record_count", "period_total_egp",
+    "collected_cleared_egp", "cheques_pending_egp", "remaining_egp",
+)
+
+_KPI7_V1_LEGACY_FIELDS = (
+    "bucket", "amount", "due_amount", "cheques_in_pipeline",
+    "cheques_record_count", "drill_down_domain", "cheques_drill_down_domain",
+    "type_breakdown",
+)
+
+
+def _kpi7_row(
+    amount: float = 1_000.0,
+    paid: float = 400.0,
+    actual: float = 250.0,
+    due: float = 600.0,
+    count: int = 10,
+) -> list:
+    """One v2 read_group aggregate row. Defaults satisfy the invariant:
+    cleared 250 + pending (400−250=150) + remaining 600 == total 1000."""
+    return [{
+        "amount":                      amount,
+        "paid_amount":                 paid,
+        "x_studio_actual_paid_amount": actual,
+        "due_amount":                  due,
+        "__count":                     count,
+    }]
+
+
+def _mock_today_kpi7(d: date) -> MagicMock:
+    mock_dt = MagicMock()
+    mock_dt.now.return_value.date.return_value = d
+    return mock_dt
 
 
 @pytest.fixture
-def mock_client_kpi7():
-    # _rg_responses consumed by _fetch_bucket (2 RPCs per bucket × 4 buckets = 8 total).
-    # search_count calls (4 total, one per bucket) return a plain int for cheques_record_count.
-    # _fetch_bucket_type_breakdown is patched at the function level (see below) so its
-    # RPC never reaches execute_kw — this keeps the iterator size stable at 8 entries.
+def mock_client_kpi7() -> MagicMock:
     client = MagicMock()
-    _rg_responses = iter([
-        _KPI7_RPC1, _KPI7_RPC2,   # this_month
-        _KPI7_RPC1, _KPI7_RPC2,   # this_quarter
-        _KPI7_RPC1, _KPI7_RPC2,   # this_half
-        _KPI7_RPC1, _KPI7_RPC2,   # this_year
-    ])
-
-    async def _execute_kw(model, method, *args, **kwargs):
-        if method == "search_count":
-            return 2  # cheques_record_count mock value (Stage 5 Decision 14.6)
-        return next(_rg_responses)
-
-    client.execute_kw = AsyncMock(side_effect=_execute_kw)
-
-    async def _mock_type_breakdown(_client, _today, _end, bucket_total):
-        if bucket_total == 0.0:
-            return []
-        return [{
-            "installment_type_id": 3,
-            "installment_type_name_ar": "قسط دوري",
-            "installment_type_name_en": "Regular",
-            "amount": bucket_total,
-            "record_count": 133,
-        }]
-
-    with patch(
-        "backend.modules.collections.services.kpi_service._fetch_bucket_type_breakdown",
-        side_effect=_mock_type_breakdown,
-    ):
-        yield client
+    client.execute_kw = AsyncMock(return_value=_kpi7_row())
+    return client
 
 
-# ── Test K7-1 — Returns all four buckets ─────────────────────────────────────
+# ── K7v2-1 — Bounds: 2026-06-11 reproduces the N3 discovery boundary table ───
 
 
-async def test_kpi7_returns_all_four_buckets(mock_client_kpi7: MagicMock) -> None:
-    with patch(
-        "backend.modules.collections.services.kpi_service._fetch_bucket",
-        AsyncMock(return_value=_RPC_TUPLE_KPI7),
-    ):
-        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-
-    assert "buckets" in result
-    assert len(result["buckets"]) == 4
-
-
-# ── Test K7-2 — Bucket keys are the canonical 4 names ────────────────────────
-
-
-async def test_kpi7_bucket_keys_are_correct(mock_client_kpi7: MagicMock) -> None:
-    with patch(
-        "backend.modules.collections.services.kpi_service._fetch_bucket",
-        AsyncMock(return_value=_RPC_TUPLE_KPI7),
-    ):
-        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-
-    assert set(result["buckets"]) == {
-        "this_month", "this_quarter", "this_half", "this_year"
+def test_kpi7_v2_bounds_discovery_day() -> None:
+    """2026-06-11 (the N3 discovery run date) must reproduce the discovery
+    boundary table exactly: month 06-01→06-30, quarter 04-01→06-30,
+    half 01-01→06-30, year 01-01→12-31."""
+    bounds = _compute_period_bounds(date(2026, 6, 11))
+    assert bounds == {
+        "this_month":   (date(2026, 6, 1), date(2026, 6, 30)),
+        "this_quarter": (date(2026, 4, 1), date(2026, 6, 30)),
+        "this_half":    (date(2026, 1, 1), date(2026, 6, 30)),
+        "this_year":    (date(2026, 1, 1), date(2026, 12, 31)),
     }
 
 
-# ── Test K7-3 — Nesting invariant: month ≤ quarter ≤ half ≤ year ─────────────
+# ── K7v2-2 — Bounds: Jan 1 (all four periods open on the same day) ───────────
 
 
-async def test_kpi7_nesting_invariant_holds(mock_client_kpi7: MagicMock) -> None:
-    # Strictly increasing amounts so any bucket-swapping plumbing bug will fail.
-    # this_year has non-zero cheques (50.0 EGP) matching Phase 0 baseline shape
-    # (D0.6: near-term buckets show 0 EGP, only the year bucket has cheques).
-    # Tuple: (amount, count, due_amount, cheques_clamped, cheques_raw)
-    tuples = [
-        (100.0,    10,  95.0,   0.0,  0.0),  # this_month
-        (350.0,    35, 340.0,   0.0,  0.0),  # this_quarter
-        (350.0,    35, 340.0,   0.0,  0.0),  # this_half (collapses with quarter in Q2)
-        (1_000.0, 100, 980.0,  50.0, 50.0),  # this_year: 50.0 EGP cheques in pipeline
-    ]
+def test_kpi7_v2_bounds_jan_1() -> None:
+    bounds = _compute_period_bounds(date(2026, 1, 1))
+    assert bounds == {
+        "this_month":   (date(2026, 1, 1), date(2026, 1, 31)),
+        "this_quarter": (date(2026, 1, 1), date(2026, 3, 31)),
+        "this_half":    (date(2026, 1, 1), date(2026, 6, 30)),
+        "this_year":    (date(2026, 1, 1), date(2026, 12, 31)),
+    }
+
+
+# ── K7v2-3 — Bounds: Dec 31 (H2; all four periods share the end, not start) ──
+
+
+def test_kpi7_v2_bounds_dec_31() -> None:
+    """Dec 31 under v2: ends coincide (12-31) but the four windows stay
+    DISTINCT via their starts — no v1-style full collapse."""
+    bounds = _compute_period_bounds(date(2026, 12, 31))
+    assert bounds == {
+        "this_month":   (date(2026, 12, 1), date(2026, 12, 31)),
+        "this_quarter": (date(2026, 10, 1), date(2026, 12, 31)),
+        "this_half":    (date(2026, 7, 1),  date(2026, 12, 31)),
+        "this_year":    (date(2026, 1, 1),  date(2026, 12, 31)),
+    }
+    assert len(set(bounds.values())) == 4
+
+
+# ── K7v2-4 — Bounds: February in a leap year (and the non-leap guard) ────────
+
+
+def test_kpi7_v2_bounds_leap_february() -> None:
+    bounds = _compute_period_bounds(date(2028, 2, 15))   # 2028 is a leap year
+    assert bounds["this_month"] == (date(2028, 2, 1), date(2028, 2, 29))
+    assert bounds["this_quarter"] == (date(2028, 1, 1), date(2028, 3, 31))
+    assert bounds["this_half"] == (date(2028, 1, 1), date(2028, 6, 30))
+    assert bounds["this_year"] == (date(2028, 1, 1), date(2028, 12, 31))
+
+
+def test_kpi7_v2_bounds_non_leap_february() -> None:
+    bounds = _compute_period_bounds(date(2026, 2, 10))   # 2026 is not a leap year
+    assert bounds["this_month"] == (date(2026, 2, 1), date(2026, 2, 28))
+
+
+# ── K7v2-5 — _compute_bucket_ends stays a thin derivation (drill-down dep) ───
+
+
+def test_kpi7_v2_bucket_ends_is_thin_derivation_of_bounds() -> None:
+    """drilldown_service.get_forecast_drilldown imports _compute_bucket_ends;
+    it must keep returning the v1-compatible END date per bucket (identical
+    to bounds[1] — period ends did not change between v1 and v2)."""
+    for d in (date(2026, 6, 11), date(2026, 1, 1), date(2026, 12, 31), date(2028, 2, 15)):
+        bounds = _compute_period_bounds(d)
+        ends   = _compute_bucket_ends(d)
+        assert ends == {name: se[1] for name, se in bounds.items()}, f"mismatch for {d}"
+    assert _compute_bucket_ends(date(2026, 6, 11)) == {
+        "this_month":   date(2026, 6, 30),
+        "this_quarter": date(2026, 6, 30),
+        "this_half":    date(2026, 6, 30),
+        "this_year":    date(2026, 12, 31),
+    }
+
+
+# ── K7v2-6 — Domain construction: full period, NO payment_state filter ───────
+
+
+async def test_kpi7_v2_domain_full_period_no_payment_state(
+    mock_client_kpi7: MagicMock,
+) -> None:
     with patch(
-        "backend.modules.collections.services.kpi_service._fetch_bucket",
-        AsyncMock(side_effect=tuples),
+        "backend.modules.collections.services.kpi_service.datetime",
+        _mock_today_kpi7(date(2026, 6, 11)),
+    ):
+        await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert mock_client_kpi7.execute_kw.call_count == 4
+
+    seen_windows = set()
+    for call_obj in mock_client_kpi7.execute_kw.call_args_list:
+        model, method = call_obj.args[0], call_obj.args[1]
+        assert model == "rs.installment"
+        assert method == "read_group"
+
+        domain, fields, groupby = call_obj.kwargs["args"]
+        assert call_obj.kwargs["kwargs"] == {"lazy": False}
+        assert groupby == [], "v2 uses no groupby — single aggregate row"
+        assert fields == [
+            "amount", "paid_amount", "x_studio_actual_paid_amount", "due_amount"
+        ]
+
+        assert len(domain) == 3, f"v2 domain must have exactly 3 clauses, got {domain}"
+        assert domain[0] == ("state", "=", "post")
+        assert domain[1][0] == "date" and domain[1][1] == ">="
+        assert domain[2][0] == "date" and domain[2][1] == "<="
+        assert all(clause[0] != "payment_state" for clause in domain), (
+            "v2 must NOT filter on payment_state (full-period definition)"
+        )
+        seen_windows.add((domain[1][2], domain[2][2]))
+
+    assert seen_windows == {
+        ("2026-06-01", "2026-06-30"),
+        ("2026-04-01", "2026-06-30"),
+        ("2026-01-01", "2026-06-30"),
+        ("2026-01-01", "2026-12-31"),
+    }
+
+
+# ── K7v2-7 — Payload math: the three segments + invariant ────────────────────
+
+
+async def test_kpi7_v2_payload_math(mock_client_kpi7: MagicMock) -> None:
+    result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    for bname in _KPI7_BUCKET_NAMES:
+        b = result["buckets"][bname]
+        assert b["period_total_egp"]      == pytest.approx(1_000.0)
+        assert b["collected_cleared_egp"] == pytest.approx(250.0)
+        assert b["cheques_pending_egp"]   == pytest.approx(150.0)   # 400 − 250
+        assert b["remaining_egp"]         == pytest.approx(600.0)
+        assert b["record_count"] == 10
+        assert (
+            b["collected_cleared_egp"] + b["cheques_pending_egp"] + b["remaining_egp"]
+            == pytest.approx(b["period_total_egp"])
+        )
+    assert result["currency"] == "EGP"
+    assert result["data_quality_warning"] is None
+
+
+# ── K7v2-8 — Rows map to buckets in canonical order ──────────────────────────
+
+
+async def test_kpi7_v2_rows_map_to_buckets_in_order() -> None:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(side_effect=[
+        _kpi7_row(amount=100.0, paid=40.0,  actual=25.0,  due=60.0,  count=1),
+        _kpi7_row(amount=200.0, paid=80.0,  actual=50.0,  due=120.0, count=2),
+        _kpi7_row(amount=300.0, paid=120.0, actual=75.0,  due=180.0, count=3),
+        _kpi7_row(amount=400.0, paid=160.0, actual=100.0, due=240.0, count=4),
+    ])
+
+    result = await get_expected_collections_forecast(odoo_client=client)
+
+    totals = [result["buckets"][n]["period_total_egp"] for n in _KPI7_BUCKET_NAMES]
+    counts = [result["buckets"][n]["record_count"]     for n in _KPI7_BUCKET_NAMES]
+    assert totals == [100.0, 200.0, 300.0, 400.0]
+    assert counts == [1, 2, 3, 4]
+    for bname in _KPI7_BUCKET_NAMES:
+        b = result["buckets"][bname]
+        assert (
+            b["collected_cleared_egp"] + b["cheques_pending_egp"] + b["remaining_egp"]
+            == pytest.approx(b["period_total_egp"])
+        )
+    assert result["data_quality_warning"] is None
+
+
+# ── K7v2-9 — Exact v2 field set; no v1 leftovers ─────────────────────────────
+
+
+async def test_kpi7_v2_returns_all_four_buckets_with_exact_v2_fields(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert set(result["buckets"]) == set(_KPI7_BUCKET_NAMES)
+    for bname in _KPI7_BUCKET_NAMES:
+        b = result["buckets"][bname]
+        assert set(b) == set(_KPI7_V2_FIELDS), (
+            f"bucket {bname!r} must carry exactly the v2 fields, got {sorted(b)}"
+        )
+        for legacy in _KPI7_V1_LEGACY_FIELDS:
+            assert legacy not in b, f"v1 field {legacy!r} leaked into v2 bucket {bname!r}"
+
+
+# ── K7v2-10 — period_start/period_end in the payload; June collapse is gone ──
+
+
+async def test_kpi7_v2_payload_period_bounds_june_distinct(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    """On 2026-06-11 the v1 cards collapsed (month==quarter==half). Under v2
+    the four (period_start, period_end) windows are all DISTINCT."""
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime",
+        _mock_today_kpi7(date(2026, 6, 11)),
     ):
         result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
 
     b = result["buckets"]
+    assert result["today_cairo"] == "2026-06-11"
+    assert (b["this_month"]["period_start"],   b["this_month"]["period_end"])   == ("2026-06-01", "2026-06-30")
+    assert (b["this_quarter"]["period_start"], b["this_quarter"]["period_end"]) == ("2026-04-01", "2026-06-30")
+    assert (b["this_half"]["period_start"],    b["this_half"]["period_end"])    == ("2026-01-01", "2026-06-30")
+    assert (b["this_year"]["period_start"],    b["this_year"]["period_end"])    == ("2026-01-01", "2026-12-31")
 
-    # Amount nests
-    assert b["this_month"]["amount"]   <= b["this_quarter"]["amount"]
-    assert b["this_quarter"]["amount"] <= b["this_half"]["amount"]
-    assert b["this_half"]["amount"]    <= b["this_year"]["amount"]
-
-    # Record count nests
-    assert b["this_month"]["record_count"]   <= b["this_quarter"]["record_count"]
-    assert b["this_quarter"]["record_count"] <= b["this_half"]["record_count"]
-    assert b["this_half"]["record_count"]    <= b["this_year"]["record_count"]
-
-    # due_amount nests
-    assert b["this_month"]["due_amount"]   <= b["this_quarter"]["due_amount"]
-    assert b["this_quarter"]["due_amount"] <= b["this_half"]["due_amount"]
-    assert b["this_half"]["due_amount"]    <= b["this_year"]["due_amount"]
-
-    # cheques_in_pipeline nests (subset of due_amount universe)
-    assert b["this_month"]["cheques_in_pipeline"]   <= b["this_quarter"]["cheques_in_pipeline"]
-    assert b["this_quarter"]["cheques_in_pipeline"] <= b["this_half"]["cheques_in_pipeline"]
-    assert b["this_half"]["cheques_in_pipeline"]    <= b["this_year"]["cheques_in_pipeline"]
-
-    # period_end nests
-    ends = [b[n]["period_end"] for n in
-            ("this_month", "this_quarter", "this_half", "this_year")]
-    assert ends[0] <= ends[1] <= ends[2] <= ends[3]
+    windows = {(b[n]["period_start"], b[n]["period_end"]) for n in _KPI7_BUCKET_NAMES}
+    assert len(windows) == 4, "v2 windows must be distinct even in June"
 
 
-# ── Test K7-4 — cheques_in_pipeline is clamped (≥ 0) and ≤ bucket amount ─────
+# ── K7v2-11 — Zero-record bucket returns 0.0 / 0, not None ───────────────────
 
 
-async def test_kpi7_cheques_in_pipeline_le_bucket_amount(
-    mock_client_kpi7: MagicMock,
-) -> None:
-    # Phase 0 baseline (D0.6): this_year has 643,000 EGP cheques; others 0.
-    tuples = [
-        (22_719_871.0,   133,  22_693_463.0,       0.0,       0.0),
-        (55_527_209.0,   355,  55_459_801.0,       0.0,       0.0),
-        (55_527_209.0,   355,  55_459_801.0,       0.0,       0.0),
-        (337_946_411.0, 1934, 337_223_075.0, 643_000.0, 643_000.0),
-    ]
-    with patch(
-        "backend.modules.collections.services.kpi_service._fetch_bucket",
-        AsyncMock(side_effect=tuples),
-    ):
-        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+async def test_kpi7_v2_zero_record_bucket_returns_zeros_not_none() -> None:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=[])   # read_group: no rows at all
 
-    for bname in ("this_month", "this_quarter", "this_half", "this_year"):
+    result = await get_expected_collections_forecast(odoo_client=client)
+
+    for bname in _KPI7_BUCKET_NAMES:
         b = result["buckets"][bname]
-        assert b["cheques_in_pipeline"] >= 0.0, (
-            f"cheques_in_pipeline must be ≥ 0 (clamped), bucket {bname!r}"
-        )
-        assert b["cheques_in_pipeline"] <= b["amount"], (
-            f"cheques_in_pipeline must be ≤ bucket amount, bucket {bname!r}"
-        )
+        assert isinstance(b["period_total_egp"], float)      and b["period_total_egp"]      == 0.0
+        assert isinstance(b["collected_cleared_egp"], float) and b["collected_cleared_egp"] == 0.0
+        assert isinstance(b["cheques_pending_egp"], float)   and b["cheques_pending_egp"]   == 0.0
+        assert isinstance(b["remaining_egp"], float)         and b["remaining_egp"]         == 0.0
+        assert isinstance(b["record_count"], int)            and b["record_count"]          == 0
+    assert result["data_quality_warning"] is None
 
 
-# ── Test K7-5 — Zero-record bucket returns 0.0 / 0, not None ─────────────────
+async def test_kpi7_v2_false_aggregates_coerced_to_zero() -> None:
+    """Odoo read_group returns False (not 0) for empty monetary sums."""
+    client = MagicMock()
+    client.execute_kw = AsyncMock(return_value=[{
+        "amount": False, "paid_amount": False,
+        "x_studio_actual_paid_amount": False, "due_amount": False, "__count": 0,
+    }])
+
+    result = await get_expected_collections_forecast(odoo_client=client)
+
+    b = result["buckets"]["this_month"]
+    assert b["period_total_egp"] == 0.0
+    assert b["collected_cleared_egp"] == 0.0
+    assert b["cheques_pending_egp"] == 0.0
+    assert b["remaining_egp"] == 0.0
+    assert b["record_count"] == 0
 
 
-async def test_kpi7_zero_bucket_returns_zero_not_none(
-    mock_client_kpi7: MagicMock,
-) -> None:
-    with patch(
-        "backend.modules.collections.services.kpi_service._fetch_bucket",
-        AsyncMock(return_value=(0.0, 0, 0.0, 0.0, 0.0)),
-    ):
-        result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+# ── K7v2-12 — Warning paths (Decision 18.2 pattern: warn, never raise) ───────
 
-    for bname in ("this_month", "this_quarter", "this_half", "this_year"):
+
+async def test_kpi7_v2_negative_cheques_warning_unclamped() -> None:
+    """actual_paid > paid → cheques_pending < 0. Identity stays exact
+    (1000 − (100 + 900) = 0) so ONLY the negative-cheques warning fires.
+    The negative value is reported unclamped."""
+    client = MagicMock()
+    client.execute_kw = AsyncMock(
+        return_value=_kpi7_row(amount=1_000.0, paid=100.0, actual=250.0, due=900.0)
+    )
+
+    result = await get_expected_collections_forecast(odoo_client=client)
+
+    assert result["data_quality_warning"] == "negative_cheques"
+    for bname in _KPI7_BUCKET_NAMES:
         b = result["buckets"][bname]
-        assert isinstance(b["amount"], float)          and b["amount"]            == 0.0
-        assert isinstance(b["record_count"], int)      and b["record_count"]      == 0
-        assert isinstance(b["due_amount"], float)      and b["due_amount"]        == 0.0
-        assert isinstance(b["cheques_in_pipeline"], float) and b["cheques_in_pipeline"] == 0.0
+        assert b["cheques_pending_egp"] == pytest.approx(-150.0), (
+            "negative cheques_pending must be reported unclamped"
+        )
+        assert (
+            b["collected_cleared_egp"] + b["cheques_pending_egp"] + b["remaining_egp"]
+            == pytest.approx(b["period_total_egp"])
+        )
 
 
-# ── Test K7-6 — Cache hit: rpc_duration_ms=0, cache_status="cached" ──────────
+async def test_kpi7_v2_identity_mismatch_warning() -> None:
+    """amount − (paid + due) = 1000 − (400 + 500) = 100 ≥ 1.0 EGP → warning,
+    values reported as-is, no exception, no 500."""
+    client = MagicMock()
+    client.execute_kw = AsyncMock(
+        return_value=_kpi7_row(amount=1_000.0, paid=400.0, actual=250.0, due=500.0)
+    )
+
+    result = await get_expected_collections_forecast(odoo_client=client)
+
+    assert result["data_quality_warning"] == "kpi7_identity_mismatch"
+    b = result["buckets"]["this_month"]
+    assert b["period_total_egp"] == pytest.approx(1_000.0)
+    assert b["remaining_egp"]    == pytest.approx(500.0)
 
 
-async def test_kpi7_cache_hit_returns_zero_rpc_duration(
-    mock_client_kpi7: MagicMock,
-) -> None:
-    with patch(
-        "backend.modules.collections.services.kpi_service._fetch_bucket",
-        AsyncMock(return_value=_RPC_TUPLE_KPI7),
-    ):
-        result1 = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-        result2 = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+async def test_kpi7_v2_warning_priority_negative_cheques_over_identity() -> None:
+    """One bucket has only an identity mismatch, another has negative cheques —
+    the structural anomaly wins (mirrors KPI 2 priority, Decision 12.3 analog)."""
+    client = MagicMock()
+    client.execute_kw = AsyncMock(side_effect=[
+        _kpi7_row(amount=1_000.0, paid=400.0, actual=250.0, due=500.0),   # identity mismatch
+        _kpi7_row(amount=1_000.0, paid=100.0, actual=250.0, due=900.0),   # negative cheques
+        _kpi7_row(),                                                       # clean
+        _kpi7_row(),                                                       # clean
+    ])
 
+    result = await get_expected_collections_forecast(odoo_client=client)
+
+    assert result["data_quality_warning"] == "negative_cheques"
+
+
+async def test_kpi7_v2_identity_drift_below_1egp_no_warning() -> None:
+    """|delta| = 0.5 EGP < 1.0 → rounding territory, no warning."""
+    client = MagicMock()
+    client.execute_kw = AsyncMock(
+        return_value=_kpi7_row(amount=1_000.5, paid=400.0, actual=250.0, due=600.0)
+    )
+
+    result = await get_expected_collections_forecast(odoo_client=client)
+
+    assert result["data_quality_warning"] is None
+
+
+# ── K7v2-13 — Cache behaviour: v2 literal key, Cairo date, hit semantics ─────
+
+
+async def test_kpi7_v2_cache_hit_second_call(mock_client_kpi7: MagicMock) -> None:
+    result1 = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+    result2 = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
+
+    assert mock_client_kpi7.execute_kw.call_count == 4, (
+        "second call must be served from cache — exactly 4 RPCs total"
+    )
     assert result1["cache_status"] == "fresh"
     assert result2["cache_status"] == "cached"
     assert result2["rpc_duration_ms"] == 0
-    assert (result2["buckets"]["this_year"]["amount"] ==
-            result1["buckets"]["this_year"]["amount"])
+    assert (result2["buckets"]["this_year"]["period_total_egp"] ==
+            result1["buckets"]["this_year"]["period_total_egp"])
 
 
-# ── Test K7-7 — Cache miss triggers exactly 12 Odoo RPCs ─────────────────────
+async def test_kpi7_v2_cache_key_is_v2_literal_with_cairo_date(
+    mock_client_kpi7: MagicMock,
+) -> None:
+    """The v2 result must be cached ONLY under kpi:dues_collections_v2:<cairo-date>.
+    Neither the retired v1 literal nor a UTC-shifted date key may be written."""
+    assert _CACHE_KEY_PREFIX_KPI7_V2 == "kpi:dues_collections_v2"
 
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime",
+        _mock_today_kpi7(date(2026, 1, 15)),
+    ):
+        await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
 
-async def test_kpi7_cache_miss_invokes_twelve_rpcs(mock_client_kpi7: MagicMock) -> None:
-    await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-
-    assert mock_client_kpi7.execute_kw.call_count == 12, (
-        f"Expected 12 RPCs (2 per bucket × 4 buckets amount + 4 cheques_count), "
-        f"got {mock_client_kpi7.execute_kw.call_count}"
+    assert _cache.get(f"{_CACHE_KEY_PREFIX_KPI7_V2}:2026-01-15") is not None, (
+        "result must be cached under the v2 literal + Cairo date"
+    )
+    assert _cache.get("kpi:expected_forecast:2026-01-15") is None, (
+        "the retired v1 cache key must never be written by v2"
+    )
+    assert _cache.get(f"{_CACHE_KEY_PREFIX_KPI7_V2}:2026-01-14") is None, (
+        "UTC-date key must remain empty — Cairo date must be used (Decision 9.3)"
     )
 
 
-# ── Test K7-8 — Read-only assertion fires before any RPC ─────────────────────
+# ── K7v2-14 — Failure paths ──────────────────────────────────────────────────
 
 
-async def test_kpi7_read_only_assertion_fires_when_violated(
+async def test_kpi7_v2_read_only_assertion_fires_before_any_rpc(
     monkeypatch: pytest.MonkeyPatch,
     mock_client_kpi7: MagicMock,
 ) -> None:
@@ -2446,152 +2653,65 @@ async def test_kpi7_read_only_assertion_fires_when_violated(
     mock_client_kpi7.execute_kw.assert_not_called()
 
 
-# ── Test K7-9 — _fetch_bucket args are plain YYYY-MM-DD, never UTC datetimes ─
+async def test_kpi7_v2_rpc_failure_raises_odoo_query_error() -> None:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(side_effect=RuntimeError("connection refused"))
+
+    with pytest.raises(OdooQueryError):
+        await get_expected_collections_forecast(odoo_client=client)
 
 
-async def test_kpi7_bucket_boundaries_use_cairo_timezone(
-    mock_client_kpi7: MagicMock,
-) -> None:
-    """rs.installment.date is a plain date field (D0.3). All date args passed to
-    _fetch_bucket must be YYYY-MM-DD strings with no time component or tz suffix.
-    UTC conversion here would be silently wrong."""
-    mock_dt = MagicMock()
-    mock_dt.now.return_value.date.return_value = date(2026, 5, 19)
+async def test_kpi7_v2_rpc_failure_writes_no_cache_entry() -> None:
+    client = MagicMock()
+    client.execute_kw = AsyncMock(side_effect=RuntimeError("timeout"))
 
     with patch(
-        "backend.modules.collections.services.kpi_service.datetime", mock_dt
+        "backend.modules.collections.services.kpi_service.datetime",
+        _mock_today_kpi7(date(2026, 5, 19)),
+    ):
+        with pytest.raises(OdooQueryError):
+            await get_expected_collections_forecast(odoo_client=client)
+
+    assert _cache.get(f"{_CACHE_KEY_PREFIX_KPI7_V2}:2026-05-19") is None, (
+        "a failed RPC must not write any cache entry"
+    )
+
+
+# ── K7v2-15 — _fetch_bucket args are plain YYYY-MM-DD, never UTC datetimes ───
+
+
+async def test_kpi7_v2_fetch_args_plain_iso_dates(mock_client_kpi7: MagicMock) -> None:
+    """rs.installment.date is a plain date field (D0.3). Both window bounds
+    passed to _fetch_bucket must be YYYY-MM-DD strings with no time component
+    or tz suffix, and start must not exceed end."""
+    with patch(
+        "backend.modules.collections.services.kpi_service.datetime",
+        _mock_today_kpi7(date(2026, 5, 19)),
     ):
         with patch(
             "backend.modules.collections.services.kpi_service._fetch_bucket",
-            AsyncMock(return_value=_RPC_TUPLE_KPI7),
+            AsyncMock(return_value=(0.0, 0.0, 0.0, 0.0, 0)),
         ) as mock_fetch:
             await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
 
+    assert mock_fetch.call_count == 4
     for call_obj in mock_fetch.call_args_list:
-        today_arg = call_obj.args[1]
+        start_arg = call_obj.args[1]
         end_arg   = call_obj.args[2]
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", today_arg), (
-            f"today_str arg must be plain YYYY-MM-DD, got {today_arg!r}"
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_arg), (
+            f"period_start arg must be plain YYYY-MM-DD, got {start_arg!r}"
         )
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", end_arg), (
-            f"bucket_end_str arg must be plain YYYY-MM-DD, got {end_arg!r}"
+            f"period_end arg must be plain YYYY-MM-DD, got {end_arg!r}"
         )
-
-
-# ── Test K7-10 — Summer DST (UTC+3): correct Cairo date + Q2/H1 collapse ─────
-
-
-async def test_kpi7_summer_dst_boundary(mock_client_kpi7: MagicMock) -> None:
-    """today = 2026-06-15 Cairo (UTC+3, summer). June = Q2 = H1, so
-    this_month, this_quarter, this_half all collapse to 2026-06-30."""
-    mock_dt = MagicMock()
-    mock_dt.now.return_value.date.return_value = date(2026, 6, 15)
-
-    with patch(
-        "backend.modules.collections.services.kpi_service.datetime", mock_dt
-    ):
-        with patch(
-            "backend.modules.collections.services.kpi_service._fetch_bucket",
-            AsyncMock(return_value=_RPC_TUPLE_KPI7),
-        ):
-            result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-
-    assert result["today_cairo"] == "2026-06-15"
-    for bname in ("this_month", "this_quarter", "this_half"):
-        assert result["buckets"][bname]["period_end"] == "2026-06-30", (
-            f"In June, {bname!r} must end 2026-06-30 (Q2/H1 collapse), "
-            f"got {result['buckets'][bname]['period_end']!r}"
-        )
-    assert result["buckets"]["this_year"]["period_end"] == "2026-12-31"
-
-
-# ── Test K7-11 — Winter DST (UTC+2): all 4 bucket ends are distinct ──────────
-
-
-async def test_kpi7_winter_dst_boundary(mock_client_kpi7: MagicMock) -> None:
-    """today = 2026-01-15 Cairo (UTC+2, winter). Jan sits in Q1/H1/year with
-    distinct ends. Feb 2026 has 28 days (not a leap year)."""
-    mock_dt = MagicMock()
-    mock_dt.now.return_value.date.return_value = date(2026, 1, 15)
-
-    with patch(
-        "backend.modules.collections.services.kpi_service.datetime", mock_dt
-    ):
-        with patch(
-            "backend.modules.collections.services.kpi_service._fetch_bucket",
-            AsyncMock(return_value=_RPC_TUPLE_KPI7),
-        ):
-            result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-
-    assert result["today_cairo"] == "2026-01-15"
-    assert result["buckets"]["this_month"]["period_end"]   == "2026-01-31"
-    assert result["buckets"]["this_quarter"]["period_end"] == "2026-03-31"
-    assert result["buckets"]["this_half"]["period_end"]    == "2026-06-30"
-    assert result["buckets"]["this_year"]["period_end"]    == "2026-12-31"
-
-
-# ── Test K7-12 — Cache key uses Cairo local date, not UTC date ───────────────
-
-
-async def test_kpi7_cache_key_uses_cairo_date_not_utc(
-    mock_client_kpi7: MagicMock,
-) -> None:
-    """At 2026-01-14 23:30 UTC (UTC+2 winter), Cairo is already 2026-01-15.
-    Result must be cached under 'kpi:expected_forecast:2026-01-15'.
-    The UTC-date key 'kpi:expected_forecast:2026-01-14' must remain empty."""
-    mock_dt = MagicMock()
-    mock_dt.now.return_value.date.return_value = date(2026, 1, 15)
-
-    with patch(
-        "backend.modules.collections.services.kpi_service.datetime", mock_dt
-    ):
-        with patch(
-            "backend.modules.collections.services.kpi_service._fetch_bucket",
-            AsyncMock(return_value=_RPC_TUPLE_KPI7),
-        ):
-            await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-
-    cairo_key = f"{_CACHE_KEY_PREFIX_KPI7}:2026-01-15"
-    utc_key   = f"{_CACHE_KEY_PREFIX_KPI7}:2026-01-14"
-
-    assert _cache.get(cairo_key) is not None, (
-        f"Result must be cached under Cairo-date key {cairo_key!r}"
-    )
-    assert _cache.get(utc_key) is None, (
-        f"UTC-date key {utc_key!r} must remain empty — Cairo date must be used"
-    )
-
-
-# ── Test K7-13 — Dec 31: all 4 buckets collapse to 2026-12-31 ────────────────
-
-
-async def test_kpi7_year_end_full_collapse(mock_client_kpi7: MagicMock) -> None:
-    """On December 31, this_month/this_quarter/this_half/this_year all share
-    the same period_end: Dec 31. Full four-way collapse."""
-    mock_dt = MagicMock()
-    mock_dt.now.return_value.date.return_value = date(2026, 12, 31)
-
-    with patch(
-        "backend.modules.collections.services.kpi_service.datetime", mock_dt
-    ):
-        with patch(
-            "backend.modules.collections.services.kpi_service._fetch_bucket",
-            AsyncMock(return_value=_RPC_TUPLE_KPI7),
-        ):
-            result = await get_expected_collections_forecast(odoo_client=mock_client_kpi7)
-
-    for bname in ("this_month", "this_quarter", "this_half", "this_year"):
-        assert result["buckets"][bname]["period_end"] == "2026-12-31", (
-            f"On Dec 31, {bname!r} period_end must be 2026-12-31 (full collapse), "
-            f"got {result['buckets'][bname]['period_end']!r}"
-        )
-        assert result["buckets"][bname]["period_start"] == "2026-12-31"
+        assert start_arg <= end_arg
 
 
 # ── D-1 — EN installment type names ──────────────────────────────────────────
-# Tests for INSTALLMENT_TYPE_NAMES_EN, get_type_name_en(), and the EN field
-# returned by _fetch_bucket_type_breakdown. All 13 IDs must be present and
-# match the D-1 specification confirmed from Stage 7 Gate 1 discovery.
+# Tests for INSTALLMENT_TYPE_NAMES_EN and get_type_name_en(). All 13 IDs must
+# be present and match the D-1 specification confirmed from Stage 7 Gate 1
+# discovery. (The _fetch_bucket_type_breakdown tests were removed with KPI 7
+# v1 — Decision 19.1; the mapping itself is still used by the drill-downs.)
 
 
 def test_en_mapping_has_all_13_ids() -> None:
@@ -2638,116 +2758,3 @@ def test_get_type_name_en_unknown_id_returns_sentinel() -> None:
 def test_en_and_ar_sentinels_are_distinct() -> None:
     from backend.modules.collections.installment_type_names import _UNKNOWN_TYPE_AR
     assert _UNKNOWN_TYPE_EN != _UNKNOWN_TYPE_AR
-
-
-@pytest.mark.asyncio
-async def test_fetch_bucket_type_breakdown_returns_en_name() -> None:
-    rows = [
-        {"installment_type_id": [3, "Regular"],  "amount": 5000.0, "__count": 3},
-        {"installment_type_id": [8, "Penalty"],  "amount": 2000.0, "__count": 1},
-        {"installment_type_id": [13, "AdminFee"], "amount": 1000.0, "__count": 1},
-    ]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    result = await _fetch_bucket_type_breakdown(client, "2026-05-25", "2026-12-31", 8000.0)
-    by_id = {e["installment_type_id"]: e for e in result}
-    assert by_id[3]["installment_type_name_en"]  == "Regular"
-    assert by_id[8]["installment_type_name_en"]  == "Penalty"
-    assert by_id[13]["installment_type_name_en"] == "Administrative Fees"
-
-
-@pytest.mark.asyncio
-async def test_fetch_bucket_type_breakdown_returns_both_names() -> None:
-    rows = [{"installment_type_id": [7, "Garage"], "amount": 1000.0, "__count": 2}]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    result = await _fetch_bucket_type_breakdown(client, "2026-05-25", "2026-12-31", 1000.0)
-    assert result[0]["installment_type_name_ar"] == "الجراج"
-    assert result[0]["installment_type_name_en"] == "Garage"
-
-
-# ── D-6 — _fetch_bucket_type_breakdown behaviour ─────────────────────────────
-# Migrated from backend/modules/collections/tests/test_stage7.py (legacy path).
-# The D-1 tests above verify name resolution; these cover the remaining
-# behavioural contracts: sort order, identity assertion, zero-count exclusion,
-# unknown-ID guard, empty input, and plain-int type_id handling.
-
-
-@pytest.mark.asyncio
-async def test_breakdown_sort_order_is_amount_descending() -> None:
-    rows = [
-        {"installment_type_id": [3, "Regular"], "amount": 1000.0, "__count": 5},
-        {"installment_type_id": [7, "Garage"],  "amount": 5000.0, "__count": 2},
-        {"installment_type_id": [6, "Club"],    "amount": 2000.0, "__count": 1},
-    ]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
-    amounts = [e["amount"] for e in result]
-    assert amounts == sorted(amounts, reverse=True)
-
-
-@pytest.mark.asyncio
-async def test_breakdown_identity_check_passes_when_sums_match() -> None:
-    rows = [
-        {"installment_type_id": [3, "Regular"],     "amount": 6000.0, "__count": 3},
-        {"installment_type_id": [2, "Down Payment"], "amount": 2000.0, "__count": 1},
-    ]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
-    assert abs(sum(e["amount"] for e in result) - 8000.0) < 0.01
-
-
-@pytest.mark.asyncio
-async def test_breakdown_identity_check_raises_on_mismatch() -> None:
-    rows = [
-        {"installment_type_id": [3, "Regular"], "amount": 5000.0, "__count": 3},
-    ]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    with pytest.raises(AssertionError, match="type_breakdown sum"):
-        await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 9999.0)
-
-
-@pytest.mark.asyncio
-async def test_breakdown_zero_count_entries_excluded() -> None:
-    rows = [
-        {"installment_type_id": [3, "Regular"], "amount": 8000.0, "__count": 5},
-        {"installment_type_id": [6, "Club"],    "amount": 0.0,    "__count": 0},
-    ]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
-    assert all(e["record_count"] > 0 for e in result)
-    assert len(result) == 1
-
-
-@pytest.mark.asyncio
-async def test_breakdown_unknown_type_id_raises_value_error() -> None:
-    rows = [
-        {"installment_type_id": [999, "Mystery Type"], "amount": 8000.0, "__count": 3},
-    ]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    with pytest.raises(ValueError, match="installment_type_id=999"):
-        await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 8000.0)
-
-
-@pytest.mark.asyncio
-async def test_breakdown_empty_input_returns_empty_list() -> None:
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=[])
-    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 0.0)
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_breakdown_type_id_from_plain_int() -> None:
-    rows = [
-        {"installment_type_id": 3, "amount": 1000.0, "__count": 2},
-    ]
-    client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=rows)
-    result = await _fetch_bucket_type_breakdown(client, "2026-05-22", "2026-05-31", 1000.0)
-    assert result[0]["installment_type_id"] == 3

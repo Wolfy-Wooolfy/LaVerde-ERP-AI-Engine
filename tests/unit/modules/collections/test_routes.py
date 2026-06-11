@@ -566,35 +566,29 @@ def test_kpi6_post_returns_405(client: TestClient) -> None:
 
 _URL_KPI7 = "/api/v1/collections/kpi/expected-forecast"
 
-# Mock data uses 2026-05-19 as today (Cairo) — bucket ends computed from D0.4 baseline.
-# this_quarter == this_half (nesting collapse: Q2/H1 both end Jun 30 in 2026).
+# KPI 7 v2 (Decision 19.1) — full-period buckets. Mock data uses 2026-05-19
+# as today (Cairo); windows are the full calendar periods containing it.
+# Month figures mirror the N3 discovery anchors (2026-06-11):
+# 580,500 + 15,445,485 + 32,766,338 == 48,792,323 (exact invariant).
 _TODAY_KPI7 = "2026-05-19"
-_BUCKET_PERIOD_ENDS = {
-    "this_month":   "2026-05-31",
-    "this_quarter": "2026-06-30",
-    "this_half":    "2026-06-30",
-    "this_year":    "2026-12-31",
+_BUCKET_PERIODS = {
+    "this_month":   ("2026-05-01", "2026-05-31"),
+    "this_quarter": ("2026-04-01", "2026-06-30"),
+    "this_half":    ("2026-01-01", "2026-06-30"),
+    "this_year":    ("2026-01-01", "2026-12-31"),
 }
 
 
 def _make_bucket(name: str) -> dict:
-    period_end = _BUCKET_PERIOD_ENDS[name]
+    period_start, period_end = _BUCKET_PERIODS[name]
     return {
-        "bucket":                    name,
-        "period_start":              _TODAY_KPI7,
-        "period_end":                period_end,
-        "amount":                    22_719_871.00,
-        "record_count":              133,
-        "due_amount":                22_693_463.00,
-        "cheques_in_pipeline":       0.0,
-        "cheques_record_count":      None,
-        "drill_down_domain": [
-            ["state", "=", "post"],
-            ["payment_state", "in", ["unpaid", "partial"]],
-            ["date", ">=", _TODAY_KPI7],
-            ["date", "<=", period_end],
-        ],
-        "cheques_drill_down_domain": None,
+        "period_start":          period_start,
+        "period_end":            period_end,
+        "record_count":          390,
+        "period_total_egp":      48_792_323.00,
+        "collected_cleared_egp": 580_500.00,
+        "cheques_pending_egp":   15_445_485.00,
+        "remaining_egp":         32_766_338.00,
     }
 
 
@@ -609,13 +603,12 @@ _MOCK_DATA_KPI7 = {
 }
 
 _BUCKET_FIELDS = (
-    "bucket", "period_start", "period_end", "amount", "record_count",
-    "due_amount", "cheques_in_pipeline", "cheques_record_count",
-    "drill_down_domain", "cheques_drill_down_domain",
+    "period_start", "period_end", "record_count", "period_total_egp",
+    "collected_cleared_egp", "cheques_pending_egp", "remaining_egp",
 )
 
 
-# ── Test K7-8a — 200 + strict full-shape verification ────────────────────────
+# ── Test K7-8a — 200 + strict full-shape verification (v2) ───────────────────
 
 
 def test_kpi7_get_returns_200_and_strict_shape(client: TestClient) -> None:
@@ -643,19 +636,24 @@ def test_kpi7_get_returns_200_and_strict_shape(client: TestClient) -> None:
     for bname in ("this_month", "this_quarter", "this_half", "this_year"):
         assert bname in buckets, f"Missing bucket key: {bname!r}"
 
-    # Per-bucket: all 10 fields, null fields, and period_end matches Cairo boundary
-    for bname, expected_end in _BUCKET_PERIOD_ENDS.items():
+    # Per-bucket: all 7 v2 fields, full-period bounds, three-segment invariant
+    for bname, (expected_start, expected_end) in _BUCKET_PERIODS.items():
         b = buckets[bname]
         for field in _BUCKET_FIELDS:
             assert field in b, f"Bucket {bname!r} missing field: {field!r}"
-        assert b["cheques_record_count"] is None, \
-            f"cheques_record_count must be null (Alternative B limitation) in bucket {bname!r}"
-        assert b["cheques_drill_down_domain"] is None, \
-            f"cheques_drill_down_domain must be null (Alternative B) in bucket {bname!r}"
+        assert b["period_start"] == expected_start, \
+            f"period_start mismatch for {bname!r}: expected {expected_start!r}, got {b['period_start']!r}"
         assert b["period_end"] == expected_end, \
             f"period_end mismatch for {bname!r}: expected {expected_end!r}, got {b['period_end']!r}"
-        assert b["period_start"] == _TODAY_KPI7, \
-            f"period_start must equal today_cairo for bucket {bname!r}"
+        assert (
+            b["collected_cleared_egp"] + b["cheques_pending_egp"] + b["remaining_egp"]
+            == pytest.approx(b["period_total_egp"])
+        ), f"three-segment invariant broken in bucket {bname!r}"
+        # v1 fields must be gone from the wire format
+        for legacy in ("bucket", "amount", "due_amount", "cheques_in_pipeline",
+                       "cheques_record_count", "drill_down_domain",
+                       "cheques_drill_down_domain", "type_breakdown"):
+            assert legacy not in b, f"v1 field {legacy!r} leaked into bucket {bname!r}"
 
 
 # ── Test K7-8b — Response headers ────────────────────────────────────────────

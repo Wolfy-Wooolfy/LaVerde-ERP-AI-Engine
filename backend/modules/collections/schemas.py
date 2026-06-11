@@ -27,26 +27,17 @@ class LateUncollectedResponse(BaseModel):
     data_quality_warning: str | None
 
 
-class TypeBreakdownEntry(BaseModel):
-    installment_type_id: int
-    installment_type_name_ar: str
-    installment_type_name_en: str
-    amount: float
-    record_count: int
-
-
 class ForecastBucket(BaseModel):
-    bucket: Literal["this_month", "this_quarter", "this_half", "this_year"]
-    period_start: date
-    period_end: date
-    amount: float
+    # KPI 7 v2 (Decision 19.1) — full-period three-segment bucket.
+    # Invariant: collected_cleared + cheques_pending + remaining == period_total.
+    # cheques_pending_egp is reported unclamped (negative → data_quality_warning).
+    period_start: date           # 1st of month/quarter/half/year (Cairo calendar)
+    period_end: date             # last day of month/quarter/half/year
     record_count: int
-    due_amount: float
-    cheques_in_pipeline: float
-    cheques_record_count: int | None  # int >= 0 from Stage 5 (Decision 14.6); was None under Alt B
-    drill_down_domain: list  # well-formed Odoo domain
-    cheques_drill_down_domain: list | None  # null under Alternative B (Decision 9.1)
-    type_breakdown: list[TypeBreakdownEntry] = []  # by-type split, sorted amount desc (Stage 7, Choice 4أ)
+    period_total_egp: float      # SUM(amount)
+    collected_cleared_egp: float # SUM(x_studio_actual_paid_amount)
+    cheques_pending_egp: float   # SUM(paid_amount) − SUM(x_studio_actual_paid_amount)
+    remaining_egp: float         # SUM(due_amount)
 
 
 class ExpectedCollectionsForecastResponse(BaseModel):
@@ -55,7 +46,7 @@ class ExpectedCollectionsForecastResponse(BaseModel):
     today_cairo: date
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int
-    data_quality_warning: str | None
+    data_quality_warning: str | None  # "negative_cheques" | "kpi7_identity_mismatch" | null
 
 
 # ---------------------------------------------------------------------------

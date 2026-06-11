@@ -8,7 +8,7 @@ GET /api/v1/collections/kpi/pending-check-exposure        — KPI 3: Pending Che
 GET /api/v1/collections/kpi/collection-trend-6m           — KPI 6: 6-Month Collection Trend
 GET /api/v1/collections/kpi/collection-rate               — KPI 4: Collection Rate MTD & YTD
 GET /api/v1/collections/kpi/collection-rate-by-project    — KPI 5b: Collection Rate per Project
-GET /api/v1/collections/kpi/expected-forecast             — KPI 7: Expected Collections Forecast
+GET /api/v1/collections/kpi/expected-forecast             — KPI 7 v2: Dues & Collections — current periods (Decision 19.1)
 
 Stage 5 — Drill-down endpoints (Decision 14.1–14.12, E1/E2/E3):
 GET /api/v1/collections/drilldown/late                    — KPI 2 late installments
@@ -361,7 +361,7 @@ async def collection_rate_by_project(
 
 @router.get(
     "/kpi/expected-forecast",
-    summary="KPI 7 — Expected Collections Forecast (4 forward-looking calendar buckets)",
+    summary="KPI 7 v2 — Dues & Collections — current periods (4 full-period calendar buckets, Decision 19.1)",
     response_model=ExpectedCollectionsForecastResponse,
 )
 @limiter.limit("60/minute")

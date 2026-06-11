@@ -21,12 +21,6 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError, ReadOnlyViolationError, UnknownProjectError
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 from backend.modules.collections.services import cache as _cache
-from backend.modules.collections.installment_type_names import (
-    INSTALLMENT_TYPE_NAMES_AR,
-    get_type_name_ar,
-    get_type_name_en,
-    _UNKNOWN_TYPE_AR,
-)
 
 # Methods that must never appear in ALLOWED_METHODS.
 _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
@@ -39,7 +33,9 @@ _CACHE_KEY_PREFIX_KPI3 = "kpi:pending_check_exposure"
 _CACHE_KEY_PREFIX_KPI6 = "kpi:collection_trend_6m"
 _CACHE_KEY_PREFIX_KPI4  = "kpi:collection_rate"
 _CACHE_KEY_PREFIX_KPI5B = "kpi:collection_rate_by_project"
-_CACHE_KEY_PREFIX_KPI7 = "kpi:expected_forecast"
+# v2 literal (Decision 19.1) — distinct from the retired v1 "kpi:expected_forecast"
+# so a stale v1 cache entry can never serve the v2 payload.
+_CACHE_KEY_PREFIX_KPI7_V2 = "kpi:dues_collections_v2"
 
 # KPI 6 uses the payment installment header model (Decision 5.6).
 # The HEADER.date field is user-entered (cash receipt date); HEADER.amount
@@ -1169,8 +1165,10 @@ async def get_collection_rate_by_project(client: Optional[OdooClient] = None) ->
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# KPI 7 — Expected Collections Forecast
-# Stage 1 — Phase 1 (Module 2 Refactor)
+# KPI 7 — Dues & Collections — Current Periods (v2, Decision 19.1)
+# Session 19 (N3) — full-period three-segment buckets.
+# v1 (forward-looking [today, period_end] unpaid/partial — Decisions 9.1-9.4,
+# 11.9, 14.6, 16.2-16.7) is superseded; see MODULE_2_REFACTOR_SPEC.md §4 banner.
 # ══════════════════════════════════════════════════════════════════════════════
 
 # Canonical bucket order — must not change without updating _BUCKET_NAMES everywhere.
@@ -1179,198 +1177,135 @@ _BUCKET_NAMES: tuple[str, ...] = (
 )
 
 
-def _compute_bucket_ends(today: date) -> dict[str, date]:
-    """Return the Cairo-local end date for each of the 4 KPI 7 calendar buckets.
+def _compute_period_bounds(today: date) -> dict[str, tuple[date, date]]:
+    """Return (period_start, period_end) for each of the 4 KPI 7 calendar buckets.
+
+    Ported from scripts/discover_kpi7_v2_full_period.py (N3 discovery,
+    commit bc0d2cd — validated live). Decision 19.1.
+
+    this_month   : 1st of current month   → last day of current month
+    this_quarter : 1st of current quarter → last day of current quarter
+    this_half    : Jan 1 → Jun 30 (H1) or Jul 1 → Dec 31 (H2)
+    this_year    : Jan 1 → Dec 31
 
     All arithmetic is pure calendar math on plain date objects. ZoneInfo is
-    NOT used here — it is used upstream when computing today_cairo. The caller
-    is responsible for passing a Cairo-local date. Decision 9.2.
-
-    Quarter boundaries: Q1 ends Mar 31, Q2 ends Jun 30, Q3 ends Sep 30, Q4 ends Dec 31.
-    Half boundaries:   H1 ends Jun 30 (months 1-6), H2 ends Dec 31 (months 7-12).
-
-    Edge case — nesting collapse in May/Jun 2026:
-      this_quarter (Q2 ends Jun 30) == this_half (H1 ends Jun 30) → correct.
-
-    Edge case — Dec 31:
-      All 4 buckets collapse to Dec 31 → correct (test_kpi7_year_end_full_collapse).
+    NOT used here — it is used upstream when computing today_cairo; the caller
+    is responsible for passing a Cairo-local date (Decision 9.2). ISO strings
+    go straight into domains with no UTC conversion — rs.installment.date is
+    a plain 'date' field (D0.3).
     """
     _, last_day = calendar.monthrange(today.year, today.month)
-    end_of_month = date(today.year, today.month, last_day)
+    month = (date(today.year, today.month, 1),
+             date(today.year, today.month, last_day))
 
-    quarter_idx = (today.month - 1) // 3          # 0=Q1, 1=Q2, 2=Q3, 3=Q4
-    end_q_month = (quarter_idx + 1) * 3           # 3, 6, 9, or 12
-    _, end_q_day = calendar.monthrange(today.year, end_q_month)
-    end_of_quarter = date(today.year, end_q_month, end_q_day)
+    quarter_idx   = (today.month - 1) // 3        # 0=Q1, 1=Q2, 2=Q3, 3=Q4
+    q_start_month = quarter_idx * 3 + 1           # 1, 4, 7, 10
+    q_end_month   = (quarter_idx + 1) * 3         # 3, 6, 9, 12
+    _, q_last_day = calendar.monthrange(today.year, q_end_month)
+    quarter = (date(today.year, q_start_month, 1),
+               date(today.year, q_end_month, q_last_day))
 
-    end_h_month = 6 if today.month <= 6 else 12
-    _, end_h_day = calendar.monthrange(today.year, end_h_month)
-    end_of_half = date(today.year, end_h_month, end_h_day)
+    if today.month <= 6:
+        half = (date(today.year, 1, 1), date(today.year, 6, 30))
+    else:
+        half = (date(today.year, 7, 1), date(today.year, 12, 31))
 
-    end_of_year = date(today.year, 12, 31)
+    year = (date(today.year, 1, 1), date(today.year, 12, 31))
 
     return {
-        "this_month":   end_of_month,
-        "this_quarter": end_of_quarter,
-        "this_half":    end_of_half,
-        "this_year":    end_of_year,
+        "this_month":   month,
+        "this_quarter": quarter,
+        "this_half":    half,
+        "this_year":    year,
     }
+
+
+def _compute_bucket_ends(today: date) -> dict[str, date]:
+    """Return the Cairo-local END date for each of the 4 KPI 7 calendar buckets.
+
+    Retained for the KPI 7 forecast drill-down ONLY
+    (drilldown_service.get_forecast_drilldown), which still serves the v1
+    forward-looking [today, period_end] window — its redefinition is a
+    separate product decision (Decision 19.1 implementation notes). Period
+    end dates are identical in v1 and v2, so this is a thin derivation of
+    _compute_period_bounds().
+    """
+    return {name: bounds[1] for name, bounds in _compute_period_bounds(today).items()}
 
 
 async def _fetch_bucket(
     client: OdooClient,
-    today_str: str,
-    bucket_end_str: str,
-) -> tuple[float, int, float, float, float]:
-    """Fetch one KPI 7 bucket via 2 sequential read_group RPCs.
+    start_str: str,
+    end_str: str,
+) -> tuple[float, float, float, float, int]:
+    """Fetch one KPI 7 v2 bucket via a single read_group RPC (Decision 19.1).
 
-    RPC 1 — amount + due_amount aggregate (bucket total + record count).
-    RPC 2 — cheques aggregate using Alternative B formula (Decision 9.1):
-              cheques_raw = SUM(paid_amount) - SUM(x_studio_actual_paid_amount)
-
-    Returns (amount, count, due_amount, cheques_clamped, cheques_raw).
-    cheques_clamped = max(cheques_raw, 0.0).
-    cheques_raw < 0 signals a data quality anomaly; the caller sets
-    data_quality_warning = "negative_cheques".
-
-    Domain (KD-1 / KD-2 compliant, Decision 9.2):
-        state='post', payment_state IN [unpaid, partial], date >= today, date <= bucket_end
+    Full-period domain — NO payment_state filter:
+        state='post', date >= period_start, date <= period_end
     No UTC conversion — rs.installment.date is a plain date field (D0.3).
+
+    Returns (amount, paid, actual_paid, due, count):
+        amount      = SUM(amount)                       — period total dues
+        paid        = SUM(paid_amount)                  — cash + cleared + postdated received
+        actual_paid = SUM(x_studio_actual_paid_amount)  — cash + cleared only
+        due         = SUM(due_amount)                   — remaining (amount − paid per record)
     """
     domain = [
         ("state", "=", "post"),
-        ("payment_state", "in", ["unpaid", "partial"]),
-        ("date", ">=", today_str),
-        ("date", "<=", bucket_end_str),
-    ]
-
-    # RPC 1 — amount + due_amount
-    amount_rows = await client.execute_kw(
-        _MODEL,
-        "read_group",
-        args=[domain, ["amount", "due_amount"], []],
-        kwargs={"lazy": False},
-    )
-    amount_row = amount_rows[0] if amount_rows else {}
-    amount     = float(amount_row.get("amount") or 0.0)
-    count      = int(amount_row.get("__count") or 0)
-    due_amount = float(amount_row.get("due_amount") or 0.0)
-
-    # RPC 2 — cheques in pipeline (Alternative B, per Decision 9.1)
-    cheque_rows = await client.execute_kw(
-        _MODEL,
-        "read_group",
-        args=[domain, ["paid_amount", "x_studio_actual_paid_amount"], []],
-        kwargs={"lazy": False},
-    )
-    cheque_row  = cheque_rows[0] if cheque_rows else {}
-    cheques_raw = (
-        float(cheque_row.get("paid_amount") or 0.0)
-        - float(cheque_row.get("x_studio_actual_paid_amount") or 0.0)
-    )
-
-    return amount, count, due_amount, max(cheques_raw, 0.0), cheques_raw
-
-
-async def _fetch_bucket_type_breakdown(
-    client: OdooClient,
-    today_str: str,
-    bucket_end_str: str,
-    bucket_total_amount: float,
-) -> list[dict]:
-    """Fetch by-type amount breakdown for one KPI 7 bucket.  1 read_group RPC.
-
-    Groups the same domain as _fetch_bucket by installment_type_id.
-    Returns a list of {installment_type_id, installment_type_name_ar, amount,
-    record_count}, sorted by amount descending (Choice 4أ).
-
-    Identity-equal assertion: sum of entry amounts == bucket_total_amount.
-    Zero-count entries are excluded (read_group natural behaviour; assertion
-    added per Khaled's Gate 1 note).
-
-    Raises OdooQueryError on RPC failure.
-    Raises AssertionError if breakdown sum != bucket_total_amount.
-    Raises ValueError if any type_id is not in INSTALLMENT_TYPE_NAMES_AR
-        (would expose a raw Odoo name to Board output — hard stop per Choice 2ج).
-    """
-    domain = [
-        ("state", "=", "post"),
-        ("payment_state", "in", ["unpaid", "partial"]),
-        ("date", ">=", today_str),
-        ("date", "<=", bucket_end_str),
+        ("date", ">=", start_str),
+        ("date", "<=", end_str),
     ]
     rows = await client.execute_kw(
         _MODEL,
         "read_group",
-        args=[domain, ["amount"], ["installment_type_id"]],
+        args=[domain, ["amount", "paid_amount", "x_studio_actual_paid_amount", "due_amount"], []],
         kwargs={"lazy": False},
     )
-
-    entries = []
-    for row in rows:
-        count = int(row.get("__count") or 0)
-        if count == 0:
-            continue  # guard: skip zero-count entries (should not occur via read_group)
-
-        type_raw = row.get("installment_type_id")
-        type_id  = (
-            int(type_raw[0]) if isinstance(type_raw, (list, tuple)) and type_raw
-            else (int(type_raw) if type_raw else 0)
-        )
-
-        # Choice 2ج: every type shown to the Board must have a reviewed Arabic name.
-        if type_id not in INSTALLMENT_TYPE_NAMES_AR:
-            raise ValueError(
-                f"installment_type_id={type_id} is not in INSTALLMENT_TYPE_NAMES_AR. "
-                "A new type has appeared in Odoo that has not been reviewed. "
-                "Add it to installment_type_names.py before re-deploying."
-            )
-
-        entries.append({
-            "installment_type_id":      type_id,
-            "installment_type_name_ar": get_type_name_ar(type_id),
-            "installment_type_name_en": get_type_name_en(type_id),
-            "amount":                   float(row.get("amount") or 0.0),
-            "record_count":             count,
-        })
-
-    # Sort by amount descending (Choice 4أ — no extra RPC; done in Python).
-    entries.sort(key=lambda e: e["amount"], reverse=True)
-
-    # Identity-equal assertion: breakdown must sum exactly to bucket total.
-    breakdown_sum = sum(e["amount"] for e in entries)
-    assert abs(breakdown_sum - bucket_total_amount) < 0.01, (
-        f"type_breakdown sum {breakdown_sum:.2f} != bucket total "
-        f"{bucket_total_amount:.2f} (delta={breakdown_sum - bucket_total_amount:.2f}). "
-        "This is a real data integrity finding — do not adjust to make it pass."
+    row = rows[0] if rows else {}
+    return (
+        float(row.get("amount") or 0.0),
+        float(row.get("paid_amount") or 0.0),
+        float(row.get("x_studio_actual_paid_amount") or 0.0),
+        float(row.get("due_amount") or 0.0),
+        int(row.get("__count") or 0),
     )
-
-    return entries
 
 
 async def get_expected_collections_forecast(
     odoo_client: Optional[OdooClient] = None,
 ) -> dict:
-    """Return KPI 7 — Expected Collections Forecast.
+    """Return KPI 7 v2 — Dues & Collections — Current Periods (Decision 19.1).
 
-    Four forward-looking calendar buckets (this_month ⊆ this_quarter ⊆
-    this_half ⊆ this_year), each reporting installment amounts due from
-    today (Cairo-local) through the bucket end date inclusive.
+    Four FULL-PERIOD calendar buckets (this_month ⊆ this_quarter ⊆ this_half
+    ⊆ this_year), each aggregating ALL posted installments dated inside the
+    calendar period [period_start, period_end] — no payment_state filter.
+    The v1 forward-looking [today, period_end] unpaid/partial number is
+    removed entirely (that story belongs to KPI 2).
 
     Bucket boundaries are computed in Africa/Cairo timezone for today's
     date; all domain values use plain ISO date strings since
     rs.installment.date is type 'date', not 'datetime' (D0.3, Decision 9.2).
 
-    Cheques formula (Alternative B, Decision 9.1):
-        cheques_in_pipeline = max(SUM(paid_amount) - SUM(x_studio_actual_paid_amount), 0)
-    cheques_record_count is null (Alternative B limitation — per-installment
-    count unavailable via read_group net formula).
+    Three-segment breakdown per bucket (locked Module 2 field semantics):
+        period_total_egp      = SUM(amount)
+        collected_cleared_egp = SUM(x_studio_actual_paid_amount)
+        cheques_pending_egp   = SUM(paid_amount) − SUM(x_studio_actual_paid_amount)
+        remaining_egp         = SUM(due_amount)
+    Invariant: collected_cleared + cheques_pending + remaining == period_total
+    (per-record identity due = amount − paid).
 
-    Cache key uses the Cairo-local date so the cache invalidates at
-    Cairo midnight, not UTC midnight (Decision 9.3).
+    Guards (Decision 18.2 warn-not-raise pattern — never HTTP 500):
+        cheques_pending_egp < 0 in any bucket          → "negative_cheques"
+        |period_total − (cleared+pending+remaining)| ≥ 1.0 EGP in any bucket
+                                                       → "kpi7_identity_mismatch"
+    Priority: "negative_cheques" > "kpi7_identity_mismatch". Values are
+    reported unclamped so the invariant stays auditable.
 
-    12 RPCs per uncached call (2 amount RPCs + 1 cheques_count RPC per bucket × 4 buckets),
-    60-second TTL (Decision 9.4; cheques_record_count added Stage 5, Decision 14.6).
+    Cache key uses the Cairo-local date so the cache invalidates at Cairo
+    midnight (Decision 9.3). The v2 literal "kpi:dues_collections_v2"
+    guarantees a stale v1 "kpi:expected_forecast" entry can never serve.
+
+    4 RPCs per uncached call (one read_group per bucket), 60-second TTL.
 
     Return shape::
 
@@ -1385,27 +1320,24 @@ async def get_expected_collections_forecast(
             "today_cairo":           "YYYY-MM-DD",   # Cairo-local date string
             "cache_status":          "fresh" | "cached",
             "rpc_duration_ms":       int,             # 0 if cached
-            "data_quality_warning":  str | None,      # "negative_cheques" or null
+            "data_quality_warning":  str | None,
         }
 
     Each bucket shape::
 
         {
-            "bucket":                    str,   # bucket name
-            "period_start":              str,   # today_cairo ISO
-            "period_end":                str,   # bucket end date ISO
-            "amount":                    float, # SUM(amount) EGP
-            "record_count":              int,
-            "due_amount":                float, # SUM(due_amount) EGP
-            "cheques_in_pipeline":       float, # clamped to >= 0
-            "cheques_record_count":      int,   # count of installments with pending cheque (Stage 5, Decision 14.6)
-            "drill_down_domain":         list,  # 4-clause Odoo domain
-            "cheques_drill_down_domain": None,  # Alt B limitation
+            "period_start":          str,    # period start ISO (1st of month/quarter/half/year)
+            "period_end":            str,    # period end ISO (last day of month/quarter/half/year)
+            "record_count":          int,
+            "period_total_egp":      float,  # SUM(amount)
+            "collected_cleared_egp": float,  # SUM(x_studio_actual_paid_amount)
+            "cheques_pending_egp":   float,  # SUM(paid) − SUM(actual_paid), unclamped
+            "remaining_egp":         float,  # SUM(due_amount)
         }
 
     Raises:
         ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
-        OdooQueryError: if any of the 8 Odoo RPCs fails.
+        OdooQueryError: if any of the 4 Odoo RPCs fails.
     """
     _assert_read_only()
 
@@ -1414,49 +1346,27 @@ async def get_expected_collections_forecast(
     today_cairo = datetime.now(_LA_VERDE_TZ).date()
     today_str   = today_cairo.isoformat()
 
-    bucket_ends = _compute_bucket_ends(today_cairo)
+    bounds = _compute_period_bounds(today_cairo)
 
     # Cairo-local date in the key so cache invalidates at Cairo midnight (Decision 9.3).
-    cache_key = f"{_CACHE_KEY_PREFIX_KPI7}:{today_str}"
+    cache_key = f"{_CACHE_KEY_PREFIX_KPI7_V2}:{today_str}"
 
     cached = _cache.get(cache_key)
     if cached is not None:
         logger.debug(f"Cache hit: {cache_key}")
         return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
 
-    logger.info(f"Cache miss: {cache_key} — querying Odoo (16 RPCs)")
+    logger.info(f"Cache miss: {cache_key} — querying Odoo (4 RPCs)")
 
     _client = odoo_client if odoo_client is not None else OdooClient()
 
     t0 = time.monotonic()
     try:
-        raw: dict[str, tuple[float, int, float, float, float]] = {}
+        raw: dict[str, tuple[float, float, float, float, int]] = {}
         for bname in _BUCKET_NAMES:
+            start, end = bounds[bname]
             raw[bname] = await _fetch_bucket(
-                _client, today_str, bucket_ends[bname].isoformat()
-            )
-        # 4 search_count RPCs for cheques_record_count (Decision 14.6, Stage 5).
-        # Uses check_pending_amount > 0 (stored monetary field, Decision 4.5/9.1).
-        cheques_counts: dict[str, int] = {}
-        for bname in _BUCKET_NAMES:
-            cheques_counts[bname] = int(await _client.execute_kw(
-                _MODEL,
-                "search_count",
-                args=[[
-                    ("state", "=", "post"),
-                    ("payment_state", "in", ["unpaid", "partial"]),
-                    ("date", ">=", today_str),
-                    ("date", "<=", bucket_ends[bname].isoformat()),
-                    ("check_pending_amount", ">", 0),
-                ]],
-            ))
-        # 4 read_group RPCs — by-type breakdown per bucket (Stage 7, Choice 3ب).
-        # _fetch_bucket_type_breakdown asserts identity-equal and rejects unknown type IDs.
-        type_breakdowns: dict[str, list[dict]] = {}
-        for bname in _BUCKET_NAMES:
-            bucket_amount = raw[bname][0]  # index 0 = amount
-            type_breakdowns[bname] = await _fetch_bucket_type_breakdown(
-                _client, today_str, bucket_ends[bname].isoformat(), bucket_amount
+                _client, start.isoformat(), end.isoformat()
             )
     except Exception as exc:
         raise OdooQueryError(f"KPI 7 read_group failed: {exc}") from exc
@@ -1465,44 +1375,51 @@ async def get_expected_collections_forecast(
             await _client.close()
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
-    logger.info(
-        f"KPI 7: 16 RPCs completed in {rpc_ms}ms | cache_key={cache_key}"
-    )
-
-    # Check for data quality anomaly — negative raw cheques (Decision 4.4 analog).
-    # raw[b][4] is cheques_raw (before clamping).
-    has_negative_cheques = any(raw[b][4] < 0 for b in _BUCKET_NAMES)
-    if has_negative_cheques:
-        logger.warning(
-            "KPI 7: negative cheques_raw detected — paid_amount < x_studio_actual_paid_amount "
-            "in one or more buckets. This is a data quality anomaly in Odoo Studio fields."
-        )
-    data_quality_warning: Optional[str] = (
-        "negative_cheques" if has_negative_cheques else None
-    )
+    logger.info(f"KPI 7 v2: 4 RPCs completed in {rpc_ms}ms | cache_key={cache_key}")
 
     buckets: dict = {}
+    has_negative_cheques  = False
+    has_identity_mismatch = False
     for bname in _BUCKET_NAMES:
-        amount, count, due_amount, cheques_clamped, _ = raw[bname]
-        bucket_end_str = bucket_ends[bname].isoformat()
+        amount, paid, actual_paid, due, count = raw[bname]
+        start, end = bounds[bname]
+        cheques_pending = paid - actual_paid
+        identity_delta  = amount - (actual_paid + cheques_pending + due)
+
+        if cheques_pending < 0:
+            has_negative_cheques = True
+            logger.warning(
+                f"KPI 7 v2: negative cheques_pending in {bname} "
+                f"({cheques_pending:,.2f} EGP) — paid_amount < x_studio_actual_paid_amount "
+                "is a data quality anomaly in Odoo Studio fields. Reported unclamped."
+            )
+        if abs(identity_delta) >= 1.0:
+            has_identity_mismatch = True
+            logger.warning(
+                f"KPI 7 v2: identity mismatch in {bname} — "
+                f"period_total {amount:,.2f} vs cleared+pending+remaining "
+                f"{actual_paid + cheques_pending + due:,.2f} "
+                f"(delta {identity_delta:,.2f} EGP). "
+                "Reported as-is (Decision 18.2 pattern — warn, never 500)."
+            )
+
         buckets[bname] = {
-            "bucket":       bname,
-            "period_start": today_str,
-            "period_end":   bucket_end_str,
-            "amount":       amount,
-            "record_count": count,
-            "due_amount":   due_amount,
-            "cheques_in_pipeline":       cheques_clamped,
-            "cheques_record_count":      cheques_counts[bname],
-            "drill_down_domain": [
-                ["state", "=", "post"],
-                ["payment_state", "in", ["unpaid", "partial"]],
-                ["date", ">=", today_str],
-                ["date", "<=", bucket_end_str],
-            ],
-            "cheques_drill_down_domain": None,
-            "type_breakdown":            type_breakdowns[bname],
+            "period_start":          start.isoformat(),
+            "period_end":            end.isoformat(),
+            "record_count":          count,
+            "period_total_egp":      amount,
+            "collected_cleared_egp": actual_paid,
+            "cheques_pending_egp":   cheques_pending,
+            "remaining_egp":         due,
         }
+
+    # Priority mirrors KPI 2 (Decision 12.3 analog): a structural field anomaly
+    # (negative cheques) outranks an identity drift.
+    data_quality_warning: Optional[str] = None
+    if has_negative_cheques:
+        data_quality_warning = "negative_cheques"
+    elif has_identity_mismatch:
+        data_quality_warning = "kpi7_identity_mismatch"
 
     result: dict = {
         "buckets":              buckets,
