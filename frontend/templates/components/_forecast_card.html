@@ -4,35 +4,72 @@
           {{ forecast_card('this_quarter') }}
           {{ forecast_card('this_half') }}
           {{ forecast_card('this_year') }}
-   Section 3 — Expected Collections
-   KPI 7: Expected Collections Forecast, primary/info accent cards
+   Section 3 — Dues & Collections — Current Periods (KPI 7 v2, Decision 19.1)
    bucket_key: this_month | this_quarter | this_half | this_year
-   Element IDs: col-forecast-{bucket_key}-container, -amount, -subtitle
-   PATH C: no cheques annotation rendered (Decision 9.1)
+   Card: period_total_egp prominent + flat stacked bar (3 segments) + 3 legend rows.
+   Segment colors: collected cleared #5DCAA5 (emerald) / cheques pending #E8A33D
+   (amber, the established cheques cue) / remaining #85B7EB (section-3 blue).
+   Bar widths (value / period_total) are set by collections.js renderSection3.
+   The v1 forward-looking number and its drill-down trigger are removed
+   (Decision 19.1 item 3 — that story belongs to KPI 2).
+   Element IDs: col-forecast-{bucket_key}-container, -amount, -subtitle, -bar,
+                -seg-cleared, -seg-pending, -seg-remaining,
+                -legend-cleared, -legend-pending, -legend-remaining
 #}
 
 {% macro forecast_card(bucket_key) %}
 <div id="col-forecast-{{ bucket_key }}-container"
-     class="kpi-card gradient-stroke border-l-4 border-primary-500 hover:border-l-[6px]
-            focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-     data-drilldown-target="forecast-{{ bucket_key }}"
-     tabindex="0"
+     class="kpi-card gradient-stroke border-l-4 border-primary-500"
      aria-label="{{ _t(bucket_key) }}: —"
      style="--pulse-color: rgba(55,138,221,0.6); --stroke-gradient: linear-gradient(90deg, transparent 0%, #378ADD 30%, #85B7EB 50%, #378ADD 70%, transparent 100%); --accent-300-color: #85b7eb">
   <p class="flex items-center gap-2 text-[10px] font-semibold uppercase [letter-spacing:0.15em] text-neutral-500 dark:text-neutral-400 mb-4">
     <span id="col-forecast-{{ bucket_key }}-live-dot" class="live-dot" style="background-color: #378ADD; flex-shrink: 0;"></span>
     {{ _t(bucket_key) }}
   </p>
+  {# period_total_egp — إجمالي مستحقات الفترة / Total period dues #}
   <p id="col-forecast-{{ bucket_key }}-amount"
-     class="text-3xl font-medium tabular kpi-headline text-primary-700 dark:text-primary-400 mb-3
+     class="text-3xl font-medium tabular kpi-headline text-primary-700 dark:text-primary-400 mb-1
             opacity-0 transition-opacity duration-200"
      title="">—</p>
   <p id="col-forecast-{{ bucket_key }}-subtitle"
      class="text-sm text-neutral-500 dark:text-neutral-400 opacity-0 transition-opacity duration-200">—</p>
-  {# Stage 7 — type_breakdown mini-bars, populated by collections.js renderSection3 #}
-  <div id="col-forecast-{{ bucket_key }}-breakdown"
-       class="mt-3 hidden"
+
+  {# Flat stacked bar — widths set by collections.js (guarded for period_total == 0).
+     dir-agnostic: flex order mirrors automatically under RTL. #}
+  <div id="col-forecast-{{ bucket_key }}-bar"
+       class="mt-4 mb-3 flex h-2 rounded-full overflow-hidden bg-neutral-200 dark:bg-neutral-700"
        aria-hidden="true">
+    <div id="col-forecast-{{ bucket_key }}-seg-cleared"   class="h-full transition-all duration-500" style="width: 0%; background-color: #5DCAA5;"></div>
+    <div id="col-forecast-{{ bucket_key }}-seg-pending"   class="h-full transition-all duration-500" style="width: 0%; background-color: #E8A33D;"></div>
+    <div id="col-forecast-{{ bucket_key }}-seg-remaining" class="h-full transition-all duration-500" style="width: 0%; background-color: #85B7EB;"></div>
+  </div>
+
+  {# 3 legend rows — EGP values populated by collections.js renderSection3 #}
+  <div class="space-y-1.5">
+    <div class="flex items-center justify-between gap-2 text-xs">
+      <span class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 truncate">
+        <span class="w-2 h-2 rounded-full shrink-0" style="background-color: #5DCAA5;" aria-hidden="true"></span>
+        {{ _t("kpi7_collected_cleared") }}
+      </span>
+      <span id="col-forecast-{{ bucket_key }}-legend-cleared"
+            class="tabular text-neutral-700 dark:text-neutral-200 shrink-0">—</span>
+    </div>
+    <div class="flex items-center justify-between gap-2 text-xs">
+      <span class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 truncate">
+        <span class="w-2 h-2 rounded-full shrink-0" style="background-color: #E8A33D;" aria-hidden="true"></span>
+        {{ _t("kpi7_cheques_pending") }}
+      </span>
+      <span id="col-forecast-{{ bucket_key }}-legend-pending"
+            class="tabular text-neutral-700 dark:text-neutral-200 shrink-0">—</span>
+    </div>
+    <div class="flex items-center justify-between gap-2 text-xs">
+      <span class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 truncate">
+        <span class="w-2 h-2 rounded-full shrink-0" style="background-color: #85B7EB;" aria-hidden="true"></span>
+        {{ _t("kpi7_remaining") }}
+      </span>
+      <span id="col-forecast-{{ bucket_key }}-legend-remaining"
+            class="tabular text-neutral-700 dark:text-neutral-200 shrink-0">—</span>
+    </div>
   </div>
 </div>
 {% endmacro %}

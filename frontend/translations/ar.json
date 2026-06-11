@@ -170,6 +170,11 @@
   "this_half": "هذا النصف",
   "this_year": "هذا العام",
   "until": "حتى {date}",
+  "kpi7_section_title": "مستحقات وتحصيل الفترات الحالية",
+  "kpi7_total_period_dues": "إجمالي مستحقات الفترة",
+  "kpi7_collected_cleared": "محصّل فعلياً",
+  "kpi7_cheques_pending": "شيكات مستلمة قيد التحصيل",
+  "kpi7_remaining": "متبقي",
   "cheques_annotation_prefix": "منها",
   "cheques_annotation_suffix": "شيكات مستلمة لم تتحصل بعد",
 

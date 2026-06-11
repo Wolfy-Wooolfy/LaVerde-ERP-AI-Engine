@@ -170,6 +170,11 @@
   "this_half": "This Half",
   "this_year": "This Year",
   "until": "until {date}",
+  "kpi7_section_title": "Dues & Collections — Current Periods",
+  "kpi7_total_period_dues": "Total period dues",
+  "kpi7_collected_cleared": "Collected (cleared)",
+  "kpi7_cheques_pending": "Cheques pending clearance",
+  "kpi7_remaining": "Remaining",
   "cheques_annotation_prefix": "of which",
   "cheques_annotation_suffix": "are received cheques not yet cleared",
 

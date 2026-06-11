@@ -112,7 +112,11 @@
     }
   }
 
-  // ── Section 3 — Expected Collections (KPI 7) ──────────────────────────────
+  // ── Section 3 — Dues & Collections — Current Periods (KPI 7 v2) ───────────
+  // Decision 19.1: full-period buckets. Per card: period_total_egp prominent,
+  // flat stacked bar (cleared / cheques pending / remaining), 3 legend rows.
+
+  var FORECAST_SEGMENTS = ['cleared', 'pending', 'remaining'];
 
   function renderSection3(state) {
     var forecast = state.forecast;
@@ -131,80 +135,43 @@
       var subEl = document.getElementById('col-forecast-' + key + '-subtitle');
       var card  = document.getElementById('col-forecast-' + key + '-container');
 
-      var amount          = fmt.formatEGP(bucket.amount, lang);
-      var countStr        = fmt.formatCount(bucket.record_count, lang);
-      var installmentsLbl = s.installments || 'installments';
-      var subtitle        = '';
-      if (bucket.period_end) {
-        var d = new Date(bucket.period_end);
-        var dateStr = d.toLocaleDateString(
-          lang === 'ar' ? 'ar-EG' : 'en-GB',
-          { day: 'numeric', month: 'long' }
-        );
-        var untilStr = (s.until || 'until {date}').replace('{date}', dateStr);
-        subtitle = countStr + ' ' + installmentsLbl + ' · ' + untilStr;
-      } else {
-        subtitle = countStr + ' ' + installmentsLbl;
-      }
+      var total  = bucket.period_total_egp || 0;
+      var values = {
+        cleared:   bucket.collected_cleared_egp || 0,
+        pending:   bucket.cheques_pending_egp   || 0,
+        remaining: bucket.remaining_egp         || 0
+      };
 
-      if (amtEl) { amtEl.textContent = amount; amtEl.title = fmt.formatEGP(bucket.amount, lang, { fullValue: true }); fadeIn(amtEl); }
+      var totalStr = fmt.formatEGP(total, lang);
+      var subtitle = (s.kpi7_total_period_dues || 'Total period dues')
+        + ' · ' + fmt.formatCount(bucket.record_count, lang)
+        + ' ' + (s.installments || 'installments');
+
+      if (amtEl) { amtEl.textContent = totalStr; amtEl.title = fmt.formatEGP(total, lang, { fullValue: true }); fadeIn(amtEl); }
       if (subEl) { subEl.textContent = subtitle; fadeIn(subEl); }
-      if (card)  card.setAttribute('aria-label', (s[key] || key) + ': ' + amount);
+      if (card)  card.setAttribute('aria-label', (s[key] || key) + ': ' + totalStr);
 
-      // Stage 7 — mini type-breakdown bars on the card (Choice 1ب)
-      var bdEl = document.getElementById('col-forecast-' + key + '-breakdown');
-      if (bdEl && bucket.type_breakdown && bucket.type_breakdown.length && bucket.amount > 0) {
-        bdEl.innerHTML = _buildBreakdownBars(bucket.type_breakdown, bucket.amount, lang, s);
-        bdEl.classList.remove('hidden');
-        bdEl.removeAttribute('aria-hidden');
+      // Stacked bar — widths are shares of period_total, guarded for total <= 0.
+      // A negative segment (data anomaly; data_quality_warning is set) renders
+      // at 0 width — the legend still shows the signed EGP value.
+      for (var i = 0; i < FORECAST_SEGMENTS.length; i++) {
+        var name  = FORECAST_SEGMENTS[i];
+        var segEl = document.getElementById('col-forecast-' + key + '-seg-' + name);
+        if (segEl) {
+          var pct = total > 0 ? (Math.max(0, values[name]) / total * 100) : 0;
+          segEl.style.width = pct + '%';
+        }
+        var legEl = document.getElementById('col-forecast-' + key + '-legend-' + name);
+        if (legEl) {
+          legEl.textContent = fmt.formatEGP(values[name], lang);
+          legEl.title = fmt.formatEGP(values[name], lang, { fullValue: true });
+        }
       }
     }
 
-    // Expose forecast data for drilldown.js breakdown injection (Deliverable 6)
+    // Kept for drilldown.js (forecast drill-down deep links read this; the v2
+    // payload has no type_breakdown, so its first-page injection no-ops).
     window._collectionsLastForecast = forecast;
-  }
-
-  // ── Type-breakdown mini-bars (Stage 7) ────────────────────────────────────
-  // Renders top types as labelled proportional bars inside a KPI 7 card.
-  function _buildBreakdownBars(typeBreakdown, totalAmount, lang, s) {
-    var MAX_ROWS = 4; // show at most 4 rows to keep card compact
-    var _fmt = window.CollectionsFormatters;
-    var shown = typeBreakdown.slice(0, MAX_ROWS);
-    var html = '<div class="space-y-1">';
-    for (var i = 0; i < shown.length; i++) {
-      var e = shown[i];
-      var pct = totalAmount > 0 ? Math.round(e.amount / totalAmount * 100) : 0;
-      var pctStr = pct + '%';
-      var amtStr = (_fmt && _fmt.formatEGP)
-        ? _fmt.formatEGP(e.amount, lang)
-        : (e.amount.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', { maximumFractionDigits: 0 }));
-      html += '<div>'
-        + '<div class="flex items-center justify-between gap-1 mb-0.5">'
-          + '<span class="text-[10px] text-neutral-500 dark:text-neutral-400 truncate">'
-            + _escHtml(lang === 'ar' ? e.installment_type_name_ar : (e.installment_type_name_en || e.installment_type_name_ar))
-          + '</span>'
-          + '<span class="text-[10px] tabular text-neutral-600 dark:text-neutral-300 shrink-0">'
-            + _escHtml(pctStr)
-          + '</span>'
-        + '</div>'
-        + '<div class="h-1 rounded-full bg-neutral-200 dark:bg-neutral-700 overflow-hidden">'
-          + '<div class="h-full rounded-full bg-primary-400 dark:bg-primary-500 transition-all duration-500"'
-               + ' style="width:' + pctStr + '">'
-          + '</div>'
-        + '</div>'
-      + '</div>';
-    }
-    html += '</div>';
-    return html;
-  }
-
-  function _escHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
   }
 
   // ── Section 4 — Performance & Trend (KPI 4, KPI 5a/5b, KPI 6) ────────────

@@ -81,12 +81,12 @@
   {{ risk_card() }}
 </section>
 
-{# ── Section 3 — Expected Collections (KPI 7) ────────────────────────────── #}
+{# ── Section 3 — Dues & Collections — Current Periods (KPI 7 v2, Decision 19.1) ─ #}
 <section>
   <h2 class="text-xs font-semibold uppercase tracking-wider
              text-neutral-500 dark:text-neutral-400
              mt-8 mb-3 text-start">
-    {{ _t("Expected Collections") }}
+    {{ _t("kpi7_section_title") }}
   </h2>
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
     {{ forecast_card('this_month') }}
@@ -204,6 +204,11 @@ window.COLLECTIONS_STRINGS = {
   this_half:             {{ _t("this_half")              | tojson }},
   this_year:             {{ _t("this_year")              | tojson }},
   until:                 {{ _t("until")                  | tojson }},
+  kpi7_section_title:      {{ _t("kpi7_section_title")      | tojson }},
+  kpi7_total_period_dues:  {{ _t("kpi7_total_period_dues")  | tojson }},
+  kpi7_collected_cleared:  {{ _t("kpi7_collected_cleared")  | tojson }},
+  kpi7_cheques_pending:    {{ _t("kpi7_cheques_pending")    | tojson }},
+  kpi7_remaining:          {{ _t("kpi7_remaining")          | tojson }},
   project_names: {
     "New Capital": {{ _t("New Capital") | tojson }},
     "Cassette":    {{ _t("Cassette")    | tojson }},
