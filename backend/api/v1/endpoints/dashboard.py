@@ -207,3 +207,103 @@ async def missing_contact_page(
         }
     )
     return templates.TemplateResponse(request, "missing_contact.html", ctx)
+
+
+@router.get(
+    "/data-quality/missing-stage",
+    response_class=HTMLResponse,
+    summary="Missing stage details page (HTML)",
+    dependencies=[Depends(require_module_html("crm"))],
+)
+async def missing_stage_page(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    team_id: int | None = Query(None),
+    salesperson_id: int | None = Query(None),
+    sort: str = Query("create_date desc"),
+    user: str = Depends(get_current_user_html),
+    service: CrmService = Depends(get_crm_service),
+) -> HTMLResponse:
+    rows, total = await service.missing_stage_details(
+        page=page,
+        page_size=page_size,
+        team_id=team_id,
+        salesperson_id=salesperson_id,
+        sort=sort,
+    )
+    from math import ceil
+
+    pag = {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": max(1, ceil(total / page_size)),
+        "has_prev": page > 1,
+        "has_next": page * page_size < total,
+    }
+    ctx = _base_ctx(request, user)
+    ctx.update(
+        {
+            "page": "missing_stage",
+            "rows": rows,
+            "pag": pag,
+            "odoo_url": settings.ODOO_URL.rstrip("/"),
+            "filters": {
+                "team_id": team_id,
+                "salesperson_id": salesperson_id,
+                "sort": sort,
+            },
+        }
+    )
+    return templates.TemplateResponse(request, "missing_stage.html", ctx)
+
+
+@router.get(
+    "/data-quality/missing-salesperson",
+    response_class=HTMLResponse,
+    summary="Missing salesperson details page (HTML)",
+    dependencies=[Depends(require_module_html("crm"))],
+)
+async def missing_salesperson_page(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    team_id: int | None = Query(None),
+    salesperson_id: int | None = Query(None),
+    sort: str = Query("create_date desc"),
+    user: str = Depends(get_current_user_html),
+    service: CrmService = Depends(get_crm_service),
+) -> HTMLResponse:
+    rows, total = await service.missing_salesperson_details(
+        page=page,
+        page_size=page_size,
+        team_id=team_id,
+        salesperson_id=salesperson_id,
+        sort=sort,
+    )
+    from math import ceil
+
+    pag = {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": max(1, ceil(total / page_size)),
+        "has_prev": page > 1,
+        "has_next": page * page_size < total,
+    }
+    ctx = _base_ctx(request, user)
+    ctx.update(
+        {
+            "page": "missing_salesperson",
+            "rows": rows,
+            "pag": pag,
+            "odoo_url": settings.ODOO_URL.rstrip("/"),
+            "filters": {
+                "team_id": team_id,
+                "salesperson_id": salesperson_id,
+                "sort": sort,
+            },
+        }
+    )
+    return templates.TemplateResponse(request, "missing_salesperson.html", ctx)

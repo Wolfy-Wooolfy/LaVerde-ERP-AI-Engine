@@ -485,19 +485,19 @@
 <div class="mt-4 chart-panel">
   <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-4">{{ _t("Data Quality") }}</h3>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-    {% for label, value, variant in [
-        (_t("New X Leads"),         data_quality.new_x_count,              "warning"),
-        (_t("Missing Stage"),       data_quality.missing_stage_count,       "warning"),
-        (_t("Missing Contact Info"),data_quality.missing_contact_count,     "danger"),
-        (_t("Missing Salesperson"), data_quality.missing_salesperson_count, "warning"),
+    {% for label, value, variant, href in [
+        (_t("New X Leads"),         data_quality.new_x_count,               "warning", None),
+        (_t("Missing Stage"),       data_quality.missing_stage_count,       "warning", "/data-quality/missing-stage"),
+        (_t("Missing Contact Info"),data_quality.missing_contact_count,     "danger",  "/data-quality/missing-contact"),
+        (_t("Missing Salesperson"), data_quality.missing_salesperson_count, "warning", "/data-quality/missing-salesperson"),
     ] %}
     <div class="flex flex-col gap-1 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
       <p class="text-xs text-neutral-500 dark:text-neutral-400">{{ label }}</p>
       <p class="text-2xl font-bold tabular {{ 'text-danger-600 dark:text-danger-400' if variant == 'danger' else 'text-warning-600 dark:text-warning-400' }}">
         {{ value }}
       </p>
-      {% if label == _t("Missing Contact Info") and value > 0 %}
-      <a href="/data-quality/missing-contact"
+      {% if href %}
+      <a href="{{ href }}"
         class="text-xs text-primary-600 dark:text-primary-400 hover:underline mt-0.5">
         View details →
       </a>
