@@ -23,7 +23,6 @@ from backend.modules.collections.services.drilldown_service import (
     _decode_cursor,
     _encode_cursor,
     _serialize_row,
-    get_forecast_drilldown,
     get_late_drilldown,
     get_portfolio_drilldown,
     get_project_drilldown,
@@ -105,19 +104,6 @@ async def test_late_drilldown_happy_path(mc: MagicMock) -> None:
         "total_count", "cursor_current", "cursor_next", "has_next",
         "filters_applied", "sort_applied",
     }.issubset(meta.keys())
-
-
-async def test_forecast_drilldown_happy_path(mc: MagicMock) -> None:
-    mc.execute_kw = AsyncMock(side_effect=[10, [_SAMPLE_ROW]])
-    result = await get_forecast_drilldown(
-        request_id="req-2", bucket_url_key="month", client=mc
-    )
-
-    assert result["version"] == "1.0"
-    assert result["data"]["bucket"] == "this_month"
-    assert result["data"]["bucket_url_key"] == "month"
-    assert len(result["data"]["items"]) == 1
-    assert result["meta"]["total_count"] == 10
 
 
 async def test_portfolio_drilldown_happy_path(mc: MagicMock) -> None:
@@ -402,36 +388,6 @@ async def test_late_drilldown_cheque_filter_false_returns_only_non_pending(mc: M
     assert ("check_pending_amount", "=", 0) in domain
 
 
-async def test_forecast_drilldown_cheque_filter_none_returns_all(mc: MagicMock) -> None:
-    mc.execute_kw = AsyncMock(side_effect=[0, []])
-    await get_forecast_drilldown(
-        request_id="r", bucket_url_key="year", has_pending_cheque=None, client=mc
-    )
-    domain = _domain_from_search_count(mc)
-    assert not any(
-        isinstance(c, tuple) and c[0] == "check_pending_amount"
-        for c in domain
-    )
-
-
-async def test_forecast_drilldown_cheque_filter_true_returns_only_pending(mc: MagicMock) -> None:
-    mc.execute_kw = AsyncMock(side_effect=[0, []])
-    await get_forecast_drilldown(
-        request_id="r", bucket_url_key="year", has_pending_cheque=True, client=mc
-    )
-    domain = _domain_from_search_count(mc)
-    assert ("check_pending_amount", ">", 0) in domain
-
-
-async def test_forecast_drilldown_cheque_filter_false_returns_only_non_pending(mc: MagicMock) -> None:
-    mc.execute_kw = AsyncMock(side_effect=[0, []])
-    await get_forecast_drilldown(
-        request_id="r", bucket_url_key="year", has_pending_cheque=False, client=mc
-    )
-    domain = _domain_from_search_count(mc)
-    assert ("check_pending_amount", "=", 0) in domain
-
-
 async def test_project_drilldown_cheque_filter_none_returns_all(mc: MagicMock) -> None:
     mc.execute_kw = AsyncMock(side_effect=[0, [], []])
     await get_project_drilldown(
@@ -557,15 +513,6 @@ async def test_late_drilldown_sort_by_due_amount_sends_due_amount_order(mc: Magi
 # ── Section 5 — Error / validation (7) ───────────────────────────────────────
 
 
-async def test_forecast_drilldown_invalid_bucket_raises_value_error(mc: MagicMock) -> None:
-    mc.execute_kw = AsyncMock()
-    with pytest.raises(ValueError, match="Unknown bucket key"):
-        await get_forecast_drilldown(
-            request_id="r", bucket_url_key="century", client=mc
-        )
-    mc.execute_kw.assert_not_called()
-
-
 async def test_project_drilldown_invalid_project_id_raises_value_error(mc: MagicMock) -> None:
     mc.execute_kw = AsyncMock()
     with pytest.raises(ValueError, match="Invalid project_id"):
@@ -645,15 +592,6 @@ async def test_late_drilldown_read_only_assertion_fires_when_violated(mc: MagicM
     mc.is_read_only = False
     with pytest.raises(AssertionError):
         await get_late_drilldown(request_id="r", client=mc)
-    mc.execute_kw.assert_not_called()
-
-
-async def test_forecast_drilldown_read_only_assertion_fires_when_violated(mc: MagicMock) -> None:
-    mc.is_read_only = False
-    with pytest.raises(AssertionError):
-        await get_forecast_drilldown(
-            request_id="r", bucket_url_key="month", client=mc
-        )
     mc.execute_kw.assert_not_called()
 
 

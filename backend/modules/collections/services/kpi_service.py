@@ -1220,19 +1220,6 @@ def _compute_period_bounds(today: date) -> dict[str, tuple[date, date]]:
     }
 
 
-def _compute_bucket_ends(today: date) -> dict[str, date]:
-    """Return the Cairo-local END date for each of the 4 KPI 7 calendar buckets.
-
-    Retained for the KPI 7 forecast drill-down ONLY
-    (drilldown_service.get_forecast_drilldown), which still serves the v1
-    forward-looking [today, period_end] window — its redefinition is a
-    separate product decision (Decision 19.1 implementation notes). Period
-    end dates are identical in v1 and v2, so this is a thin derivation of
-    _compute_period_bounds().
-    """
-    return {name: bounds[1] for name, bounds in _compute_period_bounds(today).items()}
-
-
 async def _fetch_bucket(
     client: OdooClient,
     start_str: str,

@@ -12,7 +12,6 @@ GET /api/v1/collections/kpi/expected-forecast             — KPI 7 v2: Dues & C
 
 Stage 5 — Drill-down endpoints (Decision 14.1–14.12, E1/E2/E3):
 GET /api/v1/collections/drilldown/late                    — KPI 2 late installments
-GET /api/v1/collections/drilldown/forecast/{bucket}       — KPI 7 forecast bucket
 GET /api/v1/collections/drilldown/portfolio               — KPI 1 customer × project
 GET /api/v1/collections/drilldown/project/{project_id}    — KPI 5 late by project
 GET /api/v1/collections/drilldown/trend/{month}           — KPI 6 installments by month
@@ -30,7 +29,6 @@ from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.collections.schemas import (
     ExpectedCollectionsForecastResponse,
-    ForecastDrilldownResponse,
     LateDrilldownResponse,
     LateUncollectedResponse,
     PortfolioDrilldownResponse,
@@ -38,7 +36,6 @@ from backend.modules.collections.schemas import (
     TrendDrilldownResponse,
 )
 from backend.modules.collections.services.drilldown_service import (
-    get_forecast_drilldown,
     get_late_drilldown,
     get_portfolio_drilldown,
     get_project_drilldown,
@@ -449,53 +446,6 @@ async def drilldown_late(
         return JSONResponse(status_code=503, content=_ERR_503, headers={"X-Request-ID": req_id})
     except Exception:
         logger.error("Drilldown late — unexpected error", exc_info=True)
-        return JSONResponse(status_code=500, content=_ERR_500, headers={"X-Request-ID": req_id})
-
-    response.headers["X-Request-ID"] = req_id
-    return data
-
-
-@router.get(
-    "/drilldown/forecast/{bucket}",
-    summary="Drill-down: KPI 7 — Expected Collections Forecast bucket (paginated, cursor-based)",
-    response_model=ForecastDrilldownResponse,
-)
-@limiter.limit("60/minute")
-async def drilldown_forecast(
-    request: Request,
-    response: Response,
-    bucket: Literal["month", "quarter", "half", "year"],
-    page_size: int = Query(default=50, ge=1, le=200),
-    cursor: Optional[str] = Query(default=None),
-    sort_by: Literal["date", "amount", "due_amount"] = Query(default="due_amount"),
-    sort_dir: Literal["asc", "desc"] = Query(default="desc"),
-    payment_state: Optional[Literal["unpaid", "partial"]] = Query(default=None),
-    has_pending_cheque: Optional[bool] = Query(default=None, description="True → cheque>0 only; False → cheque=0 only; omit for all"),
-    _user: str = Depends(get_current_user),
-) -> dict | JSONResponse:
-    req_id = _req_id(request)
-    try:
-        data = await get_forecast_drilldown(
-            request_id=req_id,
-            bucket_url_key=bucket,
-            cursor=cursor,
-            page_size=page_size,
-            sort_by=sort_by,
-            sort_dir=sort_dir,
-            payment_state=payment_state,
-            has_pending_cheque=has_pending_cheque,
-        )
-    except ValueError as exc:
-        return JSONResponse(
-            status_code=422,
-            content={"error": {"code": "invalid_param", "message": str(exc)}},
-            headers={"X-Request-ID": req_id},
-        )
-    except OdooQueryError:
-        logger.warning("Drilldown forecast — Odoo query failed", exc_info=True)
-        return JSONResponse(status_code=503, content=_ERR_503, headers={"X-Request-ID": req_id})
-    except Exception:
-        logger.error("Drilldown forecast — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500, headers={"X-Request-ID": req_id})
 
     response.headers["X-Request-ID"] = req_id

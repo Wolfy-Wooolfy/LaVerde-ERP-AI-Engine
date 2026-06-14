@@ -25,7 +25,6 @@ from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX_KPI6,
     _CACHE_KEY_PREFIX_KPI7_V2,
     _PAYMENT_HEADER_MODEL,
-    _compute_bucket_ends,
     _compute_period_bounds,
     get_collection_rate_mtd_ytd,
     get_collection_trend_6m,
@@ -2331,25 +2330,6 @@ def test_kpi7_v2_bounds_leap_february() -> None:
 def test_kpi7_v2_bounds_non_leap_february() -> None:
     bounds = _compute_period_bounds(date(2026, 2, 10))   # 2026 is not a leap year
     assert bounds["this_month"] == (date(2026, 2, 1), date(2026, 2, 28))
-
-
-# ── K7v2-5 — _compute_bucket_ends stays a thin derivation (drill-down dep) ───
-
-
-def test_kpi7_v2_bucket_ends_is_thin_derivation_of_bounds() -> None:
-    """drilldown_service.get_forecast_drilldown imports _compute_bucket_ends;
-    it must keep returning the v1-compatible END date per bucket (identical
-    to bounds[1] — period ends did not change between v1 and v2)."""
-    for d in (date(2026, 6, 11), date(2026, 1, 1), date(2026, 12, 31), date(2028, 2, 15)):
-        bounds = _compute_period_bounds(d)
-        ends   = _compute_bucket_ends(d)
-        assert ends == {name: se[1] for name, se in bounds.items()}, f"mismatch for {d}"
-    assert _compute_bucket_ends(date(2026, 6, 11)) == {
-        "this_month":   date(2026, 6, 30),
-        "this_quarter": date(2026, 6, 30),
-        "this_half":    date(2026, 6, 30),
-        "this_year":    date(2026, 12, 31),
-    }
 
 
 # ── K7v2-6 — Domain construction: full period, NO payment_state filter ───────

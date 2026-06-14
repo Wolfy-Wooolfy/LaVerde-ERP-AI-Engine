@@ -119,12 +119,6 @@ class LateDrilldownData(BaseModel):
     items: list[InstallmentRow]
 
 
-class ForecastDrilldownData(BaseModel):
-    bucket: str           # internal form e.g. "this_month"
-    bucket_url_key: str   # URL form e.g. "month"
-    items: list[InstallmentRow]
-
-
 class PortfolioDrilldownData(BaseModel):
     customers: list[PortfolioCustomerRow]
 
@@ -144,7 +138,6 @@ class TrendDrilldownData(BaseModel):
 
 
 LateDrilldownResponse = DrilldownEnvelope[LateDrilldownData]
-ForecastDrilldownResponse = DrilldownEnvelope[ForecastDrilldownData]
 PortfolioDrilldownResponse = DrilldownEnvelope[PortfolioDrilldownData]
 ProjectDrilldownResponse = DrilldownEnvelope[ProjectDrilldownData]
 TrendDrilldownResponse = DrilldownEnvelope[TrendDrilldownData]

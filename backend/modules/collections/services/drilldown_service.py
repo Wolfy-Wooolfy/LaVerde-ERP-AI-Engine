@@ -22,18 +22,10 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError
 from backend.shared.odoo.client import OdooClient
 from backend.modules.collections.services import cache as _cache
-from backend.modules.collections.services.kpi_service import _compute_bucket_ends
 from backend.modules.collections.installment_type_names import get_type_name_ar, get_type_name_en
 
 _MODEL = "rs.installment"
 _LA_VERDE_TZ = ZoneInfo("Africa/Cairo")
-
-_BUCKET_URL_TO_INTERNAL: dict[str, str] = {
-    "month":   "this_month",
-    "quarter": "this_quarter",
-    "half":    "this_half",
-    "year":    "this_year",
-}
 
 _PROJECT_NAMES_AR: dict[int, str] = {
     1: "نيو كابيتال",
@@ -262,113 +254,6 @@ async def get_late_drilldown(
             cursor, next_cur, has_next,
             {
                 "today": today,
-                "payment_state": payment_state,
-                "has_pending_cheque": has_pending_cheque,
-            },
-            {"sort_by": sort_by, "sort_dir": sort_dir},
-        ),
-    }
-
-
-async def get_forecast_drilldown(
-    request_id: str,
-    bucket_url_key: str,
-    cursor: Optional[str] = None,
-    page_size: int = _DEFAULT_PAGE_SIZE,
-    sort_by: str = "due_amount",
-    sort_dir: str = "desc",
-    payment_state: Optional[str] = None,
-    has_pending_cheque: Optional[bool] = None,
-    client: Optional[OdooClient] = None,
-) -> dict:
-    """Paginated drill-down for one KPI 7 forecast bucket.
-
-    bucket_url_key ∈ {'month', 'quarter', 'half', 'year'} maps to internal bucket name.
-    Domain: state=post, payment_state IN [unpaid,partial], date in [today_cairo, bucket_end].
-    Optional narrowing: payment_state='unpaid'|'partial', has_pending_cheque=True.
-    2 concurrent RPCs: search_count + search_read.
-    """
-    internal_bucket = _BUCKET_URL_TO_INTERNAL.get(bucket_url_key)
-    if internal_bucket is None:
-        raise ValueError(f"Unknown bucket key: {bucket_url_key!r}. Valid: {list(_BUCKET_URL_TO_INTERNAL)}")
-
-    _own_client = client is None
-    _client = client or OdooClient()
-    assert _client.is_read_only  # Rule R10
-    _log = logger.bind(request_id=request_id)
-
-    page_size = _clamp_page_size(page_size)
-    sort_by, sort_dir = _normalize_sort(sort_by, sort_dir)
-
-    today_cairo = datetime.now(_LA_VERDE_TZ).date()
-    today_str   = today_cairo.isoformat()
-    bucket_ends = _compute_bucket_ends(today_cairo)
-    bucket_end_str = bucket_ends[internal_bucket].isoformat()
-
-    ps_clause = (
-        ("payment_state", "=", payment_state)
-        if payment_state in ("unpaid", "partial")
-        else ("payment_state", "in", ["unpaid", "partial"])
-    )
-    base_domain: list = [
-        ("state", "=", "post"),
-        ps_clause,
-        ("date", ">=", today_str),
-        ("date", "<=", bucket_end_str),
-    ]
-    if has_pending_cheque is True:
-        base_domain.append(("check_pending_amount", ">", 0))
-    elif has_pending_cheque is False:
-        base_domain.append(("check_pending_amount", "=", 0))
-
-    page_domain = list(base_domain)
-    if cursor:
-        cur = _decode_cursor(cursor)
-        if cur:
-            page_domain += _build_keyset_clause(cur["sb"], cur["sd"], cur["sv"], cur["id"])
-
-    order = _odoo_order(sort_by, sort_dir)
-    t0 = time.monotonic()
-    try:
-        await _client.authenticate()
-        total_count, rows = await asyncio.gather(
-            _client.execute_kw(_MODEL, "search_count", args=[base_domain]),
-            _client.execute_kw(
-                _MODEL, "search_read",
-                args=[page_domain, _DRILL_FIELDS],
-                kwargs={"limit": page_size + 1, "order": order},
-            ),
-        )
-    except Exception as exc:
-        raise OdooQueryError(f"Forecast drill-down ({bucket_url_key}) failed: {exc}") from exc
-    finally:
-        if _own_client:
-            await _client.close()
-
-    rpc_ms = int((time.monotonic() - t0) * 1000)
-    _log.info(
-        f"Forecast drill-down ({internal_bucket}): {int(total_count or 0)} total in {rpc_ms}ms"
-    )
-
-    has_next = len(rows) > page_size
-    rows = rows[:page_size]
-    items = [_serialize_row(r) for r in rows]
-    next_cur = _next_cursor_from_items(items, sort_by, sort_dir) if has_next else None
-
-    return {
-        "version": "1.0",
-        "data": {
-            "bucket":         internal_bucket,
-            "bucket_url_key": bucket_url_key,
-            "items":          items,
-        },
-        "meta": _build_meta(
-            request_id, rpc_ms, page_size, int(total_count or 0),
-            cursor, next_cur, has_next,
-            {
-                "bucket": internal_bucket,
-                "today": today_str,
-                "period_end": bucket_end_str,
                 "payment_state": payment_state,
                 "has_pending_cheque": has_pending_cheque,
             },
