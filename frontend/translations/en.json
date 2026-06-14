@@ -226,6 +226,12 @@
   "dd_by_type": "By Type",
   "dd_installment_type": "Type",
 
+  "dd_seg_cleared": "Collected (cleared)",
+  "dd_seg_pending": "Cheques pending clearance",
+  "dd_seg_remaining": "Remaining",
+  "dd_forecast_list_total": "List total",
+  "dd_forecast_equals_card": "Equals this segment’s figure on the card",
+
   "Customer Accounts": "Customer Accounts",
   "Customer Accounts Dashboard": "Customer Accounts Dashboard",
   "ca_overview": "Overview",

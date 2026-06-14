@@ -46,6 +46,22 @@
     return !!_panel;
   }
 
+  // Parse a segment-aware forecast target "forecast-{bucket}-{segment}" into
+  // {bucket, segment}. bucket is one of this_month/this_quarter/this_half/this_year
+  // (underscore, no dash); segment is cleared/pending/remaining. Splitting on the
+  // LAST dash separates the bucket (which contains an underscore, never a dash)
+  // from the segment. Returns null for legacy / malformed targets (N5).
+  function _parseForecastTarget(target) {
+    if (!target || target.indexOf('forecast-') !== 0) return null;
+    var rest = target.slice('forecast-'.length);   // e.g. "this_month-cleared"
+    var dash = rest.lastIndexOf('-');
+    if (dash <= 0) return null;
+    var bucket  = rest.slice(0, dash);
+    var segment = rest.slice(dash + 1);
+    if (!bucket || !segment) return null;
+    return { bucket: bucket, segment: segment };
+  }
+
   // ── Endpoint resolver ──────────────────────────────────────────────────────
   function _resolveEndpoint(target) {
     if (!target) return null;
@@ -53,10 +69,11 @@
     if (target === 'kpi1')              return base + 'portfolio';
     if (target === 'kpi2')              return base + 'late';
     if (target === 'kpi2-cheques')      return base + 'late';
-    if (target === 'forecast-this_month')   return base + 'forecast/month';
-    if (target === 'forecast-this_quarter') return base + 'forecast/quarter';
-    if (target === 'forecast-this_half')    return base + 'forecast/half';
-    if (target === 'forecast-this_year')    return base + 'forecast/year';
+    if (target.indexOf('forecast-') === 0) {
+      var fp = _parseForecastTarget(target);
+      if (!fp) return null;
+      return base + 'forecast/' + fp.bucket + '/' + fp.segment;
+    }
     if (target.indexOf('kpi5-proj-') === 0) {
       var pid = target.slice('kpi5-proj-'.length);
       return base + 'project/' + pid;
@@ -74,13 +91,16 @@
     if (target === 'kpi2')         return S.dd_title_late      || 'Late Uncollected — Detail';
     if (target === 'kpi2-cheques') return S.dd_title_cheques   || 'Late — Received Cheques';
     if (target.indexOf('forecast-') === 0) {
-      var bucketLabel = {
-        'forecast-this_month':   S.this_month   || 'This Month',
-        'forecast-this_quarter': S.this_quarter || 'This Quarter',
-        'forecast-this_half':    S.this_half    || 'This Half',
-        'forecast-this_year':    S.this_year    || 'This Year',
-      }[target] || target;
-      return (S.dd_title_forecast || 'Expected Collections') + ' — ' + bucketLabel;
+      var fp = _parseForecastTarget(target);
+      if (!fp) return target;
+      var bucketLabel = S[fp.bucket] || fp.bucket;
+      var segLabel = {
+        cleared:   S.dd_seg_cleared   || 'Collected (cleared)',
+        pending:   S.dd_seg_pending   || 'Cheques pending clearance',
+        remaining: S.dd_seg_remaining || 'Remaining',
+      }[fp.segment] || fp.segment;
+      return (S.dd_title_forecast || 'Expected Collections')
+        + ' — ' + bucketLabel + ' · ' + segLabel;
     }
     if (target.indexOf('kpi5-proj-') === 0) {
       return S.dd_title_project || 'Late Detail';
@@ -120,10 +140,7 @@
 
     _title.textContent = _resolveTitle(target);
 
-    // dd-type-breakdown is a sibling of _listBody (inserted via insertBefore), not a child,
-    // so innerHTML='' does not remove it. Must stay in sync with the identical block in _refetch().
-    var _oldBd = document.getElementById('dd-type-breakdown');
-    if (_oldBd) _oldBd.parentNode.removeChild(_oldBd);
+    _removeInjectedBlocks();
     _listBody.innerHTML = '';
     _hide(_emptyMsg);
     _hide(_errorMsg);
@@ -281,13 +298,39 @@
       _title.textContent = (S.dd_title_trend || 'Trend') + ' — ' + data.month;
     }
 
-    // Stage 7 — Deliverable 6: inject type_breakdown section above the list
-    // on the first page of a forecast drill-down (Choice 1ب, drill-down variant).
-    // Source: window._collectionsLastForecast populated by collections.js.
+    // N5 — first page of a (bucket, segment) forecast drill-down: inject a
+    // list-total banner that equals this segment's figure on the card.
     if (isFirstPage && _state.target && _state.target.indexOf('forecast-') === 0) {
-      var bucketKey = _state.target.slice('forecast-'.length);  // e.g. "this_month"
+      var fp = _parseForecastTarget(_state.target);
+      var bucketKey = fp ? fp.bucket : '';
+
+      if (data && data.segment_total_egp != null) {
+        var totStr = F.formatEGP
+          ? F.formatEGP(data.segment_total_egp, lang, { fullValue: true })
+          : _fmtEgp(data.segment_total_egp);
+        var totSection = document.createElement('div');
+        totSection.id = 'dd-segment-total';
+        totSection.className = 'px-5 py-3 border-b border-neutral-100 dark:border-neutral-800';
+        totSection.innerHTML = ''
+          + '<div class="flex items-center justify-between gap-2">'
+            + '<span class="text-[10px] font-semibold uppercase tracking-wide'
+              + ' text-neutral-400 dark:text-neutral-500">'
+              + _esc(S.dd_forecast_list_total || 'List total')
+            + '</span>'
+            + '<span class="text-sm font-semibold tabular text-neutral-900 dark:text-neutral-100">'
+              + _esc(totStr)
+            + '</span>'
+          + '</div>'
+          + '<p class="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">'
+            + _esc(S.dd_forecast_equals_card || 'Equals this segment’s figure on the card')
+          + '</p>';
+        _listBody.parentNode.insertBefore(totSection, _listBody);
+      }
+
+      // Legacy (Stage 7) type_breakdown injection — the v2 forecast payload has
+      // no type_breakdown, so this no-ops; retained for forward-compat.
       var forecastData = window._collectionsLastForecast;
-      var tb = forecastData && forecastData.buckets
+      var tb = forecastData && forecastData.buckets && bucketKey
         ? (forecastData.buckets[bucketKey] || {}).type_breakdown
         : null;
       if (tb && tb.length) {
@@ -511,6 +554,16 @@
 
   function _hide(el) {
     if (el) el.classList.add('hidden');
+  }
+
+  // Remove the first-page blocks injected as siblings of _listBody (they are
+  // inserted via insertBefore, so _listBody.innerHTML='' does NOT remove them).
+  // Called by open() and _refetch() before a fresh fetch.
+  function _removeInjectedBlocks() {
+    ['dd-segment-total', 'dd-type-breakdown'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
   }
 
   // ── Focus management (D7) ──────────────────────────────────────────────────
@@ -762,10 +815,7 @@
       _updateHash(_state.target, _state.filters);
       _state.cursor  = null;
       _state.hasNext = false;
-      // dd-type-breakdown is a sibling of _listBody (inserted via insertBefore), not a child,
-      // so innerHTML='' does not remove it. Must stay in sync with the identical block in open().
-      var _oldBd = document.getElementById('dd-type-breakdown');
-      if (_oldBd) _oldBd.parentNode.removeChild(_oldBd);
+      _removeInjectedBlocks();
       _listBody.innerHTML = '';
       _hide(_emptyMsg);
       _hide(_errorMsg);
@@ -780,6 +830,7 @@
   if (typeof module !== 'undefined') {
     module.exports = {
       _resolveEndpoint:      _resolveEndpoint,
+      _parseForecastTarget:  _parseForecastTarget,
       _buildHash:            _buildHash,
       _parseHash:            _parseHash,
       _paymentStateChipVals: _paymentStateChipVals,

@@ -22,7 +22,7 @@ global.document = {
 global.requestAnimationFrame = function (cb) { cb(); };
 global.history = { replaceState: function () {} };
 
-var { _resolveEndpoint, _buildHash, _parseHash, _paymentStateChipVals } = require('../../frontend/static/js/drilldown.js');
+var { _resolveEndpoint, _parseForecastTarget, _buildHash, _parseHash, _paymentStateChipVals } = require('../../frontend/static/js/drilldown.js');
 
 // ── helpers ────────────────────────────────────────────────────────────────
 var passed = 0;
@@ -59,24 +59,29 @@ assert(
   '/api/v1/collections/drilldown/late'
 );
 assert(
-  'forecast-this_month → forecast/month',
+  'forecast-this_month-cleared → forecast/this_month/cleared (N5)',
+  _resolveEndpoint('forecast-this_month-cleared'),
+  '/api/v1/collections/drilldown/forecast/this_month/cleared'
+);
+assert(
+  'forecast-this_quarter-pending → forecast/this_quarter/pending (N5)',
+  _resolveEndpoint('forecast-this_quarter-pending'),
+  '/api/v1/collections/drilldown/forecast/this_quarter/pending'
+);
+assert(
+  'forecast-this_half-remaining → forecast/this_half/remaining (N5)',
+  _resolveEndpoint('forecast-this_half-remaining'),
+  '/api/v1/collections/drilldown/forecast/this_half/remaining'
+);
+assert(
+  'forecast-this_year-cleared → forecast/this_year/cleared (N5)',
+  _resolveEndpoint('forecast-this_year-cleared'),
+  '/api/v1/collections/drilldown/forecast/this_year/cleared'
+);
+assert(
+  'legacy forecast target without segment → null (N5 removed v1)',
   _resolveEndpoint('forecast-this_month'),
-  '/api/v1/collections/drilldown/forecast/month'
-);
-assert(
-  'forecast-this_quarter → forecast/quarter',
-  _resolveEndpoint('forecast-this_quarter'),
-  '/api/v1/collections/drilldown/forecast/quarter'
-);
-assert(
-  'forecast-this_half → forecast/half',
-  _resolveEndpoint('forecast-this_half'),
-  '/api/v1/collections/drilldown/forecast/half'
-);
-assert(
-  'forecast-this_year → forecast/year',
-  _resolveEndpoint('forecast-this_year'),
-  '/api/v1/collections/drilldown/forecast/year'
+  null
 );
 assert(
   'kpi5-proj-1 → project/1',
@@ -123,6 +128,30 @@ assert(
   '/api/v1/collections/drilldown/trend/2026-01'
 );
 
+// ── _parseForecastTarget — bucket/segment split on the LAST dash (N5) ────────
+console.log('\n_parseForecastTarget — bucket/segment split\n');
+
+assert(
+  'bucket has underscore, segment after last dash',
+  JSON.stringify(_parseForecastTarget('forecast-this_month-cleared')),
+  JSON.stringify({ bucket: 'this_month', segment: 'cleared' })
+);
+assert(
+  'this_year + remaining',
+  JSON.stringify(_parseForecastTarget('forecast-this_year-remaining')),
+  JSON.stringify({ bucket: 'this_year', segment: 'remaining' })
+);
+assert(
+  'no segment → null',
+  _parseForecastTarget('forecast-this_month'),
+  null
+);
+assert(
+  'non-forecast target → null',
+  _parseForecastTarget('kpi2'),
+  null
+);
+
 // ── _buildHash / _parseHash round-trips ────────────────────────────────────
 console.log('\n_buildHash — encoding\n');
 
@@ -147,9 +176,9 @@ assert(
   '#dd=kpi2-cheques&pc=1'
 );
 assert(
-  'forecast bucket target preserved',
-  _buildHash('forecast-this_month', {}),
-  '#dd=forecast-this_month'
+  'forecast segment target preserved (N5)',
+  _buildHash('forecast-this_month-cleared', {}),
+  '#dd=forecast-this_month-cleared'
 );
 assert(
   'null target → empty string',
@@ -202,7 +231,7 @@ assert(
 
 console.log('\n_buildHash + _parseHash round-trip\n');
 
-var targets = ['kpi1', 'kpi2', 'kpi2-cheques', 'forecast-this_quarter', 'kpi5-proj-2', 'trend-2025-11'];
+var targets = ['kpi1', 'kpi2', 'kpi2-cheques', 'forecast-this_quarter-pending', 'kpi5-proj-2', 'trend-2025-11'];
 targets.forEach(function (t) {
   var filters = { payment_state: 'unpaid', sort_by: 'amount', sort_dir: 'asc', has_pending_cheque: false };
   var hash   = _buildHash(t, filters);

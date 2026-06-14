@@ -44,32 +44,57 @@
     <div id="col-forecast-{{ bucket_key }}-seg-remaining" class="h-full transition-all duration-500" style="width: 0%; background-color: #85B7EB;"></div>
   </div>
 
-  {# 3 legend rows — EGP values populated by collections.js renderSection3 #}
-  <div class="space-y-1.5">
-    <div class="flex items-center justify-between gap-2 text-xs">
+  {# 3 legend rows — each a clickable drill-down trigger (N5). EGP values
+     populated by collections.js renderSection3. data-drilldown-target encodes
+     forecast-{bucket}-{segment}; drilldown.js opens the existing side panel.
+     justify-between keeps the label at the logical start, value at the end —
+     RTL-correct automatically. #}
+  <div class="space-y-1">
+    <button type="button"
+            data-drilldown-target="forecast-{{ bucket_key }}-cleared"
+            aria-label="{{ _t('dd_seg_cleared') }}"
+            class="w-full flex items-center justify-between gap-2 text-xs
+                   rounded-md px-1.5 -mx-1.5 py-1
+                   hover:bg-neutral-100 dark:hover:bg-neutral-800/60
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500
+                   transition-colors cursor-pointer">
       <span class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 truncate">
         <span class="w-2 h-2 rounded-full shrink-0" style="background-color: #5DCAA5;" aria-hidden="true"></span>
         {{ _t("kpi7_collected_cleared") }}
       </span>
       <span id="col-forecast-{{ bucket_key }}-legend-cleared"
             class="tabular text-neutral-700 dark:text-neutral-200 shrink-0">—</span>
-    </div>
-    <div class="flex items-center justify-between gap-2 text-xs">
+    </button>
+    <button type="button"
+            data-drilldown-target="forecast-{{ bucket_key }}-pending"
+            aria-label="{{ _t('dd_seg_pending') }}"
+            class="w-full flex items-center justify-between gap-2 text-xs
+                   rounded-md px-1.5 -mx-1.5 py-1
+                   hover:bg-neutral-100 dark:hover:bg-neutral-800/60
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500
+                   transition-colors cursor-pointer">
       <span class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 truncate">
         <span class="w-2 h-2 rounded-full shrink-0" style="background-color: #E8A33D;" aria-hidden="true"></span>
         {{ _t("kpi7_cheques_pending") }}
       </span>
       <span id="col-forecast-{{ bucket_key }}-legend-pending"
             class="tabular text-neutral-700 dark:text-neutral-200 shrink-0">—</span>
-    </div>
-    <div class="flex items-center justify-between gap-2 text-xs">
+    </button>
+    <button type="button"
+            data-drilldown-target="forecast-{{ bucket_key }}-remaining"
+            aria-label="{{ _t('dd_seg_remaining') }}"
+            class="w-full flex items-center justify-between gap-2 text-xs
+                   rounded-md px-1.5 -mx-1.5 py-1
+                   hover:bg-neutral-100 dark:hover:bg-neutral-800/60
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500
+                   transition-colors cursor-pointer">
       <span class="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 truncate">
         <span class="w-2 h-2 rounded-full shrink-0" style="background-color: #85B7EB;" aria-hidden="true"></span>
         {{ _t("kpi7_remaining") }}
       </span>
       <span id="col-forecast-{{ bucket_key }}-legend-remaining"
             class="tabular text-neutral-700 dark:text-neutral-200 shrink-0">—</span>
-    </div>
+    </button>
   </div>
 </div>
 {% endmacro %}
