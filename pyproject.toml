@@ -26,8 +26,9 @@ asyncio_mode = "auto"
 markers = [
     "unit: Unit tests (no external services)",
     "integration: Integration tests (requires mock server)",
+    "e2e: End-to-end Playwright tests (require a live server + browser; deselected from the bare gate)",
 ]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -m 'not e2e'"
 
 [tool.coverage.run]
 source = ["backend"]

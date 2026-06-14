@@ -21,18 +21,21 @@ def page(browser):
     ctx.close()
 
 
+@pytest.mark.e2e
 def test_dashboard_loads(page):
     page.goto(f"{BASE_URL}/dashboard")
     assert page.title() != ""
     page.wait_for_selector("#ai-priority-section", timeout=10000)
 
 
+@pytest.mark.e2e
 def test_ai_section_is_present(page):
     page.goto(f"{BASE_URL}/dashboard")
     section = page.query_selector("#ai-priority-section")
     assert section is not None, "AI priority section not found in DOM"
 
 
+@pytest.mark.e2e
 def test_ai_skeleton_shown_initially(page):
     """Skeleton is rendered server-side and visible before JS fires."""
     page.goto(f"{BASE_URL}/dashboard")
@@ -40,6 +43,7 @@ def test_ai_skeleton_shown_initially(page):
     assert skeleton is not None, "AI skeleton not in DOM"
 
 
+@pytest.mark.e2e
 def test_ai_leads_appear_after_load(page):
     """After JS loads AI data, leads list becomes visible."""
     page.goto(f"{BASE_URL}/dashboard")
@@ -55,12 +59,14 @@ def test_ai_leads_appear_after_load(page):
     assert not (leads_hidden and error_hidden), "Neither leads nor error state is visible after load"
 
 
+@pytest.mark.e2e
 def test_budget_pill_in_topbar(page):
     page.goto(f"{BASE_URL}/dashboard")
     pill = page.query_selector("#ai-budget-pill")
     assert pill is not None, "Budget pill not found in topbar"
 
 
+@pytest.mark.e2e
 def test_budget_pill_shows_spend(page):
     """After page load, budget pill should show actual spend text."""
     page.goto(f"{BASE_URL}/dashboard")
@@ -72,12 +78,14 @@ def test_budget_pill_shows_spend(page):
     assert "AI:" in label, f"Expected 'AI:' in label, got: {label}"
 
 
+@pytest.mark.e2e
 def test_refresh_button_exists(page):
     page.goto(f"{BASE_URL}/dashboard")
     btn = page.query_selector("#ai-refresh-btn")
     assert btn is not None, "AI refresh button not found"
 
 
+@pytest.mark.e2e
 def test_budget_button_opens_modal(page):
     page.goto(f"{BASE_URL}/dashboard")
     # Wait for page to stabilize
@@ -91,6 +99,7 @@ def test_budget_button_opens_modal(page):
     assert modal_display is True, "Budget modal did not open"
 
 
+@pytest.mark.e2e
 def test_console_has_no_errors(page):
     errors = []
     page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)

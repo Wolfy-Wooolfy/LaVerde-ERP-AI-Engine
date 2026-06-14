@@ -39,6 +39,7 @@ def auth_page(page: Page) -> Page:
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.e2e
 def test_no_csp_eval_errors(auth_page: Page) -> None:
     """Zero 'unsafe-eval' / EvalError violations in the browser console."""
     errors: list[str] = []
@@ -52,6 +53,7 @@ def test_no_csp_eval_errors(auth_page: Page) -> None:
     assert not eval_errors, "CSP eval errors found:\n" + "\n".join(eval_errors[:5])
 
 
+@pytest.mark.e2e
 def test_dropdowns_closed_on_load(auth_page: Page) -> None:
     """Both dropdown panels must be hidden immediately after page load."""
     auth_page.goto(f"{BASE_URL}/dashboard")
@@ -62,6 +64,7 @@ def test_dropdowns_closed_on_load(auth_page: Page) -> None:
     expect(lang_panel).to_be_hidden()
 
 
+@pytest.mark.e2e
 def test_theme_dropdown_opens_and_closes(auth_page: Page) -> None:
     """Click theme trigger → panel opens; click outside → panel closes."""
     auth_page.goto(f"{BASE_URL}/dashboard")
@@ -81,6 +84,7 @@ def test_theme_dropdown_opens_and_closes(auth_page: Page) -> None:
     expect(theme_panel).to_be_hidden()
 
 
+@pytest.mark.e2e
 def test_only_one_dropdown_open_at_a_time(auth_page: Page) -> None:
     """Opening language dropdown must close the theme dropdown."""
     auth_page.goto(f"{BASE_URL}/dashboard")
@@ -102,6 +106,7 @@ def test_only_one_dropdown_open_at_a_time(auth_page: Page) -> None:
     expect(theme_panel).to_be_hidden()
 
 
+@pytest.mark.e2e
 def test_theme_dark_applies_class(auth_page: Page) -> None:
     """Click 'Dark' option → <html> gets 'dark' class; dropdown closes."""
     auth_page.goto(f"{BASE_URL}/dashboard")
@@ -126,6 +131,7 @@ def test_theme_dark_applies_class(auth_page: Page) -> None:
     expect(auth_page.locator('[data-dropdown="theme"]')).to_be_hidden()
 
 
+@pytest.mark.e2e
 def test_language_switch_sets_cookie(auth_page: Page) -> None:
     """Click English option → lang=en cookie set → page reloads."""
     auth_page.goto(f"{BASE_URL}/dashboard")
@@ -144,6 +150,7 @@ def test_language_switch_sets_cookie(auth_page: Page) -> None:
     assert lang_cookie["value"] == "en", f"expected lang=en, got lang={lang_cookie['value']}"
 
 
+@pytest.mark.e2e
 def test_view_in_odoo_link_correct(auth_page: Page) -> None:
     """Every row's 'View in Odoo' link must point to the real Odoo deep-link."""
     auth_page.goto(f"{BASE_URL}/data-quality/missing-contact")
