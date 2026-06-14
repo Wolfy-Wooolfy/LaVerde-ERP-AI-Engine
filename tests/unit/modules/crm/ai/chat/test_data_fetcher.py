@@ -167,8 +167,17 @@ async def test_unknown_intent_returns_clarification(mock_crm):
 
 
 async def test_site_visit_signal_no_prioritizer(mock_crm):
-    data = await fetch_data_for_intent("leads_with_site_visit_signal", {}, mock_crm, prioritizer=None)
-    assert data["type"] == "unavailable"
+    """The site-visit handler was refactored to a chatter-keyword search
+    (_handle_leads_with_site_visit_signal → _search_leads_by_chatter_keywords,
+    data_fetcher.py:289-294) and no longer consults the prioritizer, so
+    prioritizer=None has no effect on its path. With the MagicMock CRM the
+    awaited client call is not awaitable, so the search hits its except branch
+    and returns the 'error' contract (data_fetcher.py:284-286) — NOT the old
+    no-prioritizer 'unavailable' response."""
+    data = await fetch_data_for_intent(
+        "leads_with_site_visit_signal", {}, mock_crm, prioritizer=None
+    )
+    assert data["type"] == "error"
 
 
 async def test_recommendation_no_prioritizer(mock_crm):
@@ -190,18 +199,30 @@ def test_normalise_stage_english_passthrough():
 
 
 def test_normalise_stage_arabic_to_english():
-    assert _normalise_stage("التفاوض") == "Negotiation"
-    assert _normalise_stage("تفاوض") == "Negotiation"
+    # Arabic aliases that map to stages which exist in live Odoo
+    # (STAGE_AR_TO_EN, data_fetcher.py:14-31).
     assert _normalise_stage("الحجز") == "Reservation"
     assert _normalise_stage("حجز") == "Reservation"
     assert _normalise_stage("متابعة") == "Follow up"
-    assert _normalise_stage("معاينة") == "Site Visit"
+    assert _normalise_stage("المتابعة") == "Follow up"
+    assert _normalise_stage("اهتمام") == "Interested"
+    assert _normalise_stage("خسارة") == "Lost"
+    assert _normalise_stage("جديد") == "New"
+    assert _normalise_stage("إعادة التوزيع") == "Re-Distribution"
+    # "Negotiation" / "Site Visit" do not exist in the live instance and were
+    # removed from the map, so their Arabic names now pass through unchanged.
+    assert _normalise_stage("التفاوض") == "التفاوض"
+    assert _normalise_stage("معاينة") == "معاينة"
 
 
 def test_normalise_stage_english_alias_case_insensitive():
+    # _normalise_stage lower-cases the input and matches it against both the
+    # keys and values of STAGE_AR_TO_EN (data_fetcher.py:41-44), so any-case
+    # English names of live stages resolve to their canonical spelling.
     assert _normalise_stage("follow up") == "Follow up"
-    assert _normalise_stage("NEGOTIATION") == "Negotiation"
-    assert _normalise_stage("site visit") == "Site Visit"
+    assert _normalise_stage("RESERVATION") == "Reservation"
+    assert _normalise_stage("interested") == "Interested"
+    assert _normalise_stage("NEW") == "New"
 
 
 def test_normalise_stage_unknown_passthrough():
@@ -209,11 +230,17 @@ def test_normalise_stage_unknown_passthrough():
 
 
 async def test_count_by_stage_arabic_stage_name(mock_crm):
-    """'التفاوض' (Arabic for Negotiation) normalises to 'Negotiation' before service call."""
-    data = await fetch_data_for_intent("count_by_stage", {"stage": "التفاوض"}, mock_crm)
+    """'الحجز' (Arabic for Reservation) normalises to 'Reservation' before the service call."""
+    mock_crm.count_leads_by_stage.return_value = StageCountResult(
+        stage_name="Reservation",
+        matched_stages=[{"id": 26, "name": "Reservation"}],
+        count=42,
+        overdue_only=False,
+    )
+    data = await fetch_data_for_intent("count_by_stage", {"stage": "الحجز"}, mock_crm)
     assert data["type"] == "stage_count"
-    assert data["stage_name"] == "Negotiation"
-    mock_crm.count_leads_by_stage.assert_called_once_with(stage_name="Negotiation", overdue_only=False)
+    assert data["stage_name"] == "Reservation"
+    mock_crm.count_leads_by_stage.assert_called_once_with(stage_name="Reservation", overdue_only=False)
 
 
 async def test_count_by_stage_mixed_language_english_term(mock_crm):
