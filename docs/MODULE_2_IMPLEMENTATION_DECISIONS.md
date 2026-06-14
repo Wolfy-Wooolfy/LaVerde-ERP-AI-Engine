@@ -3350,3 +3350,120 @@ sidebar untouched, no backend change for ITEM B.
 **Commits:** `f41abde` (C1 list endpoints + tests) · `4e0670a` (C2 pages +
 card links) · `43c5908` (C3 distribution tables redesign + i18n + CSS) ·
 C4 = verify script + live PASS + this entry.
+
+## Session 21 — 2026-06-14 — KPI 7 v2 Segment-Aware Forecast Drill-down (N5)
+
+### Decision 21.1 — Segment-aware per-installment forecast drill-down (N5)
+
+**Background:** The KPI 7 v2 "Dues & Collections — Current Periods" cards
+(Decision 19.1) each show 4 calendar buckets (this_month / this_quarter /
+this_half / this_year) and, within each, three money segments — cleared
+(محصّل فعلياً), pending (شيكات قيد التحصيل), remaining (متبقي). N5 adds a
+drill-down to the individual `rs.installment` rows behind ONE (bucket,
+segment) figure. The orphaned v1 forecast drill-down (forward-looking
+`[today, period_end]` unpaid/partial window), dead since N3 removed the card
+click-through, is removed. Row-level domains proven live in
+`scripts/discover_n5_segment_drilldown.py` (the authority — not re-derived).
+
+**Design (locked):**
+
+1. **ONE endpoint, 12 entry points, one code path:**
+   `GET /api/v1/collections/drilldown/forecast/{bucket}/{segment}`
+   — `bucket ∈ {this_month, this_quarter, this_half, this_year}`,
+   `segment ∈ {cleared, pending, remaining}`; anything else → **422**
+   (FastAPI `Literal` path params + a defensive `ValueError` in the service).
+   All three segments are clickable on all four cards (12 triggers,
+   `data-drilldown-target="forecast-{bucket}-{segment}"`), reusing the
+   EXISTING collections drill-down side panel + installment-row table
+   component — not a new panel. **60/minute** rate limit, matching the sibling
+   collections drill-down endpoints (the N5 prompt said "30/minute (match the
+   other collections endpoints)"; the actual siblings are all 60/minute, so
+   60 is what truly matches — corrected and disclosed).
+
+2. **Base domain** — lifted VERBATIM from `kpi_service._fetch_bucket`
+   (Decision 19.1): `state='post', date ∈ [period_start, period_end]`, NO
+   payment_state filter. Bucket bounds come from the REUSED
+   `_compute_period_bounds()` (Cairo calendar; `rs.installment.date` is a
+   plain date field — no UTC conversion). **Row metric** per segment:
+   cleared → `x_studio_actual_paid_amount`, pending → `paid_amount −
+   x_studio_actual_paid_amount`, remaining → `due_amount`. The sum of the
+   row metric over the full segment set reconciles to the card's segment
+   figure (identity rule, consistent with N2/N4); exposed as
+   `data.segment_total_egp`.
+
+3. **THREE proven row-level domains:**
+   - **cleared** — `base + [("x_studio_actual_paid_amount", ">", 0)]`.
+     Server-side; page via Odoo `offset`/`limit`/`order`; full-set total via
+     `read_group SUM(x_studio_actual_paid_amount)`. No negative-actual rows
+     exist, so this equals the card's `collected_cleared_egp`.
+   - **remaining** — `base + [("due_amount", "!=", 0)]`. Server-side; page
+     via Odoo `offset`/`limit`/`order`; total via `read_group SUM(due_amount)`.
+     **`!= 0`, NOT `> 0`:** exactly one overpayment row (id 93146,
+     `due_amount = −147`) is part of the card's `SUM(due_amount)`; `"> 0"`
+     would under-count this_half / this_year by 147 EGP. `"!= 0"` reconciles
+     to delta 0.00 in all four buckets.
+   - **pending** — **NO native Odoo domain.** The field-to-field comparison
+     `paid_amount > x_studio_actual_paid_amount` is REJECTED by the ORM
+     (`builtins.ValueError`). Resolved by fetching the SERVER-SIDE SUPERSET
+     `base + [("paid_amount", ">", 0)]`, computing `pending = paid − actual`
+     per row, KEEPING rows where `pending > 0`, then computing the total and
+     paginating the FILTERED list IN PYTHON. The largest pending superset
+     (this_year) is modest (~1.4k rows), so a single fetch + in-memory slice
+     is correct and cheap. Computed this way it reconciles to
+     `SUM(paid_amount) − SUM(x_studio_actual_paid_amount)` (delta 0.00).
+
+4. **Pagination** is offset-based (cursor carries `{"offset": n}`, the same
+   scheme as the portfolio drill-down) — uniform across all three segments
+   because the pending page cannot be a pure Odoo offset/limit on the
+   client-filtered set. **Row fields:** `_serialize_forecast_segment_row`
+   reuses `_serialize_row` (so the table renders identically) and adds
+   `partner_id`, `unit_id`, `unit_name` (rs.structure.unit, e.g.
+   "Unit#AF208-20-601"), `segment`, and `segment_metric`.
+
+5. **v1 removal (C1):** removed the route `GET /drilldown/forecast/{bucket}`
+   (`drilldown_forecast`), the service `get_forecast_drilldown`, the orphaned
+   `_BUCKET_URL_TO_INTERNAL` map, the helper `_compute_bucket_ends` (its only
+   live caller was `get_forecast_drilldown`; grep-confirmed orphaned — scripts
+   keep private copies), the schemas `ForecastDrilldownData` /
+   `ForecastDrilldownResponse`, and the 6 dead service tests +
+   `_compute_bucket_ends` derivation test. Frontend `drilldown.js`
+   `_resolveEndpoint` / `_resolveTitle` updated to the segment-aware target
+   `forecast-{bucket}-{segment}` (split on the LAST dash — bucket has an
+   underscore, never a dash); legacy single-segment targets now resolve to
+   null. A first-page list-total banner (`data.segment_total_egp`) notes it
+   equals the card's segment figure. i18n: 5 new keys in en.json + ar.json
+   (parity 394 = 394); Arabic segment names EXACTLY محصّل فعلياً / شيكات قيد
+   التحصيل / متبقي; never «مندوب». `app.css` rebuilt (`.rounded-md`, `.-mx-1\.5`
+   grep-proofed).
+
+**Tests (touched files only — full suite has known Playwright-fixture
+pollution, not chased):** `tests/unit/modules/collections/test_drilldowns.py`
+**63 passed** (12 new: 422 on bad bucket/segment, the three row-metric
+computations, the pending client-filter excl/incl, the remaining `!= 0` with
+the −147 row, serialization, full-set-total-vs-page, offset pagination,
+read-only assert) + `test_kpi_service.py` (123 passed after the
+`_compute_bucket_ends` test removal). Frontend `node tests/frontend/
+test_drilldown.js` **57 passed** (segment-aware resolver + `_parseForecastTarget`).
+
+**Live verification (`scripts/verify_forecast_drilldown_live.py`, run by
+Khaled 2026-06-14 after the Decision 6.4 ritual — python killed / port 8000
+free / __pycache__ purged / uvicorn without --reload): ALL 12 PASS.** For
+each (bucket, segment): TRIPLE AGREEMENT card == list == direct (worst
+delta **0.0000 EGP**), where card = the segment figure from
+`/kpi/expected-forecast`, list = the drill-down's `segment_total_egp`, and
+direct = an independent Odoo recompute over the same proven domain (for
+pending, the same superset + client filter). Spot values (this_month):
+cleared 580,500.00 / pending 15,445,485.00 / remaining 32,766,338.00.
+Largest list this_year/remaining = **3,169 rows** (the `!= 0` domain — the
+−147 overpayment row included). Page-1 pagination sanity green for all 12.
+
+**Constraints honored:** Odoo strictly READ-ONLY (ALLOWED_METHODS untouched;
+service + verify use only `search_read` / `read_group` / `search_count`),
+zero OpenAI calls ($0.00), no git push / no tags (Khaled only), app/ tree
+untouched, the KPI 7 v2 aggregate computation (`_fetch_bucket` / card
+numbers) unchanged.
+
+**Commits:** `453ca3b` (C1 remove orphaned v1 forecast drill-down) ·
+`cb96e2e` (C2 segment-aware endpoint + service + schema + unit tests) ·
+`8473421` (C3 clickable segments + drill-down wiring + i18n + CSS) ·
+C4 = verify script + live PASS + this entry.
