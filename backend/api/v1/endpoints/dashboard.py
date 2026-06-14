@@ -16,6 +16,9 @@ from backend.modules.hr.services.kpi_service import (
     get_payroll_risk_dashboard,
     get_tenure_distribution,
 )
+from backend.modules.marketing_attribution.services.attribution_service import (
+    get_attribution_overview,
+)
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="frontend/templates")
@@ -141,6 +144,30 @@ async def hr_dashboard(
         "attn_expiring_45d": buckets_by_label.get("expiring_45d", 0),
     })
     return templates.TemplateResponse(request, "hr/dashboard.html", ctx)
+
+
+@router.get(
+    "/marketing-attribution/dashboard",
+    response_class=HTMLResponse,
+    summary="Marketing Attribution overview (HTML)",
+    dependencies=[Depends(require_module_html("marketing_attribution"))],
+)
+async def marketing_attribution_dashboard(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Server-side render, mirroring the HR page: call the read-only service and pass the
+    # result straight to the template. No new backend logic — display only.
+    data = await get_attribution_overview()
+    # Remainder = leads with no media buyer by nature (events/expos/organic/place-based).
+    coverage_remainder_pct = round(100 - data["attribution_pct"], 1)
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "marketing_attribution_dashboard",
+        "attr": data,
+        "coverage_remainder_pct": coverage_remainder_pct,
+    })
+    return templates.TemplateResponse(request, "marketing_attribution/dashboard.html", ctx)
 
 
 @router.get(

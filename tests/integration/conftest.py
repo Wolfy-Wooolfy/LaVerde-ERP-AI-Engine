@@ -75,6 +75,20 @@ def coll_ca_client():
 
 
 @pytest.fixture(scope="module")
+def mktattr_only_client():
+    """TestClient authenticated as mktattr_only (modules=['marketing_attribution'])."""
+    with TestClient(app) as c:
+        _ensure_user("mktattr_only", ["marketing_attribution"])
+        r = c.post(
+            "/login",
+            data={"username": "mktattr_only", "password": "testpass"},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, f"mktattr_only login failed: {r.status_code} {r.text[:100]}"
+        yield c
+
+
+@pytest.fixture(scope="module")
 def no_modules_client():
     """TestClient authenticated as no_modules (modules=[])."""
     with TestClient(app) as c:

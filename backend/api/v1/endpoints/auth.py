@@ -22,18 +22,20 @@ def _sanitize_next(next_url: str) -> str:
 
 
 _ORDERED_MODULE_DASHBOARDS: list[tuple[str, str]] = [
-    ("crm",               "/dashboard"),
-    ("hr",                "/hr/dashboard"),
-    ("collections",       "/collections/dashboard"),
-    ("customer_accounts", "/customer-accounts/dashboard"),
+    ("crm",                   "/dashboard"),
+    ("hr",                    "/hr/dashboard"),
+    ("marketing_attribution", "/marketing-attribution/dashboard"),
+    ("collections",           "/collections/dashboard"),
+    ("customer_accounts",     "/customer-accounts/dashboard"),
 ]
 
 _PATH_MODULE_MAP: dict[str, str] = {
-    "/dashboard":         "crm",
-    "/data-quality":      "crm",
-    "/hr":                "hr",
-    "/collections":       "collections",
-    "/customer-accounts": "customer_accounts",
+    "/dashboard":              "crm",
+    "/data-quality":          "crm",
+    "/hr":                    "hr",
+    "/marketing-attribution": "marketing_attribution",
+    "/collections":           "collections",
+    "/customer-accounts":     "customer_accounts",
 }
 
 

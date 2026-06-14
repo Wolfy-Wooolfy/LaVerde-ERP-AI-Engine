@@ -15,10 +15,30 @@ FIX2: TestClient default Accept is */* → hits JSON branch of the 403 handler.
       Status == 403 assertions hold on both branches; only content-type checks need the header.
 """
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+# Minimal valid MarketingAttributionOverview shape for the HTML allowed-path test
+# (patched in so the route does not require an Odoo connection).
+_MKTATTR_MOCK = {
+    "buyers": [],
+    "confirmed_campaigns": [],
+    "pending_campaigns": [],
+    "total_leads_population": 0,
+    "total_attributed": 0,
+    "attribution_pct": 0.0,
+    "is_won_stage_names": [],
+    "config_warnings": [],
+    "integrity_alerts": [],
+    "reference_date": "2026-06-14",
+    "as_of": "2026-06-14T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 0,
+}
 
 
 # ── A. API Module Gating ──────────────────────────────────────────────────────
@@ -150,10 +170,34 @@ class TestHtmlModuleGating:
         r = coll_ca_client.get("/hr/dashboard", headers={"Accept": "text/html"})
         assert r.status_code == 403
 
+    def test_marketing_attribution_html_forbidden_for_hr_only(self, hr_only_client):
+        r = hr_only_client.get(
+            "/marketing-attribution/dashboard", headers={"Accept": "text/html"}
+        )
+        assert r.status_code == 403
+        assert "text/html" in r.headers.get("content-type", "")
+
+    def test_marketing_attribution_html_allowed_for_mktattr_only(self, mktattr_only_client):
+        # Patch the read-only service so the allowed path does not require Odoo.
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_attribution_overview",
+            new=AsyncMock(return_value=_MKTATTR_MOCK),
+        ):
+            r = mktattr_only_client.get("/marketing-attribution/dashboard")
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("content-type", "")
+
+    def test_marketing_attribution_html_forbidden_for_coll_ca(self, coll_ca_client):
+        r = coll_ca_client.get(
+            "/marketing-attribution/dashboard", headers={"Accept": "text/html"}
+        )
+        assert r.status_code == 403
+
     def test_admin_accesses_all_html_modules(self, authed_client):
         for path in [
             "/dashboard",
             "/hr/dashboard",
+            "/marketing-attribution/dashboard",
             "/collections/dashboard",
             "/customer-accounts/dashboard",
         ]:
