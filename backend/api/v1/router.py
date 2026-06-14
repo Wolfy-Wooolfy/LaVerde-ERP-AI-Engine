@@ -8,6 +8,7 @@ from backend.api.v1.endpoints.collections import router as collections_router
 from backend.api.v1.endpoints.customer_accounts import router as customer_accounts_router
 from backend.api.v1.endpoints.dashboard_api import router as dashboard_api_router
 from backend.api.v1.endpoints.hr import router as hr_router
+from backend.api.v1.endpoints.marketing_attribution import router as marketing_attribution_router
 from backend.api.v1.endpoints.metrics_endpoint import router as metrics_router
 from backend.api.v1.endpoints.settings import router as settings_router
 
@@ -42,6 +43,12 @@ api_v1_router.include_router(
 api_v1_router.include_router(
     hr_router,
     dependencies=[Depends(require_module_api("hr"))],
+)
+
+# ── marketing_attribution ─────────────────────────────────────────────────────
+api_v1_router.include_router(
+    marketing_attribution_router,
+    dependencies=[Depends(require_module_api("marketing_attribution"))],
 )
 
 # ── settings (admin-only) ─────────────────────────────────────────────────────
