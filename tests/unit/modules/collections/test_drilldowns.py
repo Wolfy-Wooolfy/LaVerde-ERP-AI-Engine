@@ -22,7 +22,10 @@ from backend.modules.collections.installment_type_names import INSTALLMENT_TYPE_
 from backend.modules.collections.services.drilldown_service import (
     _decode_cursor,
     _encode_cursor,
+    _forecast_segment_metric,
+    _serialize_forecast_segment_row,
     _serialize_row,
+    get_forecast_segment_drilldown,
     get_late_drilldown,
     get_portfolio_drilldown,
     get_project_drilldown,
@@ -51,6 +54,13 @@ _SAMPLE_RG_ROW = {
     "paid_amount": 5_000.0,
     "x_studio_actual_paid_amount": 3_000.0,
     "__count": 5,
+}
+
+# N5 segment drill-down rows carry unit_id + installment_type_id on top of _SAMPLE_ROW.
+_SAMPLE_FORECAST_ROW = {
+    **_SAMPLE_ROW,
+    "installment_type_id": [3, "Regular"],
+    "unit_id": [55, "Unit#AF208-20-601"],
 }
 
 _MOCK_CAIRO_DATE = date(2026, 5, 21)
@@ -647,3 +657,178 @@ def test_req_id_helper_generates_uuid4_hex_when_state_absent() -> None:
     assert re.fullmatch(r"[0-9a-f]{32}", result), (
         f"Expected 32-char lowercase hex UUID4, got {result!r}"
     )
+
+
+# ── Section 8 — N5 segment-aware forecast drill-down ─────────────────────────
+# Domains proven live in scripts/discover_n5_segment_drilldown.py. These unit
+# tests verify the SERVICE logic on a mocked client: param validation, the three
+# row-metric computations, the pending client-side filter, the remaining "!= 0"
+# domain (with the −147 overpayment row), serialization, and pagination.
+
+
+def test_forecast_segment_metric_cleared_is_actual_paid() -> None:
+    rec = {"x_studio_actual_paid_amount": 580_500.0, "paid_amount": 600_000.0, "due_amount": 1_000.0}
+    assert _forecast_segment_metric(rec, "cleared") == pytest.approx(580_500.0)
+
+
+def test_forecast_segment_metric_pending_is_paid_minus_actual() -> None:
+    rec = {"paid_amount": 100_000.0, "x_studio_actual_paid_amount": 30_000.0}
+    assert _forecast_segment_metric(rec, "pending") == pytest.approx(70_000.0)
+
+
+def test_forecast_segment_metric_remaining_is_due_amount() -> None:
+    # The −147 overpayment row (id 93146): remaining metric must be the signed due.
+    rec = {"due_amount": -147.0, "paid_amount": 147.0, "x_studio_actual_paid_amount": 147.0}
+    assert _forecast_segment_metric(rec, "remaining") == pytest.approx(-147.0)
+
+
+def test_serialize_forecast_segment_row_adds_unit_partner_and_metric() -> None:
+    rec = {**_SAMPLE_FORECAST_ROW, "paid_amount": 100_000.0, "x_studio_actual_paid_amount": 30_000.0}
+    row = _serialize_forecast_segment_row(rec, "pending")
+    assert row["segment"] == "pending"
+    assert row["segment_metric"] == pytest.approx(70_000.0)
+    assert row["partner_id"] == 42
+    assert row["unit_id"] == 55
+    assert row["unit_name"] == "Unit#AF208-20-601"
+    # Reused _serialize_row fields still present (table component reuse).
+    assert row["customer_name"] == "Test Customer"
+    assert row["record_id"] == 1001
+
+
+async def test_forecast_segment_invalid_bucket_raises(mc: MagicMock) -> None:
+    mc.execute_kw = AsyncMock()
+    with pytest.raises(ValueError, match="Unknown forecast bucket"):
+        await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_decade", segment="cleared", client=mc
+        )
+    mc.execute_kw.assert_not_called()
+
+
+async def test_forecast_segment_invalid_segment_raises(mc: MagicMock) -> None:
+    mc.execute_kw = AsyncMock()
+    with pytest.raises(ValueError, match="Unknown forecast segment"):
+        await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_month", segment="bananas", client=mc
+        )
+    mc.execute_kw.assert_not_called()
+
+
+async def test_forecast_segment_cleared_happy_path(mc: MagicMock) -> None:
+    # Server-side path: 3 RPCs (search_count, read_group SUM, search_read page).
+    cleared_row = {**_SAMPLE_FORECAST_ROW, "id": 7, "x_studio_actual_paid_amount": 580_500.0}
+    mc.execute_kw = AsyncMock(side_effect=[
+        1,
+        [{"x_studio_actual_paid_amount": 580_500.0, "__count": 1}],
+        [cleared_row],
+    ])
+    with _patch_cairo():
+        result = await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_month", segment="cleared", client=mc
+        )
+
+    assert result["version"] == "1.0"
+    assert result["data"]["bucket"] == "this_month"
+    assert result["data"]["segment"] == "cleared"
+    assert result["data"]["segment_total_egp"] == pytest.approx(580_500.0)
+    assert result["meta"]["total_count"] == 1
+    item = result["data"]["items"][0]
+    assert item["segment_metric"] == pytest.approx(580_500.0)
+    assert item["unit_id"] == 55 and item["partner_id"] == 42
+
+    # cleared domain uses actual_paid > 0
+    domain = _domain_from_search_count(mc)
+    assert ("x_studio_actual_paid_amount", ">", 0) in domain
+    # offset-based pagination: search_read carries offset + limit
+    sr_kwargs = mc.execute_kw.call_args_list[2].kwargs["kwargs"]
+    assert sr_kwargs["offset"] == 0
+    assert sr_kwargs["limit"] == 50
+
+
+async def test_forecast_segment_remaining_uses_not_equal_zero_domain(mc: MagicMock) -> None:
+    # remaining MUST use due_amount != 0 (NOT > 0) so the −147 overpayment row the
+    # card's SUM(due_amount) includes is not dropped.
+    neg_due_row = {**_SAMPLE_FORECAST_ROW, "id": 93146, "due_amount": -147.0}
+    mc.execute_kw = AsyncMock(side_effect=[
+        1,
+        [{"due_amount": -147.0, "__count": 1}],
+        [neg_due_row],
+    ])
+    with _patch_cairo():
+        result = await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_half", segment="remaining", client=mc
+        )
+
+    domain = _domain_from_search_count(mc)
+    assert ("due_amount", "!=", 0) in domain
+    assert ("due_amount", ">", 0) not in domain
+    item = result["data"]["items"][0]
+    assert item["record_id"] == 93146
+    assert item["segment_metric"] == pytest.approx(-147.0)
+    assert result["data"]["segment_total_egp"] == pytest.approx(-147.0)
+
+
+async def test_forecast_segment_pending_client_filter_excludes_equal_includes_greater(mc: MagicMock) -> None:
+    # Pending path: ONE search_read over the paid>0 superset, then client-side filter.
+    # paid > actual → pending > 0 → INCLUDED; paid == actual → pending 0 → EXCLUDED.
+    included = {**_SAMPLE_FORECAST_ROW, "id": 1, "paid_amount": 100_000.0, "x_studio_actual_paid_amount": 40_000.0}
+    excluded = {**_SAMPLE_FORECAST_ROW, "id": 2, "paid_amount": 50_000.0,  "x_studio_actual_paid_amount": 50_000.0}
+    mc.execute_kw = AsyncMock(return_value=[included, excluded])
+    with _patch_cairo():
+        result = await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_month", segment="pending", client=mc
+        )
+
+    # Exactly ONE RPC (the superset search_read) — no server-side segment domain exists.
+    assert mc.execute_kw.call_count == 1
+    superset_domain = mc.execute_kw.call_args_list[0].kwargs["args"][0]
+    assert ("paid_amount", ">", 0) in superset_domain
+
+    ids = [it["record_id"] for it in result["data"]["items"]]
+    assert ids == [1], "paid==actual row must be excluded; only paid>actual included"
+    assert result["meta"]["total_count"] == 1
+    assert result["data"]["segment_total_egp"] == pytest.approx(60_000.0)
+    assert result["data"]["items"][0]["segment_metric"] == pytest.approx(60_000.0)
+
+
+async def test_forecast_segment_pending_total_is_full_set_not_page(mc: MagicMock) -> None:
+    # 60 qualifying pending rows, page_size 50 → page has 50 but the total metric
+    # and total_count reflect the FULL filtered set (identity rule).
+    rows = [
+        {**_SAMPLE_FORECAST_ROW, "id": i, "paid_amount": 1_000.0, "x_studio_actual_paid_amount": 0.0}
+        for i in range(60)
+    ]
+    mc.execute_kw = AsyncMock(return_value=rows)
+    with _patch_cairo():
+        result = await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_year", segment="pending", page_size=50, client=mc
+        )
+    assert result["meta"]["total_count"] == 60
+    assert result["data"]["segment_total_egp"] == pytest.approx(60_000.0)  # 60 × 1,000
+    assert len(result["data"]["items"]) == 50
+    assert result["meta"]["has_next"] is True
+    assert _decode_cursor(result["meta"]["cursor_next"]) == {"offset": 50}
+
+
+async def test_forecast_segment_cleared_pagination_offset_cursor(mc: MagicMock) -> None:
+    page = [{**_SAMPLE_FORECAST_ROW, "id": i} for i in range(50)]
+    mc.execute_kw = AsyncMock(side_effect=[
+        120,
+        [{"x_studio_actual_paid_amount": 1.0, "__count": 120}],
+        page,
+    ])
+    with _patch_cairo():
+        result = await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_year", segment="cleared", page_size=50, client=mc
+        )
+    assert result["meta"]["has_next"] is True
+    assert _decode_cursor(result["meta"]["cursor_next"]) == {"offset": 50}
+    assert len(result["data"]["items"]) == 50
+
+
+async def test_forecast_segment_read_only_assertion_fires_when_violated(mc: MagicMock) -> None:
+    mc.is_read_only = False
+    with pytest.raises(AssertionError):
+        await get_forecast_segment_drilldown(
+            request_id="r", bucket="this_month", segment="cleared", client=mc
+        )
+    mc.execute_kw.assert_not_called()

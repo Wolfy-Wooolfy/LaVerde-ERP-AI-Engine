@@ -119,6 +119,26 @@ class LateDrilldownData(BaseModel):
     items: list[InstallmentRow]
 
 
+class ForecastSegmentRow(InstallmentRow):
+    # KPI 7 v2 segment drill-down row (N5) — InstallmentRow plus the partner id,
+    # the unit reference (rs.structure.unit, e.g. "Unit#AF208-20-601"), and the
+    # per-row SEGMENT METRIC (cleared→actual_paid, pending→paid−actual, remaining→due).
+    partner_id: int
+    unit_id: int
+    unit_name: str
+    segment: Literal["cleared", "pending", "remaining"]
+    segment_metric: float
+
+
+class ForecastSegmentDrilldownData(BaseModel):
+    bucket: Literal["this_month", "this_quarter", "this_half", "this_year"]
+    segment: Literal["cleared", "pending", "remaining"]
+    period_start: str          # period start ISO (1st of month/quarter/half/year)
+    period_end: str            # period end ISO (last day of the period)
+    segment_total_egp: float   # segment metric over the FULL set == card's segment figure
+    items: list[ForecastSegmentRow]
+
+
 class PortfolioDrilldownData(BaseModel):
     customers: list[PortfolioCustomerRow]
 
@@ -138,6 +158,7 @@ class TrendDrilldownData(BaseModel):
 
 
 LateDrilldownResponse = DrilldownEnvelope[LateDrilldownData]
+ForecastSegmentDrilldownResponse = DrilldownEnvelope[ForecastSegmentDrilldownData]
 PortfolioDrilldownResponse = DrilldownEnvelope[PortfolioDrilldownData]
 ProjectDrilldownResponse = DrilldownEnvelope[ProjectDrilldownData]
 TrendDrilldownResponse = DrilldownEnvelope[TrendDrilldownData]

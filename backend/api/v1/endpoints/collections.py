@@ -11,10 +11,11 @@ GET /api/v1/collections/kpi/collection-rate-by-project    — KPI 5b: Collection
 GET /api/v1/collections/kpi/expected-forecast             — KPI 7 v2: Dues & Collections — current periods (Decision 19.1)
 
 Stage 5 — Drill-down endpoints (Decision 14.1–14.12, E1/E2/E3):
-GET /api/v1/collections/drilldown/late                    — KPI 2 late installments
-GET /api/v1/collections/drilldown/portfolio               — KPI 1 customer × project
-GET /api/v1/collections/drilldown/project/{project_id}    — KPI 5 late by project
-GET /api/v1/collections/drilldown/trend/{month}           — KPI 6 installments by month
+GET /api/v1/collections/drilldown/late                            — KPI 2 late installments
+GET /api/v1/collections/drilldown/portfolio                       — KPI 1 customer × project
+GET /api/v1/collections/drilldown/project/{project_id}            — KPI 5 late by project
+GET /api/v1/collections/drilldown/trend/{month}                   — KPI 6 installments by month
+GET /api/v1/collections/drilldown/forecast/{bucket}/{segment}     — KPI 7 v2 segment rows (N5)
 """
 
 import uuid
@@ -29,6 +30,7 @@ from backend.core.exceptions import OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.collections.schemas import (
     ExpectedCollectionsForecastResponse,
+    ForecastSegmentDrilldownResponse,
     LateDrilldownResponse,
     LateUncollectedResponse,
     PortfolioDrilldownResponse,
@@ -36,6 +38,7 @@ from backend.modules.collections.schemas import (
     TrendDrilldownResponse,
 )
 from backend.modules.collections.services.drilldown_service import (
+    get_forecast_segment_drilldown,
     get_late_drilldown,
     get_portfolio_drilldown,
     get_project_drilldown,
@@ -446,6 +449,53 @@ async def drilldown_late(
         return JSONResponse(status_code=503, content=_ERR_503, headers={"X-Request-ID": req_id})
     except Exception:
         logger.error("Drilldown late — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500, headers={"X-Request-ID": req_id})
+
+    response.headers["X-Request-ID"] = req_id
+    return data
+
+
+@router.get(
+    "/drilldown/forecast/{bucket}/{segment}",
+    summary="Drill-down: KPI 7 v2 — per-installment rows behind one (bucket, segment) (paginated, offset cursor)",
+    response_model=ForecastSegmentDrilldownResponse,
+)
+@limiter.limit("60/minute")
+async def drilldown_forecast_segment(
+    request: Request,
+    response: Response,
+    bucket: Literal["this_month", "this_quarter", "this_half", "this_year"],
+    segment: Literal["cleared", "pending", "remaining"],
+    page_size: int = Query(default=50, ge=1, le=200),
+    cursor: Optional[str] = Query(default=None),
+    sort_by: Literal["date", "amount", "due_amount"] = Query(default="date"),
+    sort_dir: Literal["asc", "desc"] = Query(default="desc"),
+    _user: str = Depends(get_current_user),
+) -> dict | JSONResponse:
+    req_id = _req_id(request)
+    try:
+        data = await get_forecast_segment_drilldown(
+            request_id=req_id,
+            bucket=bucket,
+            segment=segment,
+            cursor=cursor,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
+    except ValueError as exc:
+        # Defense-in-depth: the Literal path params already 422 on bad values,
+        # but the service re-validates and we map its ValueError to 422 too.
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": "invalid_param", "message": str(exc)}},
+            headers={"X-Request-ID": req_id},
+        )
+    except OdooQueryError:
+        logger.warning("Drilldown forecast segment — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503, headers={"X-Request-ID": req_id})
+    except Exception:
+        logger.error("Drilldown forecast segment — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500, headers={"X-Request-ID": req_id})
 
     response.headers["X-Request-ID"] = req_id

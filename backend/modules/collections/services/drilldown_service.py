@@ -22,6 +22,7 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError
 from backend.shared.odoo.client import OdooClient
 from backend.modules.collections.services import cache as _cache
+from backend.modules.collections.services.kpi_service import _compute_period_bounds
 from backend.modules.collections.installment_type_names import get_type_name_ar, get_type_name_en
 
 _MODEL = "rs.installment"
@@ -57,6 +58,94 @@ _MAX_PAGE_SIZE = 200
 _VALID_SORT_FIELDS = frozenset({"date", "amount", "due_amount"})
 _VALID_SORT_DIRS   = frozenset({"asc", "desc"})
 _VALID_PROJECT_IDS = frozenset({1, 2, 3})
+
+# ── KPI 7 v2 segment-aware forecast drill-down (Session 21 / N5) ─────────────
+# Per-installment rows behind ONE (bucket, segment) of the "Dues & Collections —
+# Current Periods" cards (Decision 19.1). The three row-level domains below are
+# PROVEN live against Odoo in scripts/discover_n5_segment_drilldown.py — do not
+# re-derive. Buckets reuse kpi_service._compute_period_bounds (Cairo calendar).
+_FORECAST_BUCKETS  = frozenset({"this_month", "this_quarter", "this_half", "this_year"})
+_FORECAST_SEGMENTS = frozenset({"cleared", "pending", "remaining"})
+
+# Odoo field whose read_group SUM equals the card's segment figure — server-side
+# segments only ('pending' has no native domain; see get_forecast_segment_drilldown).
+_SEGMENT_SUM_FIELD: dict[str, str] = {
+    "cleared":   "x_studio_actual_paid_amount",
+    "remaining": "due_amount",
+}
+
+# _DRILL_FIELDS + unit_id (rs.structure.unit, renders like "Unit#AF208-20-601").
+_FORECAST_DRILL_FIELDS: list[str] = _DRILL_FIELDS + ["unit_id"]
+
+
+def _forecast_segment_metric(rec: dict, segment: str) -> float:
+    """Per-row segment value — the number the list sums and shows for the row.
+
+    cleared   → x_studio_actual_paid_amount  (cash + cleared cheques)
+    pending   → paid_amount − x_studio_actual_paid_amount  (postdated pipeline)
+    remaining → due_amount
+    The sum of this metric over the full segment set reconciles to the card's
+    segment figure (identity rule, consistent with N2/N4).
+    """
+    actual = float(rec.get("x_studio_actual_paid_amount") or 0.0)
+    if segment == "cleared":
+        return actual
+    if segment == "remaining":
+        return float(rec.get("due_amount") or 0.0)
+    return float(rec.get("paid_amount") or 0.0) - actual  # pending
+
+
+def _forecast_segment_clause(segment: str) -> Optional[tuple]:
+    """Server-side Odoo domain clause for cleared/remaining; None for pending.
+
+    cleared   : actual_paid > 0   (no negative actual_paid rows exist in the data)
+    remaining : due_amount != 0   (NOT > 0 — the one −147 overpayment row, id 93146,
+                is included in the card's SUM(due_amount); '> 0' would under-count it
+                by 147 EGP in this_half / this_year)
+    pending   : None — the field-to-field comparison paid_amount > actual is rejected
+                by the ORM, so pending is resolved with a client-side filter over a
+                server-side paid_amount>0 superset (see the service docstring).
+    """
+    if segment == "cleared":
+        return ("x_studio_actual_paid_amount", ">", 0)
+    if segment == "remaining":
+        return ("due_amount", "!=", 0)
+    return None
+
+
+def _serialize_forecast_segment_row(rec: dict, segment: str) -> dict:
+    """Serialize one rs.installment row for a forecast SEGMENT drill-down.
+
+    Reuses _serialize_row (so the table component renders identically to the other
+    drill-downs) and adds the partner id, the unit reference, and the per-row
+    SEGMENT METRIC.
+    """
+    row = _serialize_row(rec)
+    partner = rec.get("partner_id")
+    unit    = rec.get("unit_id")
+    row["partner_id"] = int(partner[0]) if isinstance(partner, (list, tuple)) and partner else 0
+    row["unit_id"]    = int(unit[0]) if isinstance(unit, (list, tuple)) and unit else 0
+    row["unit_name"]  = (unit[1] if isinstance(unit, (list, tuple)) and unit else "")
+    row["segment"]        = segment
+    row["segment_metric"] = _forecast_segment_metric(rec, segment)
+    return row
+
+
+def _sort_rows_py(rows: list[dict], sort_by: str, sort_dir: str) -> list[dict]:
+    """Stable Python-side sort for the pending segment (client-filtered set).
+
+    Mirrors the Odoo order `{sort_by} {sort_dir}, id {sort_dir}` so a Python page
+    matches a server page. date sorts lexicographically (ISO strings); amount /
+    due_amount sort numerically; id is the deterministic tiebreaker.
+    """
+    reverse = sort_dir == "desc"
+    if sort_by == "date":
+        def _key(r: dict) -> tuple:
+            return (str(r.get("date") or ""), int(r.get("id") or 0))
+    else:
+        def _key(r: dict) -> tuple:
+            return (float(r.get(sort_by) or 0.0), int(r.get("id") or 0))
+    return sorted(rows, key=_key, reverse=reverse)
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────────────
@@ -256,6 +345,160 @@ async def get_late_drilldown(
                 "today": today,
                 "payment_state": payment_state,
                 "has_pending_cheque": has_pending_cheque,
+            },
+            {"sort_by": sort_by, "sort_dir": sort_dir},
+        ),
+    }
+
+
+async def get_forecast_segment_drilldown(
+    request_id: str,
+    bucket: str,
+    segment: str,
+    cursor: Optional[str] = None,
+    page_size: int = _DEFAULT_PAGE_SIZE,
+    sort_by: str = "date",
+    sort_dir: str = "desc",
+    client: Optional[OdooClient] = None,
+) -> dict:
+    """Paginated per-installment drill-down for ONE KPI 7 v2 (bucket, segment).
+
+    bucket  ∈ {this_month, this_quarter, this_half, this_year}
+    segment ∈ {cleared, pending, remaining}
+
+    Full-period base domain — lifted verbatim from kpi_service._fetch_bucket
+    (Decision 19.1): state=post, date ∈ [period_start, period_end]. Bucket bounds
+    come from the REUSED _compute_period_bounds (Cairo calendar; rs.installment.date
+    is a plain date field, no UTC conversion). NO payment_state filter.
+
+    Per-segment row set (domains proven live — discover_n5_segment_drilldown.py):
+      cleared   : base + [(actual_paid, '>', 0)]  — server-side, Odoo offset/limit.
+                  read_group SUM(actual_paid) == card collected_cleared_egp.
+      remaining : base + [(due_amount, '!=', 0)]  — server-side, Odoo offset/limit.
+                  read_group SUM(due_amount)  == card remaining_egp. '!= 0' (NOT '> 0')
+                  keeps the one −147 overpayment row (id 93146) the card's SUM includes.
+      pending   : NO native Odoo domain — the field-to-field comparison
+                  paid_amount > actual is rejected by the ORM. Fetch the SERVER-SIDE
+                  SUPERSET base + [(paid_amount, '>', 0)], compute paid−actual per row,
+                  KEEP rows where it is > 0, then total and paginate the FILTERED list
+                  IN PYTHON. The this_year pending superset is modest (~1.4k rows), so a
+                  single fetch + in-memory slice is correct and cheap.
+
+    Pagination is offset-based (cursor carries {"offset": n}, the same scheme as the
+    portfolio drill-down) — uniform across all three segments because the pending page
+    cannot be a pure Odoo offset/limit on the client-filtered set.
+
+    data.segment_total_egp is the segment metric summed over the FULL set (not just the
+    page) so the UI can prove list-total == the card's segment figure.
+
+    READ-ONLY: search_read / read_group / search_count only.
+    """
+    if bucket not in _FORECAST_BUCKETS:
+        raise ValueError(
+            f"Unknown forecast bucket: {bucket!r}. Valid: {sorted(_FORECAST_BUCKETS)}"
+        )
+    if segment not in _FORECAST_SEGMENTS:
+        raise ValueError(
+            f"Unknown forecast segment: {segment!r}. Valid: {sorted(_FORECAST_SEGMENTS)}"
+        )
+
+    _own_client = client is None
+    _client = client or OdooClient()
+    assert _client.is_read_only  # Rule R10 (Decision 14.10)
+    _log = logger.bind(request_id=request_id)
+
+    page_size = _clamp_page_size(page_size)
+    sort_by, sort_dir = _normalize_sort(sort_by, sort_dir)
+
+    today_cairo = datetime.now(_LA_VERDE_TZ).date()
+    start, end = _compute_period_bounds(today_cairo)[bucket]
+    base_domain: list = [
+        ("state", "=", "post"),
+        ("date", ">=", start.isoformat()),
+        ("date", "<=", end.isoformat()),
+    ]
+
+    offset = 0
+    if cursor:
+        cur = _decode_cursor(cursor)
+        offset = max(0, int(cur.get("offset", 0) or 0))
+
+    order = _odoo_order(sort_by, sort_dir)
+    t0 = time.monotonic()
+    try:
+        if segment == "pending":
+            # No native domain — fetch the paid>0 superset and filter/paginate in Python.
+            superset = base_domain + [("paid_amount", ">", 0)]
+            rows = await _client.execute_kw(
+                _MODEL, "search_read",
+                args=[superset, _FORECAST_DRILL_FIELDS],
+                kwargs={"order": "id asc"},
+            )
+            filtered = [
+                r for r in rows
+                if (float(r.get("paid_amount") or 0.0)
+                    - float(r.get("x_studio_actual_paid_amount") or 0.0)) > 0
+            ]
+            filtered = _sort_rows_py(filtered, sort_by, sort_dir)
+            total_count  = len(filtered)
+            total_metric = sum(_forecast_segment_metric(r, "pending") for r in filtered)
+            page_rows = filtered[offset: offset + page_size]
+        else:
+            domain    = base_domain + [_forecast_segment_clause(segment)]
+            sum_field = _SEGMENT_SUM_FIELD[segment]
+            await _client.authenticate()  # pre-auth before concurrent RPCs
+            total_count, agg_rows, page_rows = await asyncio.gather(
+                _client.execute_kw(_MODEL, "search_count", args=[domain]),
+                _client.execute_kw(
+                    _MODEL, "read_group",
+                    args=[domain, [sum_field], []],
+                    kwargs={"lazy": False},
+                ),
+                _client.execute_kw(
+                    _MODEL, "search_read",
+                    args=[domain, _FORECAST_DRILL_FIELDS],
+                    kwargs={"limit": page_size, "offset": offset, "order": order},
+                ),
+            )
+            total_count  = int(total_count or 0)
+            agg_row      = agg_rows[0] if agg_rows else {}
+            total_metric = float(agg_row.get(sum_field) or 0.0)
+    except Exception as exc:
+        raise OdooQueryError(
+            f"Forecast segment drill-down ({bucket}/{segment}) failed: {exc}"
+        ) from exc
+    finally:
+        if _own_client:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+    _log.info(
+        f"Forecast segment drill-down ({bucket}/{segment}): {total_count} total, "
+        f"metric {total_metric:,.2f} EGP in {rpc_ms}ms"
+    )
+
+    items    = [_serialize_forecast_segment_row(r, segment) for r in page_rows]
+    has_next = (offset + page_size) < total_count
+    next_cur = _encode_cursor({"offset": offset + page_size}) if has_next else None
+
+    return {
+        "version": "1.0",
+        "data": {
+            "bucket":            bucket,
+            "segment":           segment,
+            "period_start":      start.isoformat(),
+            "period_end":        end.isoformat(),
+            "segment_total_egp": total_metric,
+            "items":             items,
+        },
+        "meta": _build_meta(
+            request_id, rpc_ms, page_size, total_count,
+            cursor, next_cur, has_next,
+            {
+                "bucket":       bucket,
+                "segment":      segment,
+                "period_start": start.isoformat(),
+                "period_end":   end.isoformat(),
             },
             {"sort_by": sort_by, "sort_dir": sort_dir},
         ),
