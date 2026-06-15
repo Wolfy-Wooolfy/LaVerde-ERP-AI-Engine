@@ -19,6 +19,7 @@
   "Logout": "Logout",
   "Coming soon": "Coming soon",
   "Modules": "Modules",
+  "Marketing": "Marketing",
 
   "Total Leads": "Total Leads",
   "Follow-ups Today": "Follow-ups Today",
@@ -451,5 +452,26 @@
   "mktattr_dominant_buyer": "Dominant buyer",
   "mktattr_config_note": "Configuration notes",
   "mktattr_won_stages": "Purchase stages",
-  "mktattr_footer_note": "Every figure live from Odoo · read-only · campaign-driven attribution"
+  "mktattr_footer_note": "Every figure live from Odoo · read-only · campaign-driven attribution",
+
+  "campperf_title": "Campaign Performance",
+  "campperf_subtitle": "Lead generation & conversion by campaign — not ROI. No spend or revenue exist in Odoo, so this view counts leads and outcomes only.",
+  "campperf_dq_title": "Data quality",
+  "campperf_dq_caption": "Surfaced separately — these are not campaigns and are excluded from the list below.",
+  "campperf_dq_junk_label": "Untracked (campaign “None”)",
+  "campperf_dq_junk_desc": "Leads whose UTM campaign is literally the word “None”.",
+  "campperf_dq_no_campaign_label": "No campaign set",
+  "campperf_dq_no_campaign_desc": "Leads with no campaign at all.",
+  "campperf_of_population": "of all leads",
+  "campperf_list_title": "Campaigns by lead volume",
+  "campperf_list_caption": "ordered by lead volume — highest first",
+  "campperf_confirmed_badge": "Confirmed",
+  "campperf_mixed": "Spread across several buyers",
+  "campperf_no_buyer": "No media buyer",
+  "campperf_excluded_channel": "Channel (not a media buyer)",
+  "campperf_show_all": "Show all campaigns",
+  "campperf_show_less": "Show fewer",
+  "campperf_long_tail_suffix": "smaller campaigns",
+  "campperf_long_tail_caption": "below the listing threshold",
+  "campperf_footer_note": "Every figure live from Odoo · read-only · counts and percentages only — no ROI"
 }

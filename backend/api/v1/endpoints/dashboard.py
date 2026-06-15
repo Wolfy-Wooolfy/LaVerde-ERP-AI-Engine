@@ -16,6 +16,9 @@ from backend.modules.hr.services.kpi_service import (
     get_payroll_risk_dashboard,
     get_tenure_distribution,
 )
+from backend.modules.campaign_performance.services.campaign_service import (
+    get_campaign_performance_overview,
+)
 from backend.modules.marketing_attribution.services.attribution_service import (
     get_attribution_overview,
 )
@@ -168,6 +171,28 @@ async def marketing_attribution_dashboard(
         "coverage_remainder_pct": coverage_remainder_pct,
     })
     return templates.TemplateResponse(request, "marketing_attribution/dashboard.html", ctx)
+
+
+@router.get(
+    "/campaign-performance/dashboard",
+    response_class=HTMLResponse,
+    summary="Campaign Performance overview (HTML)",
+    dependencies=[Depends(require_module_html("campaign_performance"))],
+)
+async def campaign_performance_dashboard(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Server-side render, mirroring the marketing-attribution page: call the read-only
+    # service and hand the result straight to the template. No new backend logic and no
+    # new Odoo calls — display only of the per-campaign funnel overview.
+    data = await get_campaign_performance_overview()
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "campaign_performance_dashboard",
+        "campperf": data,
+    })
+    return templates.TemplateResponse(request, "campaign_performance/dashboard.html", ctx)
 
 
 @router.get(

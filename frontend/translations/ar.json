@@ -19,6 +19,7 @@
   "Logout": "تسجيل الخروج",
   "Coming soon": "قريباً",
   "Modules": "الوحدات",
+  "Marketing": "التسويق",
 
   "Total Leads": "إجمالي الفرص",
   "Follow-ups Today": "متابعات اليوم",
@@ -451,5 +452,26 @@
   "mktattr_dominant_buyer": "الميديا باير الأغلب",
   "mktattr_config_note": "ملاحظات الإعداد",
   "mktattr_won_stages": "مراحل الشراء",
-  "mktattr_footer_note": "كل رقم مباشر من Odoo · للقراءة فقط · إسناد مبني على الحملات"
+  "mktattr_footer_note": "كل رقم مباشر من Odoo · للقراءة فقط · إسناد مبني على الحملات",
+
+  "campperf_title": "أداء الحملات",
+  "campperf_subtitle": "توليد وتحويل العملاء المحتملين حسب الحملة — وليس العائد على الإنفاق. لا يوجد إنفاق أو إيراد في Odoo، لذلك تعرض هذه الصفحة الأعداد والنتائج فقط.",
+  "campperf_dq_title": "جودة البيانات",
+  "campperf_dq_caption": "معروضة بشكل منفصل — هذه ليست حملات، ومستبعَدة من القائمة أدناه.",
+  "campperf_dq_junk_label": "غير متتبَّع (حملة باسم “None”)",
+  "campperf_dq_junk_desc": "عملاء محتملون حملتهم في UTM هي حرفياً كلمة “None”.",
+  "campperf_dq_no_campaign_label": "بدون حملة",
+  "campperf_dq_no_campaign_desc": "عملاء محتملون بلا أي حملة على الإطلاق.",
+  "campperf_of_population": "من كل العملاء المحتملين",
+  "campperf_list_title": "الحملات حسب حجم العملاء المحتملين",
+  "campperf_list_caption": "مرتبة حسب حجم العملاء المحتملين — الأعلى أولاً",
+  "campperf_confirmed_badge": "مؤكد",
+  "campperf_mixed": "موزّع على عدة بايرز",
+  "campperf_no_buyer": "بلا ميديا باير",
+  "campperf_excluded_channel": "قناة (وليست ميديا باير)",
+  "campperf_show_all": "عرض كل الحملات",
+  "campperf_show_less": "عرض أقل",
+  "campperf_long_tail_suffix": "حملة أصغر",
+  "campperf_long_tail_caption": "تحت حد العرض في القائمة",
+  "campperf_footer_note": "كل رقم مباشر من Odoo · للقراءة فقط · أعداد ونِسب فقط — بلا عائد على الإنفاق"
 }

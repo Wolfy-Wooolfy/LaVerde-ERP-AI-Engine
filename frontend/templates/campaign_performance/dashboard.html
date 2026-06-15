@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t("campperf_title") }} — LaVerde ERP AI Engine{% endblock %}
+{% block page_title %}{{ _t("campperf_title") }}{% endblock %}
+
+{% block content %}
+{# Top 15 campaigns shown by default; the rest reveal behind the Alpine expander. #}
+{% set visible_count = 15 %}
+<div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto" x-data="{ showAll: false }">
+
+  {# ── 1. HEADER + HONEST SUBTITLE ─────────────────────────────────────────── #}
+  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2.5 mb-1">
+        <span class="live-dot bg-primary-500" style="--pulse-color: rgba(99, 102, 241, 0.6);"></span>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
+          La Verde &mdash; {{ _t("campperf_title") }}
+        </h1>
+      </div>
+      {# Honest framing: this is lead-gen & conversion BY CAMPAIGN — not ROI. #}
+      <p class="text-sm text-neutral-500 dark:text-neutral-400 max-w-3xl leading-relaxed">
+        {{ _t("campperf_subtitle") }}
+      </p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+        {{ _t("mktattr_as_of") }} {{ campperf.reference_date }} &middot; {{ campperf.cache_status }}
+      </p>
+    </div>
+    <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono sm:text-right rtl:sm:text-left sm:pt-1 shrink-0">
+      {{ campperf.rpc_duration_ms }} ms &middot; {{ _t("mktattr_live_rpc") }}
+    </div>
+  </div>
+
+  {# ── 2. INTEGRITY ALERTS / CONFIG WARNINGS — LOUD when present (empty today) ─ #}
+  {% if campperf.integrity_alerts | length > 0 %}
+  <div class="bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-xl px-5 py-4">
+    <div class="flex items-center gap-2 mb-2">
+      <svg class="w-4 h-4 text-danger-600 dark:text-danger-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+      </svg>
+      <h3 class="text-sm font-semibold text-danger-700 dark:text-danger-300">{{ _t("mktattr_integrity_alerts") }}</h3>
+    </div>
+    <ul class="space-y-1 ms-6 list-disc">
+      {% for alert in campperf.integrity_alerts %}
+      <li class="text-xs text-danger-700 dark:text-danger-300">{{ alert }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if campperf.config_warnings | length > 0 %}
+  <div class="px-1">
+    <p class="text-xs font-semibold text-neutral-400 dark:text-neutral-500 mb-1">{{ _t("mktattr_config_note") }}</p>
+    <ul class="space-y-0.5 ms-4 list-disc">
+      {% for w in campperf.config_warnings %}
+      <li class="text-xs text-neutral-400 dark:text-neutral-500">{{ w }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {# ── 3. DATA-QUALITY STRIP — honest & visible, NOT mixed into the list ─────── #}
+  {% set dq = campperf.data_quality %}
+  {% if dq.junk_none or dq.no_campaign %}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-warning-200 dark:border-warning-900/60 shadow-card">
+    <div class="px-6 pt-5 pb-3 border-b border-neutral-100 dark:border-neutral-700">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-warning-500 dark:text-warning-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/>
+        </svg>
+        <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("campperf_dq_title") }}</h2>
+      </div>
+      <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400 ms-6">{{ _t("campperf_dq_caption") }}</p>
+    </div>
+    <div class="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x rtl:sm:divide-x-reverse divide-neutral-100 dark:divide-neutral-700">
+
+      {% if dq.junk_none %}
+      <div class="flex items-start justify-between gap-3 px-6 py-4">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{{ _t("campperf_dq_junk_label") }}</p>
+          <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed">{{ _t("campperf_dq_junk_desc") }}</p>
+        </div>
+        <div class="shrink-0 text-right rtl:text-left">
+          <p class="text-2xl font-bold font-mono tabular-nums text-neutral-700 dark:text-neutral-300 leading-none">{{ "{:,}".format(dq.junk_none.lead_count) }}</p>
+          <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+            {% if campperf.total_leads_population %}&approx; {{ (100.0 * dq.junk_none.lead_count / campperf.total_leads_population) | round(1) }}%{% endif %}
+            {{ _t("campperf_of_population") }}
+          </p>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if dq.no_campaign %}
+      <div class="flex items-start justify-between gap-3 px-6 py-4">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{{ _t("campperf_dq_no_campaign_label") }}</p>
+          <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed">{{ _t("campperf_dq_no_campaign_desc") }}</p>
+        </div>
+        <div class="shrink-0 text-right rtl:text-left">
+          <p class="text-2xl font-bold font-mono tabular-nums text-neutral-700 dark:text-neutral-300 leading-none">{{ "{:,}".format(dq.no_campaign.lead_count) }}</p>
+          <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+            {% if campperf.total_leads_population %}&approx; {{ (100.0 * dq.no_campaign.lead_count / campperf.total_leads_population) | round(1) }}%{% endif %}
+            {{ _t("campperf_of_population") }}
+          </p>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── 4. CAMPAIGN LIST — sorted by lead volume desc ───────────────────────── #}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card">
+
+    <div class="px-6 pt-5 pb-4 border-b border-neutral-100 dark:border-neutral-700">
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("campperf_list_title") }}</h2>
+      <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+        {{ "{:,}".format(campperf.listed_campaign_count) }} &middot; {{ _t("campperf_list_caption") }}
+      </p>
+    </div>
+
+    <div class="px-6 py-5 space-y-5">
+
+      {% if campperf.campaigns | length == 0 %}
+      <div class="flex flex-col items-center justify-center py-10 text-center">
+        <svg class="w-10 h-10 text-neutral-300 dark:text-neutral-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ _t("mktattr_no_buyers") }}</p>
+      </div>
+      {% endif %}
+
+      {# One card per campaign, in the API's returned order (lead volume desc). Rows
+         beyond the top 15 are hidden until the expander toggles showAll — the inline
+         display:none prevents a pre-Alpine flash. #}
+      {% for c in campperf.campaigns %}
+      <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"
+           {% if loop.index > visible_count %}x-show="showAll" style="display: none;"{% endif %}>
+
+        {# Header: campaign name + media-buyer cell · lead count #}
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate" title="{{ c.campaign_name }}">{{ c.campaign_name }}</p>
+            <div class="mt-1 flex items-center gap-1.5 flex-wrap min-w-0">
+              {% set st = c.attribution_status %}
+              {% if st == "confirmed" %}
+                <span class="text-xs font-medium text-neutral-700 dark:text-neutral-300 truncate" title="{{ c.media_buyer_name }}">{{ c.media_buyer_name }}</span>
+                <span class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-success-50 dark:bg-success-900/30 text-success-700 dark:text-success-400">{{ _t("campperf_confirmed_badge") }}</span>
+              {% elif st == "dominant" %}
+                <span class="text-xs font-medium text-neutral-700 dark:text-neutral-300 truncate" title="{{ c.media_buyer_name }}">{{ c.media_buyer_name }}</span>
+                <span class="text-[10px] font-mono tabular-nums text-neutral-400 dark:text-neutral-500">{{ c.concentration | round(0) | int }}%</span>
+              {% elif st == "mixed" %}
+                <span class="text-xs italic text-neutral-400 dark:text-neutral-500">{{ _t("campperf_mixed") }}</span>
+              {% elif st == "no_buyer" %}
+                <span class="text-xs text-neutral-400 dark:text-neutral-500">{{ _t("campperf_no_buyer") }}</span>
+              {% elif st == "excluded_channel" %}
+                <span class="text-xs text-neutral-400 dark:text-neutral-500" title="{{ _t('campperf_excluded_channel') }}">&mdash;</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="shrink-0 text-right rtl:text-left">
+            <p class="text-2xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 leading-none">{{ "{:,}".format(c.lead_count) }}</p>
+            <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("mktattr_leads") }}</p>
+          </div>
+        </div>
+
+        {# 4-segment outcome bar. Segment widths = each group's % of this campaign's
+           leads. flex-row reverses automatically under dir=rtl. #}
+        <div class="h-5 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-3">
+          {% for o in c.outcomes %}
+            {% if o.group == "جديد" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("mktattr_group_new") %}
+            {% elif o.group == "مهتم" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("mktattr_group_interested") %}
+            {% elif o.group == "اشترى" %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("mktattr_group_bought") %}
+            {% elif o.group == "بلا نتيجة" %}{% set seg_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set lbl = _t("mktattr_group_noresult") %}
+            {% else %}{% set seg_cls = "bg-neutral-400" %}{% set lbl = o.group %}{% endif %}
+            {% if o.pct > 0 %}
+            <div class="h-full {{ seg_cls }}" style="width: {{ o.pct }}%;"
+                 title="{{ lbl }}: {{ o.pct | round(1) }}% · {{ o.count }}"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+
+        {# Legend — BOTH % and count per segment. Khaled's rule: % first, count after,
+           so اشترى stays legible even when its bar segment is a sliver. #}
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {% for o in c.outcomes %}
+            {% if o.group == "جديد" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("mktattr_group_new") %}
+            {% elif o.group == "مهتم" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("mktattr_group_interested") %}
+            {% elif o.group == "اشترى" %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("mktattr_group_bought") %}
+            {% elif o.group == "بلا نتيجة" %}{% set dot_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set lbl = _t("mktattr_group_noresult") %}
+            {% else %}{% set dot_cls = "bg-neutral-400" %}{% set lbl = o.group %}{% endif %}
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-sm shrink-0 {{ dot_cls }}"></span>
+                <span class="text-xs text-neutral-500 dark:text-neutral-400 truncate" title="{{ lbl }}">{{ lbl }}</span>
+              </div>
+              <p class="mt-1 ms-4">
+                <span class="text-base font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ o.pct | round(1) }}%</span>
+                <span class="text-xs text-neutral-400 dark:text-neutral-500 ms-1">{{ "{:,}".format(o.count) }}</span>
+              </p>
+            </div>
+          {% endfor %}
+        </div>
+
+      </div>
+      {% endfor %}
+
+      {# Expander — reveals every listed campaign beyond the top 15. #}
+      {% if campperf.campaigns | length > visible_count %}
+      <div class="pt-1">
+        <button @click="showAll = !showAll"
+          class="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg
+                 border border-dashed border-neutral-200 dark:border-neutral-700
+                 text-xs font-medium text-primary-600 dark:text-primary-400
+                 hover:border-primary-300 dark:hover:border-primary-700
+                 hover:bg-primary-50/50 dark:hover:bg-primary-900/10 transition-colors">
+          <svg class="w-3.5 h-3.5 transition-transform" :class="showAll ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+          <span x-show="!showAll">{{ _t("campperf_show_all") }} ({{ "{:,}".format(campperf.campaigns | length) }})</span>
+          <span x-show="showAll">{{ _t("campperf_show_less") }}</span>
+        </button>
+      </div>
+      {% endif %}
+
+      {# Long tail — ONE de-emphasized summary row for every campaign below threshold. #}
+      {% if campperf.long_tail %}
+      {% set lt = campperf.long_tail %}
+      <div class="rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 bg-neutral-50/60 dark:bg-neutral-800/40 px-4 py-3">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm text-neutral-500 dark:text-neutral-400">
+              + {{ "{:,}".format(lt.campaign_count) }} {{ _t("campperf_long_tail_suffix") }}
+            </p>
+            <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">
+              {{ _t("campperf_long_tail_caption") }} &middot; &lt; {{ "{:,}".format(campperf.min_lead_threshold) }} {{ _t("mktattr_leads") }}
+            </p>
+          </div>
+          <div class="shrink-0 text-right rtl:text-left">
+            <p class="text-lg font-bold font-mono tabular-nums text-neutral-500 dark:text-neutral-400 leading-none">{{ "{:,}".format(lt.lead_count) }}</p>
+            <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("mktattr_leads") }}</p>
+          </div>
+        </div>
+        {# Thin, de-emphasized aggregate bar (no full legend — this is a summary row). #}
+        <div class="h-2 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mt-3 opacity-70">
+          {% for o in lt.outcomes %}
+            {% if o.group == "جديد" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("mktattr_group_new") %}
+            {% elif o.group == "مهتم" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("mktattr_group_interested") %}
+            {% elif o.group == "اشترى" %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("mktattr_group_bought") %}
+            {% elif o.group == "بلا نتيجة" %}{% set seg_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set lbl = _t("mktattr_group_noresult") %}
+            {% else %}{% set seg_cls = "bg-neutral-400" %}{% set lbl = o.group %}{% endif %}
+            {% if o.pct > 0 %}
+            <div class="h-full {{ seg_cls }}" style="width: {{ o.pct }}%;"
+                 title="{{ lbl }}: {{ o.pct | round(1) }}% · {{ o.count }}"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+
+  {# ── 5. FOOTER ──────────────────────────────────────────────────────────── #}
+  <footer class="pt-4 pb-2 border-t border-neutral-200 dark:border-neutral-700 space-y-1">
+    {% if campperf.is_won_stage_names | length > 0 %}
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      {{ _t("mktattr_won_stages") }}: {{ campperf.is_won_stage_names | join(" · ") }}
+    </p>
+    {% endif %}
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      {{ _t("campperf_footer_note") }}
+      &middot; {{ _t("mktattr_as_of") }} {{ campperf.as_of }}
+      &middot; {{ campperf.cache_status }}
+    </p>
+  </footer>
+
+</div>
+{% endblock %}
