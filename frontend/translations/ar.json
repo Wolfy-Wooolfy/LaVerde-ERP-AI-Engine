@@ -427,7 +427,8 @@
   "settings.error.self_lockout_demote": "لا يمكنك إزالة صلاحية الإدارة من حسابك.",
   "settings.error.last_admin": "لا يمكن إزالة المسؤول الأخير النشط.",
 
-  "mktattr_title": "إسناد التسويق",
+  "mktattr_title": "أداء موظفي الميديا باير",
+  "nav_mktattr": "الميديا باير",
   "mktattr_as_of": "حتى تاريخ",
   "mktattr_live_rpc": "استعلام مباشر للقراءة فقط",
   "mktattr_coverage_label": "تغطية الإسناد",
@@ -454,7 +455,8 @@
   "mktattr_won_stages": "مراحل الشراء",
   "mktattr_footer_note": "كل رقم مباشر من Odoo · للقراءة فقط · إسناد مبني على الحملات",
 
-  "campperf_title": "أداء الحملات",
+  "campperf_title": "أداء الحملات التسويقية",
+  "nav_campperf": "الحملات التسويقية",
   "campperf_subtitle": "توليد وتحويل العملاء المحتملين حسب الحملة — وليس العائد على الإنفاق. لا يوجد إنفاق أو إيراد في Odoo، لذلك تعرض هذه الصفحة الأعداد والنتائج فقط.",
   "campperf_dq_title": "جودة البيانات",
   "campperf_dq_caption": "معروضة بشكل منفصل — هذه ليست حملات، ومستبعَدة من القائمة أدناه.",
@@ -489,6 +491,6 @@
   "campperf_timeline_maturation_neglected": "مهملة",
   "campperf_timeline_maturation_too_early": "بدري للتقييم",
   "campperf_timeline_no_leads": "لا عملاء محتملين هذا الشهر",
-  "campperf_timeline_legacy_days": "أيام هجرة مستبعدة",
-  "campperf_timeline_footer": "بدون هجرة نوفمبر · الفانل = الحالة الحالية للـ leads اللي دخلت في الشهر (Odoo مايحتفظش بتاريخ المراحل)"
+  "campperf_timeline_legacy_days": "بيانات نوفمبر 2025 فيها ترحيل دفعة واحدة من نظام CRM قديم — مش نشاط تسويقي فعلي، ومستبعدة من المخطط الزمني.",
+  "campperf_timeline_footer": "الفانل = الحالة الحالية للـ leads اللي دخلت في الشهر (Odoo مايحتفظش بتاريخ المراحل)"
 }
