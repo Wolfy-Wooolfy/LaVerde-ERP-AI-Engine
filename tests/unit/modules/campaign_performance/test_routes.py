@@ -15,8 +15,12 @@ from backend.api.deps import get_current_user
 from backend.auth.models import UserRecord
 from backend.core.exceptions import OdooQueryError
 from backend.main import app
+from backend.modules.campaign_performance.services.timeline_service import (
+    CampaignNotFoundError,
+)
 
 _URL = "/api/v1/campaign-performance/overview"
+_TIMELINE_URL = "/api/v1/campaign-performance/timeline"
 
 _TESTADMIN_RECORD = UserRecord(
     username="testadmin", password_hash="", modules=["*"],
@@ -205,6 +209,136 @@ def test_200_with_scoped_module_grant() -> None:
         ):
             r = c.get(_URL)
         assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+# ── /timeline (Level 2) ─────────────────────────────────────────────────────
+
+
+def _tl_outcomes(new=0, intr=0, won=0, nores=0) -> list[dict]:
+    total = new + intr + won + nores
+    pct = lambda n: round(100.0 * n / total, 2) if total else 0.0
+    return [
+        {"group": "جديد", "count": new, "pct": pct(new)},
+        {"group": "مهتم", "count": intr, "pct": pct(intr)},
+        {"group": "اشترى", "count": won, "pct": pct(won)},
+        {"group": "بلا نتيجة", "count": nores, "pct": pct(nores)},
+    ]
+
+
+_MOCK_TIMELINE = {
+    "header": {
+        "campaign_id": 10,
+        "campaign_name": "FB-AY",
+        "total_leads_in_window": 12,
+        "attribution_status": "confirmed",
+        "media_buyer_id": 101,
+        "media_buyer_name": "Ahmed Aymen",
+        "concentration": 100.0,
+        "both_set_count": 100,
+    },
+    "trend": [
+        {"month": "2026-01", "lead_count": 0},
+        {"month": "2026-02", "lead_count": 2},
+        {"month": "2026-03", "lead_count": 0},
+        {"month": "2026-04", "lead_count": 3},
+        {"month": "2026-05", "lead_count": 4},
+        {"month": "2026-06", "lead_count": 5},
+    ],
+    "periods": [
+        {"month": "2026-04", "lead_count": 3, "outcomes": _tl_outcomes(new=1, intr=1, nores=1), "maturation_state": "normal"},
+        {"month": "2026-05", "lead_count": 4, "outcomes": _tl_outcomes(new=4), "maturation_state": "too_early"},
+        {"month": "2026-06", "lead_count": 5, "outcomes": _tl_outcomes(new=5), "maturation_state": "too_early"},
+    ],
+    "window_months": 3,
+    "trend_months": 6,
+    "window_start_month": "2026-04",
+    "window_end_month": "2026-06",
+    "legacy_days_excluded": ["2025-11-15", "2025-11-16", "2025-11-26"],
+    "reference_date": "2026-06-16",
+    "as_of": "2026-06-16T10:00:00+00:00",
+    "config_warnings": [],
+    "integrity_alerts": [],
+    "cache_status": "fresh",
+    "rpc_duration_ms": 33,
+}
+
+
+def test_timeline_returns_200_and_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_timeline",
+        new=AsyncMock(return_value=_MOCK_TIMELINE),
+    ):
+        r = client.get(_TIMELINE_URL, params={"campaign_id": 10, "months": 3})
+
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "header", "trend", "periods", "window_months", "trend_months",
+        "window_start_month", "window_end_month", "legacy_days_excluded",
+        "reference_date", "as_of", "config_warnings", "integrity_alerts",
+        "cache_status", "rpc_duration_ms",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+    assert body["header"]["campaign_id"] == 10
+    assert body["header"]["attribution_status"] == "confirmed"
+    assert len(body["trend"]) == 6
+    assert [p["month"] for p in body["periods"]] == ["2026-04", "2026-05", "2026-06"]
+    assert body["periods"][0]["outcomes"][0]["group"] == "جديد"
+    # cache headers
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_timeline_404_when_campaign_unknown(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_timeline",
+        new=AsyncMock(side_effect=CampaignNotFoundError("no such campaign")),
+    ):
+        r = client.get(_TIMELINE_URL, params={"campaign_id": 999999})
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "campaign_not_found"
+
+
+def test_timeline_503_on_odoo_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_timeline",
+        new=AsyncMock(side_effect=OdooQueryError("connection refused")),
+    ):
+        r = client.get(_TIMELINE_URL, params={"campaign_id": 10})
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+def test_timeline_422_on_bad_months(client: TestClient) -> None:
+    """months out of [1, 12] is rejected by FastAPI query validation (no handler call)."""
+    r = client.get(_TIMELINE_URL, params={"campaign_id": 10, "months": 99})
+    assert r.status_code == 422
+
+
+def test_timeline_422_on_missing_campaign_id(client: TestClient) -> None:
+    r = client.get(_TIMELINE_URL)
+    assert r.status_code == 422
+
+
+def test_timeline_401_when_unauthenticated() -> None:
+    """No session → 401, before the handler body runs (campaign_id provided so it is
+    the auth gate, not query validation, that triggers)."""
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_TIMELINE_URL, params={"campaign_id": 10})
+    assert r.status_code == 401
+
+
+def test_timeline_403_without_module_grant() -> None:
+    """Authenticated but lacking the campaign_performance module → 403."""
+    c = _client_with(_OTHER_MODULE_RECORD)
+    try:
+        r = c.get(_TIMELINE_URL, params={"campaign_id": 10})
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         if hasattr(app.state, "user_repo"):

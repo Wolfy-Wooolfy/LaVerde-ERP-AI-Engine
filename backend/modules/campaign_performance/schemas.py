@@ -63,6 +63,60 @@ class DataQuality(BaseModel):
     no_campaign: Optional[DataQualityBucket]  # leads with campaign_id=False (genuinely campaign-less)
 
 
+# ── Level 2 — per-campaign timeline (period-level / month) ────────────────────
+# Drill into ONE campaign and see its leads grouped over Cairo-local months: a
+# lightweight volume trend, plus a full 4-group funnel + a DERIVED maturation
+# state per recent month. The legacy CRM migration (Cairo days >= LEGACY_DAY_MIN
+# leads) is excluded from every figure. Reuses OutcomeGroup + AttributionStatus.
+#
+# NOTE on maturation (discovery §F.5): Odoo keeps NO per-stage history and NO
+# date_won, so there is no true conversion-over-time curve. Each month's funnel is
+# the CURRENT stage breakdown of the leads that AROSE that month; maturation_state
+# is a DERIVED heuristic from the month's age + its جديد share, not a measurement.
+
+
+class CampaignTimelineHeader(BaseModel):
+    campaign_id: int
+    campaign_name: str
+    total_leads_in_window: int            # Σ of the funnel periods' lead_count (windowed, post-migration)
+    attribution_status: AttributionStatus
+    media_buyer_id: Optional[int]         # populated iff a buyer is shown (confirmed/dominant)
+    media_buyer_name: Optional[str]
+    concentration: Optional[float]        # 0.0–100.0 dominant both-set share; None when no buyer shown
+    both_set_count: int                   # ALL-TIME leads with BOTH campaign_id AND media_buyer_id (matches Level 1)
+
+
+class TimelineTrendPoint(BaseModel):
+    month: str                            # Cairo-local "YYYY-MM"
+    lead_count: int                       # post-migration lead volume that arose this month (0-filled)
+
+
+class TimelinePeriod(BaseModel):
+    month: str                            # Cairo-local "YYYY-MM"
+    lead_count: int                       # post-migration leads that arose this month
+    outcomes: list[OutcomeGroup]          # always exactly 4, GROUP_ORDER; sum(count)==lead_count
+    maturation_state: Literal["too_early", "neglected", "normal"]
+
+
+class CampaignTimeline(BaseModel):
+    header: CampaignTimelineHeader
+    trend: list[TimelineTrendPoint]       # last trend_months Cairo months, oldest→newest (volume only)
+    periods: list[TimelinePeriod]         # last window_months Cairo months, oldest→newest (full funnel)
+
+    window_months: int                    # # of funnel periods (the `months` query param)
+    trend_months: int                     # # of trend points (fixed: DEFAULT_TREND_MONTHS)
+    window_start_month: str               # oldest funnel period "YYYY-MM"
+    window_end_month: str                 # newest funnel period "YYYY-MM" (== current Cairo month)
+    legacy_days_excluded: list[str]       # detected migration Cairo days (YYYY-MM-DD) dropped from every figure
+
+    reference_date: str                   # Cairo-local YYYY-MM-DD
+    as_of: str                            # UTC ISO 8601 of the query
+    config_warnings: list[str]            # configured gate names that didn't resolve / matched >1 record
+    integrity_alerts: list[str]           # LOUD: confirmed campaign no longer holds >=90% (locked-decision drift)
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int                  # 0 when served from cache
+
+
 class CampaignPerformanceOverview(BaseModel):
     campaigns: list[CampaignFunnelRow]    # lead_count >= threshold, sorted by lead_count desc
     long_tail: Optional[AggregateFunnel]  # campaigns below threshold, aggregated (None if empty)

@@ -59,3 +59,33 @@ DOMINANT_FLOOR_PCT: int = 50
 # concentration. (Confirmed campaigns hold thousands of both-set leads, so this
 # never bites them.)
 MIN_BOTH_SET_FOR_BUYER: int = 10
+
+# ── Level-2 (per-campaign timeline) tunables ──────────────────────────────────
+# These add the period-level (month) timeline knobs on top of Level 1. None of
+# them change the Level-1 funnel or the buyer rule — they only parameterise the
+# timeline service (services/timeline_service.py).
+
+# A Cairo-local DAY holding >= this many leads is treated as a bulk data
+# migration/import (discovery §F.1: the Nov-2025 CRM migration ran as 3 such days
+# of 2,000-row chunks). Detected DYNAMICALLY at query time — never hardcoded to
+# the dates — so re-imports relocate cleanly. Reproduces the discovery rule.
+LEGACY_DAY_MIN: int = 10000
+
+# How many trailing Cairo calendar months the timeline reports a FULL funnel for
+# (default; overridable per call as the `months` query param, 1..12).
+DEFAULT_WINDOW_MONTHS: int = 3
+
+# How many trailing Cairo calendar months the lightweight volume TREND spans
+# (volume-only, 0-filled). Fixed per request; wider than the funnel window so the
+# trend gives context the periods alone do not.
+DEFAULT_TREND_MONTHS: int = 6
+
+# Maturation heuristic (DERIVED state, not a true conversion curve — Odoo keeps no
+# per-stage history / no date_won; discovery §F.5). A month whose جديد share is >=
+# this % is "still raw". Combined with the month's age:
+#   age <= YOUNG_MAX_AGE  & جديد% >= HIGH -> too_early  (new, naturally still raw)
+#   age >= NEGLECTED_MIN  & جديد% >= HIGH -> neglected  (old but never worked)
+#   otherwise (incl. zero-lead months)    -> normal
+MATURATION_NEW_PCT_HIGH: float = 50.0
+MATURATION_YOUNG_MAX_AGE: int = 1
+MATURATION_NEGLECTED_MIN_AGE: int = 2

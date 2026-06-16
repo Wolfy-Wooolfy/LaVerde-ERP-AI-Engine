@@ -54,13 +54,12 @@ from backend.modules.campaign_performance.domain import (
     BUYER_FIELD,
     CAMPAIGN_FIELD,
     DEFAULT_MIN_LEAD_THRESHOLD,
-    DOMINANT_FLOOR_PCT,
     GROUP_ORDER,
     JUNK_CAMPAIGN_NAMES,
-    MIN_BOTH_SET_FOR_BUYER,
     classify_stage,
 )
 from backend.modules.campaign_performance.services import cache as _cache
+from backend.modules.campaign_performance.services.buyer import derive_buyer_status
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 
 # Methods that must never appear in ALLOWED_METHODS.
@@ -92,14 +91,6 @@ def _m2o(value) -> tuple[Optional[int], Optional[str]]:
     if isinstance(value, (list, tuple)) and len(value) == 2:
         return int(value[0]), str(value[1])
     return None, None
-
-
-def _concentration_at_least(dominant_count: int, both_set_count: int, pct: int) -> bool:
-    """concentration >= pct%, integer-exact at the boundary (identical math to the
-    shipped module's _qualifies, parameterized for the 90% gate and the 50% floor)."""
-    if both_set_count <= 0:
-        return False
-    return dominant_count * 100 >= both_set_count * pct
 
 
 def _outcomes(group_counts: dict[str, int], total: int, label: str) -> list[dict]:
@@ -316,39 +307,29 @@ async def get_campaign_performance_overview(
         entry["buyers"][bid] += cnt
         entry["buyer_names"][bid] = bname
 
-    def _dominant(cid: int) -> tuple[Optional[int], Optional[str], int, int]:
-        """(buyer_id, buyer_name, dominant_count, both_set_count) for a campaign."""
-        entry = campaign_map.get(cid)
-        if not entry or not entry["buyers"]:
-            return None, None, 0, 0
-        bid, dom_cnt = entry["buyers"].most_common(1)[0]
-        return bid, entry["buyer_names"].get(bid), dom_cnt, entry["both_set"]
-
     integrity_alerts: list[str] = []
 
     def _status_and_buyer(cid: int) -> tuple[str, Optional[int], Optional[str], Optional[float], int]:
         """Determine (status, buyer_id, buyer_name, concentration, both_set_count)
-        for a campaign per the amended display rule (§7.1)."""
-        bid, bname, dom_cnt, both = _dominant(cid)
-        if cid in denylist_ids:
-            return "excluded_channel", None, None, None, both
-        if both == 0:
-            return "no_buyer", None, None, None, 0
-        conc = round(100.0 * dom_cnt / both, 2)
-        enough = both >= MIN_BOTH_SET_FOR_BUYER
-        if cid in confirmed_ids:
-            if _concentration_at_least(dom_cnt, both, 90) and enough:
-                return "confirmed", bid, bname, conc, both
-            integrity_alerts.append(
-                f"INTEGRITY: confirmed campaign {id_to_name.get(cid, cid)!r} "
-                f"(id={cid}) dominant buyer {bname!r} holds {conc:.1f}% of {both} "
-                f"both-set leads (< 90% gate or < {MIN_BOTH_SET_FOR_BUYER} min "
-                f"sample) — shown as non-confirmed. Locked-decision drift."
-            )
-            # fall through and display by actual numbers
-        if _concentration_at_least(dom_cnt, both, DOMINANT_FLOOR_PCT) and enough:
-            return "dominant", bid, bname, conc, both
-        return "mixed", None, None, None, both
+        for a campaign via the shared buyer.derive_buyer_status helper (§7.1).
+        Collects any confirmed-drift alert it returns into integrity_alerts."""
+        entry = campaign_map.get(cid)
+        if entry:
+            buyers, buyer_names, both = entry["buyers"], entry["buyer_names"], entry["both_set"]
+        else:
+            buyers, buyer_names, both = Counter(), {}, 0
+        status, bid, bname, conc, both_out, alert = derive_buyer_status(
+            cid,
+            id_to_name.get(cid, cid),
+            buyers,
+            buyer_names,
+            both,
+            is_confirmed=cid in confirmed_ids,
+            is_denylisted=cid in denylist_ids,
+        )
+        if alert is not None:
+            integrity_alerts.append(alert)
+        return status, bid, bname, conc, both_out
 
     # ── classify every real campaign (also surfaces confirmed-drift alerts) ───
     all_ids_with_leads = [c for c in lead_count if c is not None]
