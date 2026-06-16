@@ -427,7 +427,8 @@
   "settings.error.self_lockout_demote": "You cannot remove your own admin role.",
   "settings.error.last_admin": "Cannot remove the last active admin account.",
 
-  "mktattr_title": "Marketing Attribution",
+  "mktattr_title": "Media Buyer Performance",
+  "nav_mktattr": "Media Buyers",
   "mktattr_as_of": "as of",
   "mktattr_live_rpc": "live read-only query",
   "mktattr_coverage_label": "Attribution Coverage",
@@ -454,7 +455,8 @@
   "mktattr_won_stages": "Purchase stages",
   "mktattr_footer_note": "Every figure live from Odoo · read-only · campaign-driven attribution",
 
-  "campperf_title": "Campaign Performance",
+  "campperf_title": "Marketing Campaign Performance",
+  "nav_campperf": "Marketing Campaigns",
   "campperf_subtitle": "Lead generation & conversion by campaign — not ROI. No spend or revenue exist in Odoo, so this view counts leads and outcomes only.",
   "campperf_dq_title": "Data quality",
   "campperf_dq_caption": "Surfaced separately — these are not campaigns and are excluded from the list below.",
@@ -489,6 +491,6 @@
   "campperf_timeline_maturation_neglected": "Neglected",
   "campperf_timeline_maturation_too_early": "Too early to assess",
   "campperf_timeline_no_leads": "No leads this month",
-  "campperf_timeline_legacy_days": "migration days excluded",
-  "campperf_timeline_footer": "Excludes the Nov-2025 migration · the funnel is the CURRENT state of the leads that arrived that month (Odoo keeps no stage history)."
+  "campperf_timeline_legacy_days": "November 2025 includes a one-time bulk import from a legacy CRM — not real marketing activity, so it's excluded from this timeline.",
+  "campperf_timeline_footer": "The funnel is the CURRENT state of the leads that arrived that month (Odoo keeps no stage history)."
 }

@@ -152,8 +152,10 @@ def test_200_renders_timeline_content() -> None:
         assert "2026-06" in body
         assert "Neglected" in body                           # neglected month badge
         assert "Too early to assess" in body                 # too_early month badge
-        # Footer caveat (real data, not "illustrative").
-        assert "migration days excluded" in body
+        # Footer caveat (real data, not "illustrative"): the human-readable
+        # migration note replaces the old raw "N migration days excluded" counter.
+        assert "one-time bulk import from a legacy CRM" in body
+        assert "migration days excluded" not in body
     finally:
         _cleanup()
 
