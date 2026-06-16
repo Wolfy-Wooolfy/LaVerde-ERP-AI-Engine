@@ -103,10 +103,11 @@ class CampaignTimeline(BaseModel):
     trend: list[TimelineTrendPoint]       # last trend_months Cairo months, oldest→newest (volume only)
     periods: list[TimelinePeriod]         # last window_months Cairo months, oldest→newest (full funnel)
 
-    window_months: int                    # # of funnel periods (the `months` query param)
+    window_months: int                    # # of funnel periods (the `months` preset, OR the derived custom span)
     trend_months: int                     # # of trend points (fixed: DEFAULT_TREND_MONTHS)
     window_start_month: str               # oldest funnel period "YYYY-MM"
-    window_end_month: str                 # newest funnel period "YYYY-MM" (== current Cairo month)
+    window_end_month: str                 # newest funnel period "YYYY-MM" (preset: current Cairo month; custom: end_month)
+    is_custom_range: bool                 # True iff an explicit start_month..end_month range drove the window (vs a months preset)
     legacy_days_excluded: list[str]       # detected migration Cairo days (YYYY-MM-DD) dropped from every figure
 
     reference_date: str                   # Cairo-local YYYY-MM-DD

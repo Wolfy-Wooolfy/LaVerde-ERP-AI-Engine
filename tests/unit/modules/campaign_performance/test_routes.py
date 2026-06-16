@@ -17,6 +17,7 @@ from backend.core.exceptions import OdooQueryError
 from backend.main import app
 from backend.modules.campaign_performance.services.timeline_service import (
     CampaignNotFoundError,
+    InvalidTimelineRangeError,
 )
 
 _URL = "/api/v1/campaign-performance/overview"
@@ -257,6 +258,7 @@ _MOCK_TIMELINE = {
     "trend_months": 6,
     "window_start_month": "2026-04",
     "window_end_month": "2026-06",
+    "is_custom_range": False,
     "legacy_days_excluded": ["2025-11-15", "2025-11-16", "2025-11-26"],
     "reference_date": "2026-06-16",
     "as_of": "2026-06-16T10:00:00+00:00",
@@ -317,6 +319,56 @@ def test_timeline_422_on_bad_months(client: TestClient) -> None:
     """months out of [1, 12] is rejected by FastAPI query validation (no handler call)."""
     r = client.get(_TIMELINE_URL, params={"campaign_id": 10, "months": 99})
     assert r.status_code == 422
+
+
+# ── /timeline custom range (start_month / end_month) ─────────────────────────
+
+
+def test_timeline_custom_range_returns_200(client: TestClient) -> None:
+    custom = {**_MOCK_TIMELINE, "is_custom_range": True,
+              "window_start_month": "2025-11", "window_end_month": "2026-02"}
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_timeline",
+        new=AsyncMock(return_value=custom),
+    ) as m:
+        r = client.get(
+            _TIMELINE_URL,
+            params={"campaign_id": 10, "start_month": "2025-11", "end_month": "2026-02"},
+        )
+    assert r.status_code == 200
+    assert r.json()["is_custom_range"] is True
+    # The custom range is forwarded to the service.
+    assert m.await_args.kwargs["start_month"] == "2025-11"
+    assert m.await_args.kwargs["end_month"] == "2026-02"
+
+
+def test_timeline_custom_invalid_range_returns_422(client: TestClient) -> None:
+    """An invalid custom range surfaces as 422 invalid_range. Validation happens
+    BEFORE any RPC, so the REAL service path is exercised (no Odoo)."""
+    for params in [
+        {"campaign_id": 10, "start_month": "2026-06", "end_month": "2026-01"},  # start>end
+        {"campaign_id": 10, "start_month": "2026-01"},                          # partial
+        {"campaign_id": 10, "start_month": "2026-13", "end_month": "2026-01"},  # malformed
+        {"campaign_id": 10, "start_month": "2000-01", "end_month": "2099-12"},  # over cap
+    ]:
+        r = client.get(_TIMELINE_URL, params=params)
+        assert r.status_code == 422, params
+        assert r.json()["error"]["code"] == "invalid_range", params
+
+
+def test_timeline_custom_invalid_range_maps_service_error(client: TestClient) -> None:
+    """Belt-and-suspenders: if the service raises InvalidTimelineRangeError, the
+    route maps it to 422 invalid_range (independent of the real validation path)."""
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_timeline",
+        new=AsyncMock(side_effect=InvalidTimelineRangeError("bad range")),
+    ):
+        r = client.get(
+            _TIMELINE_URL,
+            params={"campaign_id": 10, "start_month": "2026-01", "end_month": "2026-02"},
+        )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "invalid_range"
 
 
 def test_timeline_422_on_missing_campaign_id(client: TestClient) -> None:

@@ -83,17 +83,98 @@
   </div>
   {% endif %}
 
-  {# ── 2. PRESET PILLS — switch the window via full page reload (query param) ──── #}
-  <div class="flex flex-wrap items-center gap-2">
-    {% for m, key in [(1, "campperf_timeline_preset_1"), (3, "campperf_timeline_preset_3"), (6, "campperf_timeline_preset_6"), (12, "campperf_timeline_preset_12")] %}
-    <a href="/campaign-performance/timeline?campaign_id={{ tl.header.campaign_id }}&months={{ m }}"
-       class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
-              {% if tl.window_months == m %}bg-primary-600 border-primary-600 text-white
-              {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
-       {% if tl.window_months == m %}aria-current="page"{% endif %}>
-      {{ _t(key) }}
-    </a>
-    {% endfor %}
+  {# ── 2. WINDOW SWITCHER — presets + custom range (full page reload, query param) ─
+     A custom range NEVER lights a preset pill: preset-active = (not is_custom_range
+     and window_months == m). The Custom pill is active when is_custom_range is true.
+     Apply is guarded client-side (both set · start ≤ end · span ≤ 24mo) so the UI can
+     never submit a range the backend would reject; the dropdowns list only the last
+     24 Cairo months (current + 23 preceding), so neither a future month nor an
+     out-of-cap span can be picked. #}
+  <div class="space-y-3"
+       x-data="{
+         showCustom: {{ 'true' if tl.is_custom_range else 'false' }},
+         start: '{{ tl.window_start_month if tl.is_custom_range else '' }}',
+         end: '{{ tl.window_end_month if tl.is_custom_range else '' }}',
+         maxMonth: '{{ tl.reference_date[:7] }}',
+         campaignId: {{ tl.header.campaign_id }},
+         maxSpan: 24,
+         get monthList() {
+           const [y, m] = this.maxMonth.split('-').map(Number);
+           const out = [];
+           for (let i = 0; i < this.maxSpan; i++) {
+             const total = (y * 12 + (m - 1)) - i;       // current month minus i
+             out.push(Math.floor(total / 12) + '-' + String((total % 12) + 1).padStart(2, '0'));
+           }
+           return out;                                    // newest → oldest, 24 entries
+         },
+         span() {
+           if (!this.start || !this.end) return 0;
+           const [sy, sm] = this.start.split('-').map(Number);
+           const [ey, em] = this.end.split('-').map(Number);
+           return (ey * 12 + em) - (sy * 12 + sm) + 1;
+         },
+         get valid() { const s = this.span(); return s >= 1 && s <= this.maxSpan; },
+         apply() {
+           if (!this.valid) return;
+           window.location.href = '/campaign-performance/timeline?campaign_id=' +
+             this.campaignId + '&start_month=' + this.start + '&end_month=' + this.end;
+         }
+       }">
+    <div class="flex flex-wrap items-center gap-2">
+      {% for m, key in [(1, "campperf_timeline_preset_1"), (3, "campperf_timeline_preset_3"), (6, "campperf_timeline_preset_6"), (12, "campperf_timeline_preset_12")] %}
+      <a href="/campaign-performance/timeline?campaign_id={{ tl.header.campaign_id }}&months={{ m }}"
+         class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                {% if not tl.is_custom_range and tl.window_months == m %}bg-primary-600 border-primary-600 text-white
+                {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+         {% if not tl.is_custom_range and tl.window_months == m %}aria-current="page"{% endif %}>
+        {{ _t(key) }}
+      </a>
+      {% endfor %}
+      {# Custom pill — toggles the pickers; primary-filled when a custom range drives the view. #}
+      <button type="button" @click="showCustom = !showCustom"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                     {% if tl.is_custom_range %}bg-primary-600 border-primary-600 text-white
+                     {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+              {% if tl.is_custom_range %}aria-current="page"{% endif %}>
+        {{ _t("campperf_timeline_preset_custom") }}
+      </button>
+    </div>
+
+    {# Month dropdowns — revealed by the Custom pill. Each lists the last 24 Cairo
+       months (current + 23 preceding) so neither a future month nor an out-of-cap
+       span is selectable; the Apply guard enforces start ≤ end. Options are rendered
+       client-side by Alpine, so x-model seeds the selection from the active window.
+       Inline display:none (when not already custom) avoids a flash before Alpine
+       initialises; x-show then manages it. #}
+    <div x-show="showCustom"{% if not tl.is_custom_range %} style="display: none;"{% endif %}
+         class="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-4 py-3">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_start") }}</label>
+        <select x-model="start" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_end") }}</label>
+        <select x-model="end" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <button type="button" @click="apply()" :disabled="!valid"
+              class="px-4 py-1.5 rounded-lg text-xs font-medium border border-primary-600 bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed">
+        {{ _t("campperf_timeline_custom_apply") }}
+      </button>
+      {# Inline hint — shown only when both months are set but the range is invalid. #}
+      <p x-show="start && end && !valid" class="basis-full text-[11px] text-warning-600 dark:text-warning-400">
+        {{ _t("campperf_timeline_custom_invalid") }}
+      </p>
+    </div>
   </div>
 
   {# ── 3. TREND STRIP — compact monthly lead-VOLUME bars (volume only) ─────────── #}
@@ -113,7 +194,9 @@
       </div>
       {% endfor %}
     </div>
-    <p class="mt-3 text-xs text-neutral-400 dark:text-neutral-500 text-center">{{ _t("campperf_timeline_trend_caption") }}</p>
+    <p class="mt-3 text-xs text-neutral-400 dark:text-neutral-500 text-center">
+      {% if tl.is_custom_range %}{{ _t("campperf_timeline_trend_caption_custom") }} {{ tl.window_end_month }}{% else %}{{ _t("campperf_timeline_trend_caption") }}{% endif %}
+    </p>
   </div>
 
   {# ── 4. PERIOD CARDS — one per window month (oldest→newest): funnel + maturation #}

@@ -34,6 +34,7 @@ from backend.modules.campaign_performance.services.campaign_service import (
 )
 from backend.modules.campaign_performance.services.timeline_service import (
     CampaignNotFoundError,
+    InvalidTimelineRangeError,
     get_campaign_timeline,
 )
 
@@ -79,11 +80,24 @@ async def timeline(
     request: Request,
     response: Response,
     campaign_id: int = Query(..., gt=0, description="utm.campaign id to drill into"),
-    months: int = Query(3, ge=1, le=12, description="trailing Cairo months reported with a full funnel"),
+    months: int = Query(3, ge=1, le=12, description="trailing Cairo months reported with a full funnel (ignored when a custom range is given)"),
+    start_month: str | None = Query(None, description="custom range start, Cairo 'YYYY-MM' (both-or-neither with end_month)"),
+    end_month: str | None = Query(None, description="custom range end, Cairo 'YYYY-MM' (both-or-neither with start_month)"),
     _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     try:
-        data = await get_campaign_timeline(campaign_id=campaign_id, window_months=months)
+        data = await get_campaign_timeline(
+            campaign_id=campaign_id,
+            window_months=months,
+            start_month=start_month,
+            end_month=end_month,
+        )
+    except InvalidTimelineRangeError as exc:
+        logger.info(f"Campaign timeline — invalid custom range: {exc}")
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": "invalid_range", "message": str(exc)}},
+        )
     except CampaignNotFoundError:
         logger.info(f"Campaign timeline — campaign_id={campaign_id} not found")
         return JSONResponse(status_code=404, content=_ERR_404)

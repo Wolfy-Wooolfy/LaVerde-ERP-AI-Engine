@@ -43,8 +43,10 @@ from backend.modules.campaign_performance.services import cache as _cache
 from backend.modules.campaign_performance.services.buyer import derive_buyer_status
 from backend.modules.campaign_performance.services.timeline_service import (
     CampaignNotFoundError,
+    InvalidTimelineRangeError,
     get_campaign_timeline,
 )
+from backend.modules.campaign_performance.domain import MAX_CUSTOM_SPAN_MONTHS
 
 _CAIRO = ZoneInfo("Africa/Cairo")
 _NOW = datetime(2026, 6, 16, 12, 0, 0, tzinfo=_CAIRO)   # fixed "now" for the windows
@@ -136,7 +138,7 @@ def _trend_point(result: dict, month: str) -> int:
 async def _timeline(windowed_leads, both_set=None, *, campaign_id=10,
                     campaign_name="TESTCAMP", confirmed=frozenset(),
                     denylist=frozenset(), legacy_days=frozenset(),
-                    window_months=3, now=_NOW):
+                    window_months=3, start_month=None, end_month=None, now=_NOW):
     client = _make_client(
         [{"id": campaign_id, "name": campaign_name}],
         _STAGES,
@@ -147,6 +149,8 @@ async def _timeline(windowed_leads, both_set=None, *, campaign_id=10,
         client=client,
         campaign_id=campaign_id,
         window_months=window_months,
+        start_month=start_month,
+        end_month=end_month,
         confirmed_campaigns=confirmed,
         denylist_campaigns=denylist,
         legacy_days=set(legacy_days),
@@ -409,3 +413,134 @@ async def test_override_config_bypasses_cache():
     assert first["cache_status"] == "fresh"
     second = await _timeline([], legacy_days=set())
     assert second["cache_status"] == "fresh"
+
+
+# ── Custom range (explicit start_month..end_month) ──────────────────────────
+
+# Fields that legitimately differ between two calls / between preset & custom.
+_NON_IDENTITY_KEYS = {"as_of", "rpc_duration_ms", "cache_status", "is_custom_range"}
+
+
+async def test_custom_range_byte_identical_to_equivalent_preset():
+    """A custom range equal to a preset's window reproduces it EXACTLY (modulo the
+    runtime/flag fields). The trend ends at end_month == current month, so even the
+    fixed 6-bar trend matches. This is the §T7 identity proof in miniature."""
+    leads = (
+        [_lead(datetime(2026, 2, 10, 12), 1)] * 2      # trend-only context month
+        + [_lead(datetime(2026, 4, 10, 12), 1)] * 3
+        + [_lead(datetime(2026, 5, 10, 12), 2)] * 4
+        + [_lead(datetime(2026, 6, 10, 12), 3)] * 5
+    )
+    preset = await _timeline(leads, window_months=3)                 # [2026-04,05,06]
+    custom = await _timeline(leads, start_month="2026-04", end_month="2026-06")
+
+    assert preset["is_custom_range"] is False
+    assert custom["is_custom_range"] is True
+    assert custom["window_months"] == 3                              # derived count
+    stripped_preset = {k: v for k, v in preset.items() if k not in _NON_IDENTITY_KEYS}
+    stripped_custom = {k: v for k, v in custom.items() if k not in _NON_IDENTITY_KEYS}
+    assert stripped_custom == stripped_preset                       # byte-identical
+
+
+async def test_custom_range_overrides_window_months_and_derives_count():
+    leads = [_lead(datetime(2026, 3, 10, 12), 1)] * 2
+    # window_months=3 is IGNORED when a custom range is supplied.
+    result = await _timeline(
+        leads, window_months=3, start_month="2026-01", end_month="2026-06",
+    )
+    assert result["is_custom_range"] is True
+    assert [p["month"] for p in result["periods"]] == [
+        "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+    ]
+    assert result["window_months"] == 6
+    assert result["window_start_month"] == "2026-01"
+    assert result["window_end_month"] == "2026-06"
+
+
+async def test_custom_single_month():
+    """start_month == end_month → exactly one period that reconciles; the 6-bar trend
+    still renders, ending at that month."""
+    leads = (
+        [_lead(datetime(2026, 3, 5, 12), 1)] * 4       # جديد
+        + [_lead(datetime(2026, 3, 6, 12), 3)] * 1     # اشترى
+    )
+    result = await _timeline(leads, start_month="2026-03", end_month="2026-03")
+    assert result["is_custom_range"] is True
+    assert [p["month"] for p in result["periods"]] == ["2026-03"]
+    assert result["window_months"] == 1
+    march = _period(result, "2026-03")
+    assert march["lead_count"] == 5
+    assert sum(o["count"] for o in march["outcomes"]) == 5
+    # Trend = 6 months ending at end_month (2026-03), oldest→newest.
+    assert [t["month"] for t in result["trend"]] == [
+        "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03",
+    ]
+    assert _trend_point(result, "2026-03") == 5
+
+
+async def test_custom_trend_ends_at_end_month_not_current():
+    """For a historical custom range, the trend ends at end_month, NOT the current
+    Cairo month — proving the generalized trend-end rule."""
+    leads = [_lead(datetime(2025, 12, 10, 12), 1)] * 3
+    result = await _timeline(leads, start_month="2025-12", end_month="2025-12")
+    assert result["trend"][-1]["month"] == "2025-12"     # ends at end_month
+    assert all(t["month"] <= "2025-12" for t in result["trend"])
+
+
+async def test_custom_range_excludes_migration_inside_window():
+    """A custom span covering a legacy migration day still drops it everywhere."""
+    leads = (
+        [_lead(datetime(2025, 11, 15, 12), 1)] * 10    # legacy day → dropped
+        + [_lead(datetime(2025, 11, 20, 12), 1)] * 4   # normal Nov lead → kept
+        + [_lead(datetime(2025, 12, 10, 12), 1)] * 6
+    )
+    result = await _timeline(
+        leads, legacy_days={"2025-11-15"},
+        start_month="2025-11", end_month="2025-12",
+    )
+    assert _period(result, "2025-11")["lead_count"] == 4    # not 14
+    assert _period(result, "2025-12")["lead_count"] == 6
+    assert result["header"]["total_leads_in_window"] == 10
+    assert result["legacy_days_excluded"] == ["2025-11-15"]
+
+
+# ── Custom range validation (raised BEFORE any RPC) ─────────────────────────
+
+
+async def test_custom_partial_range_raises():
+    with pytest.raises(InvalidTimelineRangeError):
+        await _timeline([], start_month="2026-01", end_month=None)
+    with pytest.raises(InvalidTimelineRangeError):
+        await _timeline([], start_month=None, end_month="2026-01")
+
+
+async def test_custom_malformed_range_raises():
+    for bad in [("2026-13", "2026-01"), ("2026-01", "nope"), ("2026/01", "2026-03")]:
+        with pytest.raises(InvalidTimelineRangeError):
+            await _timeline([], start_month=bad[0], end_month=bad[1])
+
+
+async def test_custom_start_after_end_raises():
+    with pytest.raises(InvalidTimelineRangeError):
+        await _timeline([], start_month="2026-06", end_month="2026-01")
+
+
+def _add_months(month_str: str, n: int) -> str:
+    """'YYYY-MM' + n months → 'YYYY-MM' (test-local, no service import)."""
+    y, m = (int(x) for x in month_str.split("-"))
+    total = y * 12 + (m - 1) + n
+    return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+
+async def test_custom_span_at_cap_ok_one_over_raises():
+    start = "2024-01"
+    end_ok = _add_months(start, MAX_CUSTOM_SPAN_MONTHS - 1)   # inclusive span == MAX
+    end_bad = _add_months(start, MAX_CUSTOM_SPAN_MONTHS)      # span == MAX + 1
+    # Use a far-back `now` so these historical windows aren't truncated by the ref.
+    res = await _timeline(
+        [], start_month=start, end_month=end_ok,
+        now=datetime(2026, 6, 16, 12, 0, tzinfo=_CAIRO),
+    )
+    assert res["window_months"] == MAX_CUSTOM_SPAN_MONTHS
+    with pytest.raises(InvalidTimelineRangeError):
+        await _timeline([], start_month=start, end_month=end_bad)
