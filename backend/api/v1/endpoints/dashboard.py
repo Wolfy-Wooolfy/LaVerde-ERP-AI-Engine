@@ -3,7 +3,7 @@
 import asyncio
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from backend.api.deps import get_crm_service, get_current_user_html, require_admin_html, require_module_html
@@ -18,6 +18,10 @@ from backend.modules.hr.services.kpi_service import (
 )
 from backend.modules.campaign_performance.services.campaign_service import (
     get_campaign_performance_overview,
+)
+from backend.modules.campaign_performance.services.timeline_service import (
+    CampaignNotFoundError,
+    get_campaign_timeline,
 )
 from backend.modules.marketing_attribution.services.attribution_service import (
     get_attribution_overview,
@@ -193,6 +197,39 @@ async def campaign_performance_dashboard(
         "campperf": data,
     })
     return templates.TemplateResponse(request, "campaign_performance/dashboard.html", ctx)
+
+
+@router.get(
+    "/campaign-performance/timeline",
+    response_class=HTMLResponse,
+    summary="Campaign Performance — per-campaign timeline (HTML)",
+    dependencies=[Depends(require_module_html("campaign_performance"))],
+)
+async def campaign_performance_timeline(
+    request: Request,
+    campaign_id: int | None = Query(None),
+    months: int = Query(3, ge=1, le=12),
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Display-only drill-in mirroring the Level-1 page: call the read-only timeline
+    # service and hand the result straight to the template — no new backend logic.
+    # A missing/invalid campaign_id, or one resolving to no utm.campaign, redirects
+    # back to the list (graceful — no 404 stack trace for a hand-edited URL). This
+    # HTML path (/campaign-performance/timeline) is distinct from the JSON API at
+    # /api/v1/campaign-performance/timeline (different router + prefix).
+    _LIST_URL = "/campaign-performance/dashboard"
+    if campaign_id is None or campaign_id <= 0:
+        return RedirectResponse(_LIST_URL, status_code=302)
+    try:
+        data = await get_campaign_timeline(campaign_id=campaign_id, window_months=months)
+    except CampaignNotFoundError:
+        return RedirectResponse(_LIST_URL, status_code=302)
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "campaign_performance_dashboard",
+        "tl": data,
+    })
+    return templates.TemplateResponse(request, "campaign_performance/timeline.html", ctx)
 
 
 @router.get(

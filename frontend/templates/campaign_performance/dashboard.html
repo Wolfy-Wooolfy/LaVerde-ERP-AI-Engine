@@ -202,6 +202,18 @@
           {% endfor %}
         </div>
 
+        {# Drill-in to this campaign's per-campaign timeline (Level 2). Only on a real
+           campaign row — NOT the long-tail aggregate or the data-quality flags. #}
+        <div class="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-700/60 flex justify-end">
+          <a href="/campaign-performance/timeline?campaign_id={{ c.campaign_id }}&months=3"
+             class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors">
+            {{ _t("campperf_timeline_drill") }}
+            <svg class="w-3.5 h-3.5 rtl:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </a>
+        </div>
+
       </div>
       {% endfor %}
 

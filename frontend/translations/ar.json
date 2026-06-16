@@ -473,5 +473,22 @@
   "campperf_show_less": "عرض أقل",
   "campperf_long_tail_suffix": "حملة أصغر",
   "campperf_long_tail_caption": "تحت حد العرض في القائمة",
-  "campperf_footer_note": "كل رقم مباشر من Odoo · للقراءة فقط · أعداد ونِسب فقط — بلا عائد على الإنفاق"
+  "campperf_footer_note": "كل رقم مباشر من Odoo · للقراءة فقط · أعداد ونِسب فقط — بلا عائد على الإنفاق",
+
+  "campperf_timeline_label": "الأداء عبر الوقت",
+  "campperf_timeline_drill": "الأداء عبر الوقت",
+  "campperf_timeline_back": "كل الحملات",
+  "campperf_timeline_subtitle": "التدفق الفعلي للعملاء المحتملين بعد استبعاد هجرة نوفمبر ٢٠٢٥ — وليس الإجمالي الكلي المعروض في القائمة.",
+  "campperf_timeline_window_prefix": "آخر",
+  "campperf_timeline_window_unit": "شهر",
+  "campperf_timeline_preset_1": "الشهر الحالي",
+  "campperf_timeline_preset_3": "آخر 3 شهور",
+  "campperf_timeline_preset_6": "آخر 6 شهور",
+  "campperf_timeline_preset_12": "آخر سنة",
+  "campperf_timeline_trend_caption": "عدد الـ leads شهرياً (آخر 6 شهور)",
+  "campperf_timeline_maturation_neglected": "مهملة",
+  "campperf_timeline_maturation_too_early": "بدري للتقييم",
+  "campperf_timeline_no_leads": "لا عملاء محتملين هذا الشهر",
+  "campperf_timeline_legacy_days": "أيام هجرة مستبعدة",
+  "campperf_timeline_footer": "بدون هجرة نوفمبر · الفانل = الحالة الحالية للـ leads اللي دخلت في الشهر (Odoo مايحتفظش بتاريخ المراحل)"
 }

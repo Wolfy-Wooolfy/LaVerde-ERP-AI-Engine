@@ -473,5 +473,22 @@
   "campperf_show_less": "Show fewer",
   "campperf_long_tail_suffix": "smaller campaigns",
   "campperf_long_tail_caption": "below the listing threshold",
-  "campperf_footer_note": "Every figure live from Odoo · read-only · counts and percentages only — no ROI"
+  "campperf_footer_note": "Every figure live from Odoo · read-only · counts and percentages only — no ROI",
+
+  "campperf_timeline_label": "Performance over time",
+  "campperf_timeline_drill": "Performance over time",
+  "campperf_timeline_back": "All campaigns",
+  "campperf_timeline_subtitle": "The actual ongoing lead flow after excluding the Nov-2025 migration — not the all-time total shown in the list.",
+  "campperf_timeline_window_prefix": "last",
+  "campperf_timeline_window_unit": "mo",
+  "campperf_timeline_preset_1": "Current month",
+  "campperf_timeline_preset_3": "Last 3 months",
+  "campperf_timeline_preset_6": "Last 6 months",
+  "campperf_timeline_preset_12": "Last year",
+  "campperf_timeline_trend_caption": "Leads per month (last 6 months)",
+  "campperf_timeline_maturation_neglected": "Neglected",
+  "campperf_timeline_maturation_too_early": "Too early to assess",
+  "campperf_timeline_no_leads": "No leads this month",
+  "campperf_timeline_legacy_days": "migration days excluded",
+  "campperf_timeline_footer": "Excludes the Nov-2025 migration · the funnel is the CURRENT state of the leads that arrived that month (Odoo keeps no stage history)."
 }
