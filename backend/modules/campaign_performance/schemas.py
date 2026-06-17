@@ -136,3 +136,39 @@ class CampaignPerformanceOverview(BaseModel):
     as_of: str                            # UTC ISO 8601 of the query
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int                  # 0 when served from cache
+
+
+# ── Level 1 — WINDOWED list (the whole campaign list scoped to a Cairo period) ─
+# Same per-campaign funnel row + 5-state buyer cell as the all-time overview, but
+# every figure is restricted to the leads that AROSE in the window (Cairo
+# create_date), the legacy Nov-2025 migration EXCLUDED. Lists EVERY campaign with
+# >=1 windowed lead individually (no threshold, no long-tail) and hides
+# zero-activity campaigns. The buyer cell stays the ALL-TIME both-set status, so a
+# campaign's buyer label never shifts with the window. The "all" window is served
+# by CampaignPerformanceOverview (the shipped un-windowed path), not this model.
+
+WindowName = Literal["current", "last3", "custom"]
+
+
+class CampaignPerformanceWindowed(BaseModel):
+    campaigns: list[CampaignFunnelRow]    # every campaign with >=1 windowed lead, sorted by windowed lead_count desc
+    data_quality: DataQuality             # windowed junk "None" / no-campaign buckets (None when empty in-window)
+
+    total_leads_population: int           # WINDOWED population: post-migration leads that arose in the window
+    active_campaign_count: int            # # real campaigns with >=1 lead in the window (== len(campaigns))
+
+    window: WindowName                    # the active dated window ("current" | "last3" | "custom")
+    is_custom_range: bool                 # True iff an explicit start_month..end_month range drove the window
+    window_months: int                    # # of Cairo months the window spans (derived for custom)
+    window_start_month: str               # oldest window month "YYYY-MM"
+    window_end_month: str                 # newest window month "YYYY-MM" (preset: current Cairo month; custom: end_month)
+    legacy_days_excluded: list[str]       # detected migration Cairo days (YYYY-MM-DD) dropped from every figure
+
+    is_won_stage_names: list[str]         # crm.stage names where is_won=True (spot-check aid)
+    config_warnings: list[str]            # configured names that didn't resolve / matched >1 record
+    integrity_alerts: list[str]           # LOUD: a confirmed campaign no longer holds >=90% (locked-decision drift)
+
+    reference_date: str                   # Cairo-local YYYY-MM-DD
+    as_of: str                            # UTC ISO 8601 of the query
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int                  # 0 when served from cache

@@ -89,6 +89,37 @@ MAX_CUSTOM_SPAN_MONTHS: int = 24
 # trend gives context the periods alone do not.
 DEFAULT_TREND_MONTHS: int = 6
 
+# ── Level-1 LIST windowing (scope the whole campaign list to a Cairo period) ──
+# The Level-1 list shows ALL-TIME totals per campaign; the discovery
+# (scripts/discovery_level1_windowing.py) showed ~86% of all leads are the
+# Nov-2025 migration and only ~6 campaigns are active in the current month. These
+# presets scope the WHOLE list to a Cairo window so the board can see "how are all
+# campaigns doing THIS period" in one view. A windowed view lists every campaign
+# with >=1 (post-migration) lead in the window individually (no long-tail, no
+# threshold) and hides zero-activity campaigns; "all" is the shipped un-windowed
+# path (>=50 threshold + long tail + migration included), unchanged.
+WINDOW_ALL: str = "all"            # today's shipped behaviour (incl. migration)
+WINDOW_CURRENT: str = "current"    # the current Cairo month only
+WINDOW_LAST3: str = "last3"        # the current + 2 preceding Cairo months
+WINDOW_CUSTOM: str = "custom"      # an explicit start_month..end_month range
+
+# The trailing Cairo-month count each DATED preset spans (ending at the current
+# Cairo month). "all" / "custom" are NOT here — "all" is the un-windowed path and
+# "custom" derives its span from the explicit range (capped by MAX_CUSTOM_SPAN_MONTHS).
+WINDOW_PRESET_MONTHS: dict[str, int] = {
+    WINDOW_CURRENT: 1,
+    WINDOW_LAST3: 3,
+}
+
+# The presets offered on the list, in display order. "custom" is driven by the
+# start_month/end_month range, not a pill value.
+WINDOW_PRESETS: tuple[str, ...] = (WINDOW_CURRENT, WINDOW_LAST3, WINDOW_ALL)
+
+# The default window when the list is opened with no explicit selection (locked
+# decision): scope to the LAST 3 Cairo months so the list reads as current
+# performance, not the migration-dominated all-time total.
+DEFAULT_WINDOW: str = WINDOW_LAST3
+
 # Maturation heuristic (DERIVED state, not a true conversion curve — Odoo keeps no
 # per-stage history / no date_won; discovery §F.5). A month whose جديد share is >=
 # this % is "still raw". Combined with the month's age:

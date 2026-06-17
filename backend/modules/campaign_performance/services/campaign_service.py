@@ -60,6 +60,19 @@ from backend.modules.campaign_performance.domain import (
 )
 from backend.modules.campaign_performance.services import cache as _cache
 from backend.modules.campaign_performance.services.buyer import derive_buyer_status
+# Window primitives are REUSED VERBATIM from the Level-2 timeline service (single
+# source of truth for Cairo bucketing, the custom-range contract, and dynamic
+# legacy-migration detection) — never re-declared here. timeline_service does not
+# import campaign_service, so this one-way import introduces no cycle.
+from backend.modules.campaign_performance.services.timeline_service import (
+    InvalidTimelineRangeError,
+    _month_range,
+    _month_str,
+    _resolve_custom_window,
+    _shift_months,
+    _to_cairo,
+    get_legacy_migration_days,
+)
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 
 # Methods that must never appear in ALLOWED_METHODS.
@@ -70,7 +83,9 @@ _CAMPAIGN_MODEL = "utm.campaign"
 _STAGE_MODEL = "crm.stage"
 
 _CACHE_KEY_PREFIX = "campaign_performance:overview"
+_CACHE_KEY_PREFIX_WINDOWED = "campaign_performance:windowed"
 _CAIRO_TZ = ZoneInfo("Africa/Cairo")
+_PAGE = 5000
 
 # All counts include archived leads (board analysis must include Lost/closed).
 _CTX_ALL = {"active_test": False}
@@ -435,6 +450,400 @@ async def get_campaign_performance_overview(
         "total_leads_population": total_leads_population,
         "total_campaigns_with_leads": len(all_ids_with_leads),
         "listed_campaign_count": len(listed_ids),
+        "is_won_stage_names": is_won_stage_names,
+        "config_warnings": config_warnings,
+        "integrity_alerts": integrity_alerts,
+        "reference_date": cairo_today.isoformat(),
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "cache_status": "fresh",
+        "rpc_duration_ms": rpc_ms,
+    }
+
+    if default_config:
+        _cache.set(cache_key, result)
+    return result
+
+
+async def _fetch_all_windowed(
+    client: OdooClient, dom: list, fields: list[str]
+) -> list[dict]:
+    """search_read the whole domain in pages of _PAGE, ordered by id.
+
+    The SAME paged-fetch pattern timeline_service uses; kept local so the windowed
+    list owns its fetch (its domain carries the create_date bounds).
+    """
+    rows, offset = [], 0
+    while True:
+        page = await client.execute_kw(
+            _LEAD_MODEL,
+            "search_read",
+            args=[dom],
+            kwargs={
+                "fields": fields,
+                "order": "id",
+                "limit": _PAGE,
+                "offset": offset,
+                "context": _CTX_ALL,
+            },
+        )
+        rows.extend(page)
+        if len(page) < _PAGE:
+            break
+        offset += _PAGE
+    return rows
+
+
+async def get_campaign_performance_windowed(
+    client: Optional[OdooClient] = None,
+    window: str = domain.DEFAULT_WINDOW,
+    start_month: Optional[str] = None,
+    end_month: Optional[str] = None,
+    confirmed_campaigns: Optional[frozenset[str]] = None,
+    denylist_campaigns: Optional[frozenset[str]] = None,
+    legacy_days: Optional[set[str]] = None,
+    now_cairo: Optional[datetime] = None,
+) -> dict:
+    """Return the per-campaign Level-1 list SCOPED to a Cairo time window.
+
+    Same per-campaign funnel + 5-state media-buyer cell as the all-time overview,
+    but every figure is restricted to the leads that AROSE in the window (Cairo
+    create_date), the legacy Nov-2025 migration EXCLUDED (consistent with the
+    timeline). Lists EVERY campaign with >=1 windowed lead individually — no
+    long-tail roll-up, no volume threshold — and hides zero-activity campaigns. The
+    media-buyer cell stays the ALL-TIME both-set status (identical to the list and
+    the timeline header), so a campaign's buyer label never shifts with the window.
+
+    Window resolution:
+      - An explicit, valid start_month/end_month range OVERRIDES `window` and drives
+        a custom window (is_custom_range=True), validated by the SAME
+        _resolve_custom_window contract the timeline uses.
+      - Otherwise `window` is a DATED preset key in domain.WINDOW_PRESET_MONTHS
+        (e.g. "current", "last3"), a trailing span ending at the current Cairo month.
+      - The "all" window is NOT handled here — callers route it to
+        get_campaign_performance_overview() (the shipped, un-windowed path).
+
+    Args mirror get_campaign_performance_overview plus:
+        window: a dated preset key (domain.WINDOW_PRESET_MONTHS). Ignored when a
+            custom range is given. Defaults to domain.DEFAULT_WINDOW.
+        start_month / end_month: optional Cairo-local "YYYY-MM" custom range
+            (both-or-neither — see _resolve_custom_window).
+        legacy_days / now_cairo: optional test injections (bypass the legacy RPC /
+            pin "now") — same as the timeline service.
+
+    Returns a dict matching schemas.CampaignPerformanceWindowed.
+
+    Raises:
+        InvalidTimelineRangeError: the custom start_month/end_month range is invalid.
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any Odoo RPC fails.
+        RuntimeError: if a funnel fails to reconcile, or the windowed population fails
+            the listed + junk + no-campaign identity.
+    """
+    _assert_read_only()
+
+    # Custom range validated BEFORE any RPC (both-or-neither, span <= cap). None →
+    # the dated preset path.
+    custom_window = _resolve_custom_window(start_month, end_month)
+    is_custom_range = custom_window is not None
+
+    if not is_custom_range and window not in domain.WINDOW_PRESET_MONTHS:
+        raise InvalidTimelineRangeError(
+            f"window must be one of {sorted(domain.WINDOW_PRESET_MONTHS)} "
+            f"or a custom start_month/end_month range — got {window!r}."
+        )
+
+    default_config = (
+        confirmed_campaigns is None
+        and denylist_campaigns is None
+        and legacy_days is None
+        and now_cairo is None
+    )
+    confirmed_names = (
+        confirmed_campaigns if confirmed_campaigns is not None
+        else domain.CONFIRMED_BUYER_CAMPAIGNS
+    )
+    denylist_names = (
+        denylist_campaigns if denylist_campaigns is not None
+        else domain.DENYLIST_CAMPAIGNS
+    )
+
+    ref = now_cairo if now_cairo is not None else datetime.now(_CAIRO_TZ)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=_CAIRO_TZ)
+    cairo_today = ref.date()
+    current_month_start = ref.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # ── resolve the window's [start_dt .. end_dt] Cairo month bounds ──────────
+    if is_custom_range:
+        start_dt, end_dt = custom_window
+        window_tag = f"c{_month_str(start_dt)}_{_month_str(end_dt)}"
+    else:
+        span = domain.WINDOW_PRESET_MONTHS[window]
+        end_dt = current_month_start
+        start_dt = _shift_months(current_month_start, -(span - 1))
+        window_tag = window
+    window_months_list = _month_range(start_dt, end_dt)
+    window_month_set = set(window_months_list)
+    window_months = len(window_months_list)
+
+    cache_key = _cache.make_key(f"{_CACHE_KEY_PREFIX_WINDOWED}:{window_tag}")
+    if default_config:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit: {cache_key}")
+            return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+        logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    # Coarse UTC fetch bounds (Cairo month-starts → UTC; Odoo stores UTC-naive). The
+    # exact Cairo bucketing/legacy-day drop happens per-lead below — these bounds are
+    # only a fetch filter. Lower = window start; upper = first day after window end.
+    lower_str = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    upper_str = _shift_months(end_dt, 1).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # ── RPC 1 — utm.campaign id+name (resolve gates + junk label) ─────────
+        campaigns = await _client.execute_kw(
+            _CAMPAIGN_MODEL,
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["id", "name"], "context": _CTX_ALL},
+        )
+
+        # ── RPC 2 — crm.stage id+name+is_won (outcome group mapping) ──────────
+        stages = await _client.execute_kw(
+            _STAGE_MODEL,
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["id", "name", "is_won"]},
+        )
+
+        # ── RPC 3 — THE windowed query: leads in [lower .. upper) (paged) ─────
+        # ONE search_read of create_date + campaign_id + stage_id, regrouped in
+        # Python by Cairo month (legacy days dropped) — the discovery-recommended
+        # single-query path (1 RPC for the whole list, vs N per-campaign).
+        windowed_leads = await _fetch_all_windowed(
+            _client,
+            [("create_date", ">=", lower_str), ("create_date", "<", upper_str)],
+            ["create_date", CAMPAIGN_FIELD, "stage_id"],
+        )
+
+        # ── RPC 4 — ALL-TIME both-set slice by (campaign, buyer) ──────────────
+        # Unbounded (no date filter) so the media-buyer cell == the all-time list.
+        both_set_rows = await _client.execute_kw(
+            _LEAD_MODEL,
+            "read_group",
+            args=[
+                [(CAMPAIGN_FIELD, "!=", False), (BUYER_FIELD, "!=", False)],
+                [CAMPAIGN_FIELD, BUYER_FIELD],
+                [CAMPAIGN_FIELD, BUYER_FIELD],
+            ],
+            kwargs={"context": _CTX_ALL, "lazy": False},
+        )
+
+        # ── RPC 5 — legacy migration days (cached long; injectable for tests) ─
+        resolved_legacy = (
+            set(legacy_days) if legacy_days is not None
+            else await get_legacy_migration_days(_client)
+        )
+    except ReadOnlyViolationError:
+        raise
+    except Exception as exc:
+        raise OdooQueryError(
+            f"get_campaign_performance_windowed() RPC failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+
+    # ── name<->id maps + gate resolution (same pattern as the all-time path) ──
+    name_to_ids: dict[str, list[int]] = defaultdict(list)
+    id_to_name: dict[int, str] = {}
+    for c in campaigns:
+        cid = int(c["id"])
+        cname = str(c.get("name") or "")
+        id_to_name[cid] = cname
+        name_to_ids[cname].append(cid)
+
+    config_warnings: list[str] = []
+
+    def _resolve(names: frozenset[str], label: str) -> set[int]:
+        resolved: set[int] = set()
+        for nm in sorted(names):
+            ids = name_to_ids.get(nm, [])
+            if not ids:
+                config_warnings.append(
+                    f"{label} campaign name {nm!r} did not resolve to any "
+                    f"utm.campaign record — ignored."
+                )
+                continue
+            if len(ids) > 1:
+                config_warnings.append(
+                    f"{label} campaign name {nm!r} matched {len(ids)} "
+                    f"utm.campaign records (ids {sorted(ids)}) — all included."
+                )
+            resolved.update(ids)
+        return resolved
+
+    confirmed_ids = _resolve(confirmed_names, "Confirmed")
+    denylist_ids = _resolve(denylist_names, "Denylist")
+    junk_ids = {cid for cid, nm in id_to_name.items() if nm in JUNK_CAMPAIGN_NAMES}
+
+    # ── stage info + is_won names (RPC 2) ─────────────────────────────────────
+    stage_info: dict[int, dict] = {}
+    is_won_stage_names: list[str] = []
+    for s in stages:
+        sid = int(s["id"])
+        sname = str(s.get("name") or "")
+        is_won = bool(s.get("is_won"))
+        stage_info[sid] = {"name": sname, "is_won": is_won}
+        if is_won:
+            is_won_stage_names.append(sname)
+    is_won_stage_names.sort()
+
+    # ── regroup windowed leads by Cairo month, dropping legacy days ───────────
+    funnel: dict[Optional[int], dict[str, int]] = defaultdict(
+        lambda: {g: 0 for g in GROUP_ORDER}
+    )
+    lead_count: dict[Optional[int], int] = defaultdict(int)
+    windowed_population = 0
+    for r in windowed_leads:
+        cd = r.get("create_date")
+        if not cd:
+            continue
+        cairo = _to_cairo(cd)
+        if cairo.strftime("%Y-%m-%d") in resolved_legacy:
+            continue                                   # drop the legacy migration
+        if _month_str(cairo) not in window_month_set:  # exact-bound / over-fetch guard
+            continue
+        cid, _ = _m2o(r.get(CAMPAIGN_FIELD))           # cid is None for the no-campaign bucket
+        sid, _ = _m2o(r.get("stage_id"))               # stage_id may be False -> None -> جديد
+        funnel[cid][classify_stage(sid, stage_info)] += 1
+        lead_count[cid] += 1
+        windowed_population += 1
+
+    # ── per-campaign dominant buyer from ALL-TIME both-set (RPC 4) ────────────
+    campaign_map: dict[int, dict] = {}
+    for r in both_set_rows:
+        cid, _ = _m2o(r.get(CAMPAIGN_FIELD))
+        if cid is None:
+            continue
+        bid, bname = _m2o(r.get(BUYER_FIELD))
+        if bid is None:
+            continue
+        cnt = int(r.get("__count") or 0)
+        entry = campaign_map.setdefault(
+            cid, {"both_set": 0, "buyers": Counter(), "buyer_names": {}}
+        )
+        entry["both_set"] += cnt
+        entry["buyers"][bid] += cnt
+        entry["buyer_names"][bid] = bname
+
+    integrity_alerts: list[str] = []
+
+    def _status_and_buyer(cid: int) -> tuple:
+        entry = campaign_map.get(cid)
+        if entry:
+            buyers, buyer_names, both = entry["buyers"], entry["buyer_names"], entry["both_set"]
+        else:
+            buyers, buyer_names, both = Counter(), {}, 0
+        status, bid, bname, conc, both_out, alert = derive_buyer_status(
+            cid,
+            id_to_name.get(cid, cid),
+            buyers,
+            buyer_names,
+            both,
+            is_confirmed=cid in confirmed_ids,
+            is_denylisted=cid in denylist_ids,
+        )
+        if alert is not None:
+            integrity_alerts.append(alert)
+        return status, bid, bname, conc, both_out
+
+    # ── active real campaigns (>=1 windowed lead): list ALL, sort by volume ───
+    active_real_ids = [c for c in lead_count if c is not None and c not in junk_ids]
+    ranked = sorted(active_real_ids, key=lambda c: (-lead_count[c], id_to_name.get(c, "")))
+
+    campaigns_out: list[dict] = []
+    for cid in ranked:
+        status, bid, bname, conc, both = _status_and_buyer(cid)
+        campaigns_out.append(
+            {
+                "campaign_id": cid,
+                "campaign_name": id_to_name.get(cid, f"id={cid}"),
+                "lead_count": lead_count[cid],
+                "outcomes": _outcomes(funnel[cid], lead_count[cid], f"campaign id={cid} (windowed)"),
+                "attribution_status": status,
+                "media_buyer_id": bid,
+                "media_buyer_name": bname,
+                "concentration": conc,
+                "both_set_count": both,
+            }
+        )
+
+    for alert in integrity_alerts:
+        logger.error(alert)
+
+    # ── data-quality buckets (windowed; NOT list rows) ────────────────────────
+    junk_present = [c for c in junk_ids if c in lead_count]
+    junk_out: Optional[dict] = None
+    junk_leads = 0
+    if junk_present:
+        junk_groups = {g: 0 for g in GROUP_ORDER}
+        for cid in junk_present:
+            for g in GROUP_ORDER:
+                junk_groups[g] += funnel[cid][g]
+            junk_leads += lead_count[cid]
+        junk_out = {
+            "label": "None",
+            "campaign_ids": sorted(junk_present),
+            "lead_count": junk_leads,
+            "outcomes": _outcomes(junk_groups, junk_leads, "junk None campaign (windowed)"),
+        }
+
+    no_campaign_out: Optional[dict] = None
+    no_campaign_leads = lead_count.get(None, 0)
+    if no_campaign_leads:
+        no_campaign_out = {
+            "label": "(no campaign)",
+            "campaign_ids": [],
+            "lead_count": no_campaign_leads,
+            "outcomes": _outcomes(funnel[None], no_campaign_leads, "no-campaign bucket (windowed)"),
+        }
+
+    # ── windowed population identity (explicit raise; survives -O) ────────────
+    listed_leads = sum(lead_count[c] for c in active_real_ids)
+    recon_total = listed_leads + junk_leads + no_campaign_leads
+    if recon_total != windowed_population:
+        raise RuntimeError(
+            f"Windowed population reconciliation FAILED: listed {listed_leads} + junk "
+            f"{junk_leads} + no_campaign {no_campaign_leads} = {recon_total} != windowed "
+            f"population {windowed_population}."
+        )
+
+    logger.info(
+        f"Campaign performance (windowed): window={window_tag} "
+        f"[{window_months_list[0]}..{window_months_list[-1]}] | active={len(active_real_ids)} "
+        f"windowed_leads={windowed_population:,} | legacy_days={len(resolved_legacy)} | "
+        f"RPCs in {rpc_ms}ms | alerts={len(integrity_alerts)} warnings={len(config_warnings)} | "
+        f"cache_key={cache_key}"
+    )
+
+    result: dict = {
+        "campaigns": campaigns_out,
+        "data_quality": {"junk_none": junk_out, "no_campaign": no_campaign_out},
+        "total_leads_population": windowed_population,
+        "active_campaign_count": len(active_real_ids),
+        "window": domain.WINDOW_CUSTOM if is_custom_range else window,
+        "is_custom_range": is_custom_range,
+        "window_months": window_months,
+        "window_start_month": window_months_list[0],
+        "window_end_month": window_months_list[-1],
+        "legacy_days_excluded": sorted(resolved_legacy),
         "is_won_stage_names": is_won_stage_names,
         "config_warnings": config_warnings,
         "integrity_alerts": integrity_alerts,

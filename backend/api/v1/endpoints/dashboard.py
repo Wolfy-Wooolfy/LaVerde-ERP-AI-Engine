@@ -16,8 +16,10 @@ from backend.modules.hr.services.kpi_service import (
     get_payroll_risk_dashboard,
     get_tenure_distribution,
 )
+from backend.modules.campaign_performance import domain as campperf_domain
 from backend.modules.campaign_performance.services.campaign_service import (
     get_campaign_performance_overview,
+    get_campaign_performance_windowed,
 )
 from backend.modules.campaign_performance.services.timeline_service import (
     CampaignNotFoundError,
@@ -186,16 +188,48 @@ async def marketing_attribution_dashboard(
 )
 async def campaign_performance_dashboard(
     request: Request,
+    window: str = Query(campperf_domain.DEFAULT_WINDOW),
+    start_month: str | None = Query(None),
+    end_month: str | None = Query(None),
     user: str = Depends(get_current_user_html),
 ) -> HTMLResponse:
-    # Server-side render, mirroring the marketing-attribution page: call the read-only
-    # service and hand the result straight to the template. No new backend logic and no
-    # new Odoo calls — display only of the per-campaign funnel overview.
-    data = await get_campaign_performance_overview()
+    # Server-side render. The list is scoped to a Cairo WINDOW (locked default: last
+    # 3 months). "all" routes to the shipped un-windowed overview (incl. migration);
+    # every dated preset / valid custom range routes to the windowed aggregator
+    # (migration excluded). An invalid/partial custom range silently falls back to
+    # the default preset (this HTML page never 422s a hand-edited URL — same policy
+    # as the timeline). All paths are read-only; the template branches on win.is_windowed.
+    has_custom = bool(start_month) and bool(end_month)
+    if not has_custom and window not in campperf_domain.WINDOW_PRESETS:
+        window = campperf_domain.DEFAULT_WINDOW
+
+    if window == campperf_domain.WINDOW_ALL and not has_custom:
+        data = await get_campaign_performance_overview()
+        win = {
+            "active": campperf_domain.WINDOW_ALL, "is_windowed": False,
+            "is_custom_range": False, "start": "", "end": "",
+            "ref_month": data["reference_date"][:7],
+        }
+    else:
+        try:
+            data = await get_campaign_performance_windowed(
+                window=window, start_month=start_month, end_month=end_month,
+            )
+        except InvalidTimelineRangeError:
+            data = await get_campaign_performance_windowed(window=campperf_domain.DEFAULT_WINDOW)
+        win = {
+            "active": data["window"], "is_windowed": True,
+            "is_custom_range": data["is_custom_range"],
+            "start": data["window_start_month"] if data["is_custom_range"] else "",
+            "end": data["window_end_month"] if data["is_custom_range"] else "",
+            "ref_month": data["reference_date"][:7],
+        }
+
     ctx = _base_ctx(request, user)
     ctx.update({
         "page": "campaign_performance_dashboard",
         "campperf": data,
+        "win": win,
     })
     return templates.TemplateResponse(request, "campaign_performance/dashboard.html", ctx)
 

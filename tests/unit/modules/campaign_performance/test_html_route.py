@@ -184,7 +184,7 @@ def test_200_with_scoped_module_grant() -> None:
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_overview",
             new=AsyncMock(return_value=_MOCK_DATA),
         ):
-            r = c.get(_URL)
+            r = c.get(_URL, params={"window": "all"})   # all-time path → the overview fn
         assert r.status_code == 200
         assert "text/html" in r.headers.get("content-type", "")
         body = r.text
@@ -208,7 +208,7 @@ def test_200_renders_data_quality_long_tail_and_won_stages() -> None:
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_overview",
             new=AsyncMock(return_value=_MOCK_DATA),
         ):
-            r = c.get(_URL)
+            r = c.get(_URL, params={"window": "all"})   # long tail only exists in the all-time view
         assert r.status_code == 200
         body = r.text
         assert "Data quality" in body                   # data-quality section heading
@@ -217,6 +217,103 @@ def test_200_renders_data_quality_long_tail_and_won_stages() -> None:
         assert "Reservation" in body                     # is_won_stage_names in footer
         # The junk bucket's raw "None" label must NOT leak in as a campaign list row.
         assert ">None<" not in body
+    finally:
+        _cleanup()
+
+
+# ── default (windowed) path + the window switcher ─────────────────────────────
+
+
+_MOCK_WINDOWED = {
+    "campaigns": [
+        {
+            "campaign_id": 1,
+            "campaign_name": "FB-AY",
+            "lead_count": 320,
+            "outcomes": [
+                {"group": "جديد", "count": 200, "pct": 62.5},
+                {"group": "مهتم", "count": 60, "pct": 18.75},
+                {"group": "اشترى", "count": 20, "pct": 6.25},
+                {"group": "بلا نتيجة", "count": 40, "pct": 12.5},
+            ],
+            "attribution_status": "confirmed",
+            "media_buyer_id": 101,
+            "media_buyer_name": "Ahmed Aymen",
+            "concentration": 100.0,
+            "both_set_count": 100,
+        },
+    ],
+    "data_quality": {"junk_none": None, "no_campaign": None},
+    "total_leads_population": 320,
+    "active_campaign_count": 1,
+    "window": "last3",
+    "is_custom_range": False,
+    "window_months": 3,
+    "window_start_month": "2026-04",
+    "window_end_month": "2026-06",
+    "legacy_days_excluded": ["2025-11-15", "2025-11-16", "2025-11-26"],
+    "is_won_stage_names": ["Reservation"],
+    "config_warnings": [],
+    "integrity_alerts": [],
+    "reference_date": "2026-06-16",
+    "as_of": "2026-06-16T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 25,
+}
+
+
+def test_default_page_is_windowed_and_renders_switcher() -> None:
+    """No query params → the locked default (last 3 months, windowed). The window
+    switcher + windowed caption render, and the active campaign row is shown."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_campaign_performance_windowed",
+            new=AsyncMock(return_value=_MOCK_WINDOWED),
+        ):
+            r = c.get(_URL)                              # no params → DEFAULT_WINDOW (last3)
+        assert r.status_code == 200
+        body = r.text
+        # Window switcher present (presets + the windowed caption).
+        assert "Time window" in body                    # campperf_window_label
+        assert "All-time" in body                       # campperf_window_all pill
+        assert "Last 3 months" in body                  # campperf_window_last3 pill
+        assert "migration excluded" in body             # windowed list caption
+        # The active campaign row renders (same row shape as all-time).
+        assert "FB-AY" in body
+        assert "Ahmed Aymen" in body
+        # No long-tail summary suffix in a windowed view.
+        assert "smaller campaigns" not in body
+    finally:
+        _cleanup()
+
+
+def test_invalid_custom_range_falls_back_to_default(monkeypatch=None) -> None:
+    """A hand-edited invalid custom range must NOT 500 — the HTML route silently
+    falls back to the default windowed preset (never 422s a hand-edited URL)."""
+    from backend.modules.campaign_performance.services.timeline_service import (
+        InvalidTimelineRangeError,
+    )
+
+    calls = {"n": 0}
+
+    async def _fake(**kwargs):
+        calls["n"] += 1
+        # First call (the bad range) raises; the fallback call (no custom) succeeds.
+        if kwargs.get("start_month") or kwargs.get("end_month"):
+            raise InvalidTimelineRangeError("start_month is after end_month")
+        return _MOCK_WINDOWED
+
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_campaign_performance_windowed",
+            new=_fake,
+        ):
+            r = c.get(_URL, params={"start_month": "2026-06", "end_month": "2026-01"})
+        assert r.status_code == 200
+        assert calls["n"] == 2                           # bad range, then default fallback
+        assert "FB-AY" in r.text
     finally:
         _cleanup()
 
@@ -233,7 +330,7 @@ def test_200_surfaces_integrity_alerts_loudly() -> None:
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_overview",
             new=AsyncMock(return_value=data),
         ):
-            r = c.get(_URL)
+            r = c.get(_URL, params={"window": "all"})
         assert r.status_code == 200
         assert "Integrity alerts" in r.text
         assert "locked-decision drift" in r.text or "drift" in r.text

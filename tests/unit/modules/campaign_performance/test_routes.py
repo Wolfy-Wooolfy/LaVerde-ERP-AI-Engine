@@ -21,6 +21,7 @@ from backend.modules.campaign_performance.services.timeline_service import (
 )
 
 _URL = "/api/v1/campaign-performance/overview"
+_WINDOWED_URL = "/api/v1/campaign-performance/windowed"
 _TIMELINE_URL = "/api/v1/campaign-performance/timeline"
 
 _TESTADMIN_RECORD = UserRecord(
@@ -210,6 +211,151 @@ def test_200_with_scoped_module_grant() -> None:
         ):
             r = c.get(_URL)
         assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+# ── /windowed (Level 1, windowed list) ───────────────────────────────────────
+
+
+_MOCK_WINDOWED = {
+    "campaigns": [
+        {
+            "campaign_id": 1,
+            "campaign_name": "FB-AY",
+            "lead_count": 320,
+            "outcomes": [
+                {"group": "جديد", "count": 200, "pct": 62.5},
+                {"group": "مهتم", "count": 60, "pct": 18.75},
+                {"group": "اشترى", "count": 20, "pct": 6.25},
+                {"group": "بلا نتيجة", "count": 40, "pct": 12.5},
+            ],
+            "attribution_status": "confirmed",
+            "media_buyer_id": 101,
+            "media_buyer_name": "Ahmed Aymen",
+            "concentration": 100.0,
+            "both_set_count": 100,
+        },
+    ],
+    "data_quality": {"junk_none": None, "no_campaign": None},
+    "total_leads_population": 320,
+    "active_campaign_count": 1,
+    "window": "last3",
+    "is_custom_range": False,
+    "window_months": 3,
+    "window_start_month": "2026-04",
+    "window_end_month": "2026-06",
+    "legacy_days_excluded": ["2025-11-15", "2025-11-16", "2025-11-26"],
+    "is_won_stage_names": ["Reservation"],
+    "config_warnings": [],
+    "integrity_alerts": [],
+    "reference_date": "2026-06-16",
+    "as_of": "2026-06-16T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 25,
+}
+
+
+def test_windowed_returns_200_and_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_performance_windowed",
+        new=AsyncMock(return_value=_MOCK_WINDOWED),
+    ):
+        r = client.get(_WINDOWED_URL, params={"window": "last3"})
+
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "campaigns", "data_quality", "total_leads_population", "active_campaign_count",
+        "window", "is_custom_range", "window_months", "window_start_month",
+        "window_end_month", "legacy_days_excluded", "is_won_stage_names",
+        "config_warnings", "integrity_alerts", "reference_date", "as_of",
+        "cache_status", "rpc_duration_ms",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+    assert body["window"] == "last3"
+    assert body["active_campaign_count"] == 1
+    assert body["campaigns"][0]["campaign_name"] == "FB-AY"
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_windowed_custom_range_forwarded(client: TestClient) -> None:
+    custom = {**_MOCK_WINDOWED, "window": "custom", "is_custom_range": True,
+              "window_start_month": "2025-10", "window_end_month": "2026-01"}
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_performance_windowed",
+        new=AsyncMock(return_value=custom),
+    ) as m:
+        r = client.get(
+            _WINDOWED_URL,
+            params={"start_month": "2025-10", "end_month": "2026-01"},
+        )
+    assert r.status_code == 200
+    assert r.json()["is_custom_range"] is True
+    assert m.await_args.kwargs["start_month"] == "2025-10"
+    assert m.await_args.kwargs["end_month"] == "2026-01"
+
+
+def test_windowed_invalid_range_returns_422(client: TestClient) -> None:
+    """Invalid window / custom range surfaces as 422 invalid_range. Validation
+    happens BEFORE any RPC, so the REAL service path is exercised (no Odoo)."""
+    for params in [
+        {"start_month": "2026-06", "end_month": "2026-01"},   # start > end
+        {"start_month": "2026-01"},                           # partial
+        {"start_month": "2026-13", "end_month": "2026-01"},   # malformed
+        {"start_month": "2000-01", "end_month": "2099-12"},   # over cap
+        {"window": "bogus"},                                  # unknown preset
+    ]:
+        r = client.get(_WINDOWED_URL, params=params)
+        assert r.status_code == 422, params
+        assert r.json()["error"]["code"] == "invalid_range", params
+
+
+def test_windowed_invalid_range_maps_service_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_performance_windowed",
+        new=AsyncMock(side_effect=InvalidTimelineRangeError("bad range")),
+    ):
+        r = client.get(_WINDOWED_URL, params={"window": "last3"})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "invalid_range"
+
+
+def test_windowed_503_on_odoo_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_performance_windowed",
+        new=AsyncMock(side_effect=OdooQueryError("connection refused")),
+    ):
+        r = client.get(_WINDOWED_URL, params={"window": "current"})
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+def test_windowed_500_on_unexpected(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.campaign_performance.get_campaign_performance_windowed",
+        new=AsyncMock(side_effect=RuntimeError("boom")),
+    ):
+        r = client.get(_WINDOWED_URL, params={"window": "current"})
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
+
+
+def test_windowed_401_when_unauthenticated() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_WINDOWED_URL, params={"window": "last3"})
+    assert r.status_code == 401
+
+
+def test_windowed_403_without_module_grant() -> None:
+    c = _client_with(_OTHER_MODULE_RECORD)
+    try:
+        r = c.get(_WINDOWED_URL, params={"window": "last3"})
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         if hasattr(app.state, "user_repo"):

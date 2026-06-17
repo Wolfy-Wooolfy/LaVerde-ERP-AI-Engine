@@ -30,6 +30,98 @@
     </div>
   </div>
 
+  {# ── 1b. WINDOW SWITCHER — presets + custom range (full page reload, query param) ─
+     The list is scoped to a Cairo window (default: last 3 months). "All-time" is the
+     shipped un-windowed view (migration included); every dated window excludes the
+     Nov-2025 migration. A custom range NEVER lights a preset pill: preset-active =
+     (not win.is_custom_range and win.active == key). The Custom pill is active when
+     win.is_custom_range. Apply is guarded client-side (both set · start ≤ end · span
+     ≤ 24mo); the dropdowns list only the last 24 Cairo months, so neither a future
+     month nor an out-of-cap span is selectable — the backend can never be sent a
+     range it would reject (and a hand-edited bad URL silently falls back to default). #}
+  <div class="space-y-3"
+       x-data="{
+         showCustom: {{ 'true' if win.is_custom_range else 'false' }},
+         start: '{{ win.start }}',
+         end: '{{ win.end }}',
+         maxMonth: '{{ win.ref_month }}',
+         maxSpan: 24,
+         get monthList() {
+           const [y, m] = this.maxMonth.split('-').map(Number);
+           const out = [];
+           for (let i = 0; i < this.maxSpan; i++) {
+             const total = (y * 12 + (m - 1)) - i;
+             out.push(Math.floor(total / 12) + '-' + String((total % 12) + 1).padStart(2, '0'));
+           }
+           return out;
+         },
+         span() {
+           if (!this.start || !this.end) return 0;
+           const [sy, sm] = this.start.split('-').map(Number);
+           const [ey, em] = this.end.split('-').map(Number);
+           return (ey * 12 + em) - (sy * 12 + sm) + 1;
+         },
+         get valid() { const s = this.span(); return s >= 1 && s <= this.maxSpan; },
+         apply() {
+           if (!this.valid) return;
+           window.location.href = '/campaign-performance/dashboard?start_month=' +
+             this.start + '&end_month=' + this.end;
+         }
+       }">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">{{ _t("campperf_window_label") }}</span>
+      {% for key, lbl_key in [("current", "campperf_window_current"), ("last3", "campperf_window_last3"), ("all", "campperf_window_all")] %}
+      <a href="/campaign-performance/dashboard?window={{ key }}"
+         class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                {% if not win.is_custom_range and win.active == key %}bg-primary-600 border-primary-600 text-white
+                {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+         {% if not win.is_custom_range and win.active == key %}aria-current="page"{% endif %}>
+        {{ _t(lbl_key) }}
+      </a>
+      {% endfor %}
+      {# Custom pill — toggles the pickers; primary-filled when a custom range drives the view. #}
+      <button type="button" @click="showCustom = !showCustom"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                     {% if win.is_custom_range %}bg-primary-600 border-primary-600 text-white
+                     {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+              {% if win.is_custom_range %}aria-current="page"{% endif %}>
+        {{ _t("campperf_timeline_preset_custom") }}
+      </button>
+    </div>
+
+    {# Month dropdowns — revealed by the Custom pill. Each lists the last 24 Cairo
+       months; the Apply guard enforces start ≤ end. Inline display:none (when not
+       already custom) avoids a flash before Alpine initialises. #}
+    <div x-show="showCustom"{% if not win.is_custom_range %} style="display: none;"{% endif %}
+         class="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-4 py-3">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_start") }}</label>
+        <select x-model="start" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_end") }}</label>
+        <select x-model="end" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <button type="button" @click="apply()" :disabled="!valid"
+              class="px-4 py-1.5 rounded-lg text-xs font-medium border border-primary-600 bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed">
+        {{ _t("campperf_timeline_custom_apply") }}
+      </button>
+      <p x-show="start && end && !valid" class="basis-full text-[11px] text-warning-600 dark:text-warning-400">
+        {{ _t("campperf_timeline_custom_invalid") }}
+      </p>
+    </div>
+  </div>
+
   {# ── 2. INTEGRITY ALERTS / CONFIG WARNINGS — LOUD when present (empty today) ─ #}
   {% if campperf.integrity_alerts | length > 0 %}
   <div class="bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-xl px-5 py-4">
@@ -114,9 +206,16 @@
 
     <div class="px-6 pt-5 pb-4 border-b border-neutral-100 dark:border-neutral-700">
       <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("campperf_list_title") }}</h2>
+      {% if win.is_windowed %}
+      <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+        {{ "{:,}".format(campperf.active_campaign_count) }} &middot; {{ _t("campperf_window_list_caption") }}
+        <span class="text-neutral-400 dark:text-neutral-500">&middot; {{ campperf.window_start_month }}{% if campperf.window_start_month != campperf.window_end_month %} → {{ campperf.window_end_month }}{% endif %} &middot; {{ _t("campperf_window_excl_migration") }}</span>
+      </p>
+      {% else %}
       <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
         {{ "{:,}".format(campperf.listed_campaign_count) }} &middot; {{ _t("campperf_list_caption") }}
       </p>
+      {% endif %}
     </div>
 
     <div class="px-6 py-5 space-y-5">
@@ -126,7 +225,7 @@
         <svg class="w-10 h-10 text-neutral-300 dark:text-neutral-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/>
         </svg>
-        <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ _t("mktattr_no_buyers") }}</p>
+        <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ _t("campperf_window_empty") if win.is_windowed else _t("mktattr_no_buyers") }}</p>
       </div>
       {% endif %}
 
@@ -135,7 +234,7 @@
          display:none prevents a pre-Alpine flash. #}
       {% for c in campperf.campaigns %}
       <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4"
-           {% if loop.index > visible_count %}x-show="showAll" style="display: none;"{% endif %}>
+           {% if not win.is_windowed and loop.index > visible_count %}x-show="showAll" style="display: none;"{% endif %}>
 
         {# Header: campaign name + media-buyer cell · lead count #}
         <div class="flex items-start justify-between gap-3 mb-3">
@@ -217,8 +316,9 @@
       </div>
       {% endfor %}
 
-      {# Expander — reveals every listed campaign beyond the top 15. #}
-      {% if campperf.campaigns | length > visible_count %}
+      {# Expander — reveals every listed campaign beyond the top 15 (all-time only;
+         a windowed view lists its small active set in full, no expander). #}
+      {% if not win.is_windowed and campperf.campaigns | length > visible_count %}
       <div class="pt-1">
         <button @click="showAll = !showAll"
           class="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-lg
@@ -235,8 +335,9 @@
       </div>
       {% endif %}
 
-      {# Long tail — ONE de-emphasized summary row for every campaign below threshold. #}
-      {% if campperf.long_tail %}
+      {# Long tail — ONE de-emphasized summary row for every campaign below threshold
+         (all-time only; a windowed view lists every active campaign individually). #}
+      {% if not win.is_windowed and campperf.long_tail %}
       {% set lt = campperf.long_tail %}
       <div class="rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 bg-neutral-50/60 dark:bg-neutral-800/40 px-4 py-3">
         <div class="flex items-center justify-between gap-3">
@@ -275,6 +376,11 @@
 
   {# ── 5. FOOTER ──────────────────────────────────────────────────────────── #}
   <footer class="pt-4 pb-2 border-t border-neutral-200 dark:border-neutral-700 space-y-1">
+    {% if win.is_windowed and campperf.legacy_days_excluded | length > 0 %}
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      {{ _t("campperf_window_footer_note") }}
+    </p>
+    {% endif %}
     {% if campperf.is_won_stage_names | length > 0 %}
     <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
       {{ _t("mktattr_won_stages") }}: {{ campperf.is_won_stage_names | join(" · ") }}
