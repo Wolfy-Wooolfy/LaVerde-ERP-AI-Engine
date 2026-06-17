@@ -75,6 +75,15 @@ LEGACY_DAY_MIN: int = 10000
 # (default; overridable per call as the `months` query param, 1..12).
 DEFAULT_WINDOW_MONTHS: int = 3
 
+# Maximum span (in whole Cairo months, inclusive) of an explicit CUSTOM date range
+# (start_month..end_month). The funnel renders one card + one trend bar per month,
+# so an unbounded span would be unwieldy and fetch ever more leads; the real
+# post-migration flow only begins ~Nov-2025, so 24 months covers all genuine data
+# with headroom. A range wider than this is rejected (InvalidTimelineRangeError on
+# the JSON API; silent fallback to the months preset on the HTML page). The custom
+# range is OPT-IN — absent start/end, the trailing `months` preset is unchanged.
+MAX_CUSTOM_SPAN_MONTHS: int = 24
+
 # How many trailing Cairo calendar months the lightweight volume TREND spans
 # (volume-only, 0-filled). Fixed per request; wider than the funnel window so the
 # trend gives context the periods alone do not.

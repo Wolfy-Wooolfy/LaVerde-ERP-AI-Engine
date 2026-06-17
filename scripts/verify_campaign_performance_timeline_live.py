@@ -19,6 +19,12 @@ Runs on the 4 CONFIRMED campaigns. Proves the period-level (month) timeline:
         bounds + an independent group→stage_id domain).
   §T6 — legacy-day detection: the detected legacy days each hold >= LEGACY_DAY_MIN
         leads and NO other Cairo day does (independent full-population re-scan).
+  §T7 — custom range == preset: a custom start_month..end_month equal to the months=3
+        preset window reproduces it BYTE-IDENTICALLY (modulo as_of/rpc/cache/flag).
+  §T8 — DST-crossing custom range (Oct→Jan): each Cairo month bounded independently
+        (ZoneInfo→UTC) reconciles against the service, legacy-day leads subtracted.
+  §T9 — single-month custom range (start == end): one reconciling period, 6-bar trend
+        ending at that month.
 
 ALSO PRINTS, per confirmed campaign, its per-month POST-MIGRATION lead volume for
 the last ~12 Cairo months — so the real ongoing flow is visible (it may be modest;
@@ -319,9 +325,109 @@ async def main():
         print(f"  detection matches service get_legacy_migration_days : {_ok(detected == my_legacy)}")
         print()
 
+        # ── §T7–§T9 — CUSTOM DATE RANGE (start_month..end_month) ───────────────
+        print(_SEP)
+        print("  §T7–§T9 — CUSTOM DATE RANGE (start_month..end_month)")
+        print(_SEP)
+        _NON_IDENTITY = {"as_of", "rpc_duration_ms", "cache_status", "is_custom_range"}
+        _cp_cache.clear()
+        for cid in confirmed_ids:
+            cname = id_to_name.get(cid, f"id={cid}")
+            print(_SEP2)
+            print(f"  CAMPAIGN {cname!r} (id={cid})")
+            print(_SEP2)
+
+            # §T7 — a custom range equal to the months=3 preset window reproduces it
+            #        BYTE-IDENTICALLY (modulo runtime/flag fields). The trend ends at
+            #        end_month == the current month, so even the 6-bar trip matches.
+            preset = await get_campaign_timeline(client=client, campaign_id=cid, window_months=3)
+            custom = await get_campaign_timeline(
+                client=client, campaign_id=cid,
+                start_month=preset["window_start_month"],
+                end_month=preset["window_end_month"],
+            )
+            sp = {k: v for k, v in preset.items() if k not in _NON_IDENTITY}
+            sc = {k: v for k, v in custom.items() if k not in _NON_IDENTITY}
+            t7_ok = (
+                sp == sc
+                and custom["is_custom_range"] is True
+                and preset["is_custom_range"] is False
+            )
+            fail_count += 0 if t7_ok else 1
+            print(f"  §T7 custom == preset(3mo)   : window="
+                  f"{preset['window_start_month']}..{preset['window_end_month']}  "
+                  f"identical={sp == sc}  {_ok(t7_ok)}")
+            if not t7_ok:
+                diffs = sorted(
+                    {k for k in sp if sp.get(k) != sc.get(k)} | (set(sc) ^ set(sp))
+                )
+                print(f"        DIFFERING KEYS: {diffs}")
+
+            # §T9 — single month (start == end): exactly one reconciling period, and
+            #        the 6-bar trend ends at that month.
+            single = preset["window_end_month"]
+            tl_single = await get_campaign_timeline(
+                client=client, campaign_id=cid, start_month=single, end_month=single,
+            )
+            p0 = tl_single["periods"][0]
+            t9_ok = (
+                len(tl_single["periods"]) == 1
+                and p0["month"] == single
+                and tl_single["trend"][-1]["month"] == single
+                and sum(o["count"] for o in p0["outcomes"]) == p0["lead_count"]
+            )
+            fail_count += 0 if t9_ok else 1
+            print(f"  §T9 single month {single}      : periods={len(tl_single['periods'])} "
+                  f"trend_end={tl_single['trend'][-1]['month']} "
+                  f"lead_count={p0['lead_count']:,}  {_ok(t9_ok)}")
+
+        # §T8 — DST-CROSSING custom range. Egypt ends DST at the end of October
+        #        (Oct = UTC+3, Nov = UTC+2), so an Oct→Jan window crosses the DST
+        #        boundary AND covers the Nov-2025 migration. Each Cairo month is
+        #        bounded independently (ZoneInfo → UTC) and reconciled against the
+        #        service, with legacy-day leads subtracted — never a single naive span.
+        print(_SEP2)
+        dst_cid = confirmed_ids[0]
+        dst_name = id_to_name.get(dst_cid, f"id={dst_cid}")
+        dst_start, dst_end = "2025-10", "2026-01"
+        print(f"  §T8 DST-crossing range {dst_start}..{dst_end}  "
+              f"campaign {dst_name!r} (id={dst_cid})")
+        tl_dst = await get_campaign_timeline(
+            client=client, campaign_id=dst_cid, start_month=dst_start, end_month=dst_end,
+        )
+        legacy_in_range = sorted(d for d in detected if dst_start <= d[:7] <= dst_end)
+        t8_ok = True
+        for p in tl_dst["periods"]:
+            m_lo, m_hi = _month_bounds_utc(p["month"])     # DST-aware Cairo→UTC bounds
+            raw = await _count(
+                client,
+                [(CAMPAIGN_FIELD, "=", dst_cid),
+                 ("create_date", ">=", m_lo), ("create_date", "<", m_hi)],
+            )
+            legacy_in_month = 0
+            for d in detected:
+                if d[:7] != p["month"]:
+                    continue
+                d_lo, d_hi = _day_bounds_utc(d)
+                legacy_in_month += await _count(
+                    client,
+                    [(CAMPAIGN_FIELD, "=", dst_cid),
+                     ("create_date", ">=", d_lo), ("create_date", "<", d_hi)],
+                )
+            expected = raw - legacy_in_month
+            ok = expected == p["lead_count"]
+            t8_ok = t8_ok and ok
+            flag = "  <-legacy-excl" if legacy_in_month else ""
+            print(f"        {p['month']}  CP={p['lead_count']:>7,}  "
+                  f"ODOO(−legacy)={expected:>7,}  (raw={raw:,} legacy={legacy_in_month:,})"
+                  f"{flag}  {_ok(ok)}")
+        fail_count += 0 if t8_ok else 1
+        print(f"  §T8 DST-crossing reconcile  : legacy_days_in_range={legacy_in_range}  {_ok(t8_ok)}")
+        print()
+
     print(_SEP)
     if fail_count == 0:
-        print("  TIMELINE VERIFICATION COMPLETE — ALL CHECKS (§T1–§T6) PASSED.")
+        print("  TIMELINE VERIFICATION COMPLETE — ALL CHECKS (§T1–§T9) PASSED.")
     else:
         print(f"  TIMELINE VERIFICATION COMPLETE — {fail_count} CHECK(S) FAILED/FLAGGED. STOP and report.")
     print(_SEP)

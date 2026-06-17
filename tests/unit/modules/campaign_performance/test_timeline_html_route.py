@@ -19,6 +19,7 @@ from backend.auth.models import UserRecord
 from backend.main import app
 from backend.modules.campaign_performance.services.timeline_service import (
     CampaignNotFoundError,
+    InvalidTimelineRangeError,
 )
 
 _URL = "/campaign-performance/timeline"
@@ -78,6 +79,7 @@ _MOCK_TIMELINE = {
     "trend_months": 6,
     "window_start_month": "2026-04",
     "window_end_month": "2026-06",
+    "is_custom_range": False,
     "legacy_days_excluded": ["2025-11-15", "2025-11-16", "2025-11-26"],
     "reference_date": "2026-06-16",
     "as_of": "2026-06-16T10:00:00+00:00",
@@ -185,5 +187,75 @@ def test_unknown_campaign_id_redirects_to_list() -> None:
             r = c.get(_URL, params={"campaign_id": 999999})
         assert r.status_code == 302
         assert _LIST_URL in r.headers.get("location", "")
+    finally:
+        _cleanup()
+
+
+# ── custom range rendering + silent fallback ────────────────────────────────
+
+
+_CUSTOM_TIMELINE = {
+    **_MOCK_TIMELINE,
+    "is_custom_range": True,
+    "window_months": 4,
+    "window_start_month": "2025-11",
+    "window_end_month": "2026-02",
+}
+
+
+def test_custom_range_renders_with_custom_pill_active() -> None:
+    """A custom range renders: the Custom pill is the active one, the month pickers
+    are seeded with the active window, and the trend caption names the end month."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_campaign_timeline",
+            new=AsyncMock(return_value=_CUSTOM_TIMELINE),
+        ) as m:
+            r = c.get(
+                _URL,
+                params={"campaign_id": 10, "start_month": "2025-11", "end_month": "2026-02"},
+            )
+        assert r.status_code == 200
+        body = r.text
+        # Custom pill label + month dropdowns (selects, not native month inputs).
+        assert "Custom" in body
+        assert 'type="month"' not in body
+        assert 'x-model="start"' in body
+        assert 'x-model="end"' in body
+        assert body.count("<select") == 2
+        assert "Select month" in body                       # placeholder option
+        # Alpine state is seeded from the active custom window (drives the selected option).
+        assert "start: '2025-11'" in body
+        assert "end: '2026-02'" in body
+        # Conditional trend caption names the window end month (parallel to the preset copy).
+        assert "Leads per month — 6 months ending" in body
+        assert "2026-02" in body
+        # The custom range was forwarded to the service.
+        assert m.await_args.kwargs["start_month"] == "2025-11"
+        assert m.await_args.kwargs["end_month"] == "2026-02"
+    finally:
+        _cleanup()
+
+
+def test_invalid_custom_range_falls_back_to_preset() -> None:
+    """A bad hand-edited custom URL does NOT 422 on the HTML page — it silently
+    retries with the months preset and renders normally."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_campaign_timeline",
+            new=AsyncMock(side_effect=[InvalidTimelineRangeError("bad"), _MOCK_TIMELINE]),
+        ) as m:
+            r = c.get(
+                _URL,
+                params={"campaign_id": 10, "start_month": "2026-06", "end_month": "2026-01"},
+            )
+        assert r.status_code == 200
+        assert "FB-AY" in r.text                       # rendered the preset result
+        assert m.await_count == 2                       # custom attempt, then preset fallback
+        # Second (fallback) call dropped the custom range.
+        assert m.await_args.kwargs.get("start_month") is None
+        assert m.await_args.kwargs.get("end_month") is None
     finally:
         _cleanup()
