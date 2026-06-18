@@ -18,6 +18,7 @@ from backend.modules.hr.services.kpi_service import (
 )
 from backend.modules.campaign_performance import domain as campperf_domain
 from backend.modules.campaign_performance.services.campaign_service import (
+    get_campaign_grand_totals,
     get_campaign_performance_overview,
     get_campaign_performance_windowed,
 )
@@ -225,11 +226,18 @@ async def campaign_performance_dashboard(
             "ref_month": data["reference_date"][:7],
         }
 
+    # Grand totals are window-INDEPENDENT: the full-scale all-time funnel INCLUDING
+    # the Nov-2025 migration plus the same EXCLUDING it. Called in EVERY branch
+    # (all-time / preset / custom) so the pinned footer block is byte-identical
+    # whatever window is on screen — never the windowed numbers above it.
+    grand_totals = await get_campaign_grand_totals()
+
     ctx = _base_ctx(request, user)
     ctx.update({
         "page": "campaign_performance_dashboard",
         "campperf": data,
         "win": win,
+        "grand_totals": grand_totals,
     })
     return templates.TemplateResponse(request, "campaign_performance/dashboard.html", ctx)
 

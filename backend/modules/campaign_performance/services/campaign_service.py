@@ -42,7 +42,7 @@ attribution metric.
 
 import time
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -84,6 +84,12 @@ _STAGE_MODEL = "crm.stage"
 
 _CACHE_KEY_PREFIX = "campaign_performance:overview"
 _CACHE_KEY_PREFIX_WINDOWED = "campaign_performance:windowed"
+_CACHE_KEY_PREFIX_GRAND = "campaign_performance:grand_totals"
+# The grand-totals aggregate read_groups the WHOLE population (~147k leads, one RPC
+# seen at ~28s live) and the pinned block loads on every page view, yet the figures
+# only change ~daily. Hold it for an hour (vs the default 60s) — the cache key is
+# already Cairo-date-stamped, so it still refreshes at most once per Cairo day.
+_GRAND_TTL_SECONDS = 60 * 60
 _CAIRO_TZ = ZoneInfo("Africa/Cairo")
 _PAGE = 5000
 
@@ -128,6 +134,215 @@ def _outcomes(group_counts: dict[str, int], total: int, label: str) -> list[dict
         }
         for g in GROUP_ORDER
     ]
+
+
+def _legacy_days_domain(legacy_days: set[str]) -> Optional[list]:
+    """Build a POSITIVE Odoo domain matching every lead created on any legacy
+    migration day, as the OR of each Cairo day's [day_start, next_day_start) UTC
+    range.
+
+    Each "YYYY-MM-DD" Cairo day is turned into its UTC half-open bounds with the
+    SAME Cairo→UTC handling the timeline/windowed fetch uses (build the Cairo-aware
+    first-instant of the day and of the next day, then .astimezone(UTC)). The ranges
+    are OR-ed in Odoo prefix (polish) notation — positive ranges, no negation. The
+    DST-safe next-day boundary is built from a fresh date (not timedelta on an aware
+    datetime), identical to the live verification's _day_bounds_utc.
+
+    Returns None when there are no legacy days (nothing to exclude) so the caller can
+    skip the RPC entirely (migration counts then collapse to zero).
+    """
+    days = sorted(legacy_days)
+    if not days:
+        return None
+    ranges: list = []
+    for d in days:
+        day = datetime.strptime(d, "%Y-%m-%d").date()
+        nxt = day + timedelta(days=1)
+        lo = datetime(day.year, day.month, day.day, tzinfo=_CAIRO_TZ)
+        hi = datetime(nxt.year, nxt.month, nxt.day, tzinfo=_CAIRO_TZ)
+        lo_str = lo.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        hi_str = hi.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        ranges.append(["&", ("create_date", ">=", lo_str), ("create_date", "<", hi_str)])
+    domain_out: list = ["|"] * (len(ranges) - 1)
+    for rng in ranges:
+        domain_out.extend(rng)
+    return domain_out
+
+
+async def get_campaign_grand_totals(
+    client: Optional[OdooClient] = None,
+    legacy_days: Optional[set[str]] = None,
+    now_cairo: Optional[datetime] = None,
+) -> dict:
+    """Return the window-INDEPENDENT grand-totals funnel for the whole population.
+
+    Two all-time 4-group funnels, GROUPED (never a row fetch — no 130k-row scan):
+      - incl: ALL leads (active_test=False) INCLUDING the Nov-2025 legacy migration —
+        the full population funnel (ties 1:1 to the overview's aggregate funnel and
+        total_leads_population).
+      - excl: the same with the legacy migration SUBTRACTED per group — what the
+        ongoing, non-migration funnel looks like.
+
+    Both are built from read_group-by-stage_id counts classified through the SAME
+    stage_info + classify_stage the overview uses, so the group shape matches the row
+    funnels exactly. The migration slice is one extra read_group restricted to the
+    legacy days' UTC ranges (see _legacy_days_domain); excl[g] = incl[g] −
+    migration[g], with every excl[g] guarded >= 0 (explicit raise — survives -O).
+
+    Args:
+        client: optional injected OdooClient (tests pass a mock; production opens and
+            closes its own).
+        legacy_days: optional injected migration-day set (tests) — bypasses the live
+            detection RPC entirely.
+        now_cairo: optional injected Cairo-local "now" (tests) — pins reference_date.
+
+    The result is cached ONLY for the default configuration (no legacy/now overrides)
+    under its own key, the same pattern as the overview/windowed services.
+
+    Returns:
+        {
+          "incl": {"total": int, "groups": [{group, count, pct}, ...]},
+          "excl": {"total": int, "groups": [{group, count, pct}, ...]},
+          "migration_total": int,
+          "legacy_days": [str, ...],
+          "reference_date": str, "as_of": str,
+          "cache_status": str, "rpc_duration_ms": int,
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any Odoo RPC fails.
+        RuntimeError: if a funnel fails to reconcile, or any excl group would go
+            negative (migration count exceeds the all-time count for that group).
+    """
+    _assert_read_only()
+
+    default_config = legacy_days is None and now_cairo is None
+
+    ref = now_cairo if now_cairo is not None else datetime.now(_CAIRO_TZ)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=_CAIRO_TZ)
+    cairo_today = ref.date()
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_GRAND)
+    if default_config:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit: {cache_key}")
+            return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+        logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # ── RPC 1 — crm.stage id+name+is_won (outcome group mapping) ──────────
+        stages = await _client.execute_kw(
+            _STAGE_MODEL,
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["id", "name", "is_won"]},
+        )
+
+        # ── RPC 2 — ALL leads grouped by stage_id (incl. migration + archived) ─
+        all_by_stage = await _client.execute_kw(
+            _LEAD_MODEL,
+            "read_group",
+            args=[[], ["stage_id"], ["stage_id"]],
+            kwargs={"context": _CTX_ALL, "lazy": False},
+        )
+
+        # ── RPC 3 — legacy migration days (cached long; injectable for tests) ──
+        resolved_legacy = (
+            set(legacy_days) if legacy_days is not None
+            else await get_legacy_migration_days(_client)
+        )
+
+        # ── RPC 4 — migration leads grouped by stage_id (legacy days ONLY) ─────
+        # Domain = OR of the legacy days' UTC ranges (positive). Skipped entirely
+        # when no legacy days were detected (migration then collapses to zero).
+        migration_domain = _legacy_days_domain(resolved_legacy)
+        if migration_domain is not None:
+            migration_by_stage = await _client.execute_kw(
+                _LEAD_MODEL,
+                "read_group",
+                args=[migration_domain, ["stage_id"], ["stage_id"]],
+                kwargs={"context": _CTX_ALL, "lazy": False},
+            )
+        else:
+            migration_by_stage = []
+    except ReadOnlyViolationError:
+        raise
+    except Exception as exc:
+        raise OdooQueryError(
+            f"get_campaign_grand_totals() RPC failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+
+    # ── stage info for classify_stage (identical to the overview) ─────────────
+    stage_info: dict[int, dict] = {}
+    for s in stages:
+        stage_info[int(s["id"])] = {
+            "name": str(s.get("name") or ""),
+            "is_won": bool(s.get("is_won")),
+        }
+
+    def _classify_by_stage(rows: list[dict]) -> tuple[dict[str, int], int]:
+        groups = {g: 0 for g in GROUP_ORDER}
+        total = 0
+        for r in rows:
+            cnt = int(r.get("__count") or 0)
+            total += cnt
+            sid, _ = _m2o(r.get("stage_id"))   # stage_id may be False -> None -> جديد
+            groups[classify_stage(sid, stage_info)] += cnt
+        return groups, total
+
+    incl_groups, incl_total = _classify_by_stage(all_by_stage)
+    migration_groups, migration_total = _classify_by_stage(migration_by_stage)
+
+    # ── excl = incl − migration, per group, guarded non-negative ──────────────
+    excl_groups: dict[str, int] = {}
+    for g in GROUP_ORDER:
+        diff = incl_groups[g] - migration_groups[g]
+        if diff < 0:
+            raise RuntimeError(
+                f"Grand-totals reconciliation FAILED for group {g!r}: migration "
+                f"{migration_groups[g]} exceeds all-time {incl_groups[g]} "
+                f"(excl would be {diff} < 0). Refusing an inconsistent funnel."
+            )
+        excl_groups[g] = diff
+    excl_total = incl_total - migration_total
+
+    logger.info(
+        f"Campaign grand totals: incl={incl_total:,} migration={migration_total:,} "
+        f"excl={excl_total:,} | legacy_days={len(resolved_legacy)} | RPCs in {rpc_ms}ms "
+        f"| cache_key={cache_key}"
+    )
+
+    result: dict = {
+        "incl": {
+            "total": incl_total,
+            "groups": _outcomes(incl_groups, incl_total, "grand_totals incl migration"),
+        },
+        "excl": {
+            "total": excl_total,
+            "groups": _outcomes(excl_groups, excl_total, "grand_totals excl migration"),
+        },
+        "migration_total": migration_total,
+        "legacy_days": sorted(resolved_legacy),
+        "reference_date": cairo_today.isoformat(),
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "cache_status": "fresh",
+        "rpc_duration_ms": rpc_ms,
+    }
+
+    if default_config:
+        _cache.set(cache_key, result, ttl=_GRAND_TTL_SECONDS)
+    return result
 
 
 async def get_campaign_performance_overview(

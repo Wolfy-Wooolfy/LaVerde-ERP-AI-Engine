@@ -133,6 +133,44 @@ _MOCK_DATA = {
     "rpc_duration_ms": 42,
 }
 
+# The window-INDEPENDENT grand totals — the route calls get_campaign_grand_totals() in
+# EVERY branch, so every 200-path test must patch it (else a real OdooClient opens).
+# incl == 146,925 (full population incl. the Nov-2025 migration); excl == 21,156.
+_MOCK_GRAND = {
+    "incl": {
+        "total": 146925,
+        "groups": [
+            {"group": "جديد", "count": 100000, "pct": 68.06},
+            {"group": "مهتم", "count": 20000, "pct": 13.61},
+            {"group": "اشترى", "count": 6925, "pct": 4.71},
+            {"group": "بلا نتيجة", "count": 20000, "pct": 13.61},
+        ],
+    },
+    "excl": {
+        "total": 21156,
+        "groups": [
+            {"group": "جديد", "count": 12000, "pct": 56.72},
+            {"group": "مهتم", "count": 4000, "pct": 18.91},
+            {"group": "اشترى", "count": 1156, "pct": 5.46},
+            {"group": "بلا نتيجة", "count": 4000, "pct": 18.91},
+        ],
+    },
+    "migration_total": 125769,
+    "legacy_days": ["2025-11-15", "2025-11-16", "2025-11-26"],
+    "reference_date": "2026-06-16",
+    "as_of": "2026-06-16T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 12,
+}
+
+
+def _patch_grand():
+    """Patch the grand-totals aggregator the route calls in every branch."""
+    return patch(
+        "backend.api.v1.endpoints.dashboard.get_campaign_grand_totals",
+        new=AsyncMock(return_value=_MOCK_GRAND),
+    )
+
 
 def _client_with(record: UserRecord) -> TestClient:
     app.dependency_overrides[get_current_user_html] = lambda: record.username
@@ -183,7 +221,7 @@ def test_200_with_scoped_module_grant() -> None:
         with patch(
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_overview",
             new=AsyncMock(return_value=_MOCK_DATA),
-        ):
+        ), _patch_grand():
             r = c.get(_URL, params={"window": "all"})   # all-time path → the overview fn
         assert r.status_code == 200
         assert "text/html" in r.headers.get("content-type", "")
@@ -207,7 +245,7 @@ def test_200_renders_data_quality_long_tail_and_won_stages() -> None:
         with patch(
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_overview",
             new=AsyncMock(return_value=_MOCK_DATA),
-        ):
+        ), _patch_grand():
             r = c.get(_URL, params={"window": "all"})   # long tail only exists in the all-time view
         assert r.status_code == 200
         body = r.text
@@ -270,7 +308,7 @@ def test_default_page_is_windowed_and_renders_switcher() -> None:
         with patch(
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_windowed",
             new=AsyncMock(return_value=_MOCK_WINDOWED),
-        ):
+        ), _patch_grand():
             r = c.get(_URL)                              # no params → DEFAULT_WINDOW (last3)
         assert r.status_code == 200
         body = r.text
@@ -309,7 +347,7 @@ def test_invalid_custom_range_falls_back_to_default(monkeypatch=None) -> None:
         with patch(
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_windowed",
             new=_fake,
-        ):
+        ), _patch_grand():
             r = c.get(_URL, params={"start_month": "2026-06", "end_month": "2026-01"})
         assert r.status_code == 200
         assert calls["n"] == 2                           # bad range, then default fallback
@@ -329,10 +367,54 @@ def test_200_surfaces_integrity_alerts_loudly() -> None:
         with patch(
             "backend.api.v1.endpoints.dashboard.get_campaign_performance_overview",
             new=AsyncMock(return_value=data),
-        ):
+        ), _patch_grand():
             r = c.get(_URL, params={"window": "all"})
         assert r.status_code == 200
         assert "Integrity alerts" in r.text
         assert "locked-decision drift" in r.text or "drift" in r.text
+    finally:
+        _cleanup()
+
+
+# ── pinned grand-totals block (window-independent, always rendered) ───────────
+
+
+def test_grand_totals_block_renders_in_windowed_view() -> None:
+    """The pinned grand-totals block renders in a WINDOWED view: title, both line
+    labels, and BOTH totals (incl 146,925 / excl 21,156) — constant regardless of the
+    scoped window above."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_campaign_performance_windowed",
+            new=AsyncMock(return_value=_MOCK_WINDOWED),
+        ), _patch_grand():
+            r = c.get(_URL)                              # default → windowed (last3)
+        assert r.status_code == 200
+        body = r.text
+        assert "Grand totals" in body                   # campperf_grand_title (EN)
+        assert "All-time — including the migration" in body
+        assert "All-time — excluding the migration" in body
+        assert "146,925" in body                         # incl total (migration INCLUDED)
+        assert "21,156" in body                          # excl total (migration EXCLUDED)
+    finally:
+        _cleanup()
+
+
+def test_grand_totals_block_renders_in_all_time_view() -> None:
+    """The SAME pinned grand-totals block also renders in the ALL-TIME view — proving
+    it is window-independent (always present, identical numbers)."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_campaign_performance_overview",
+            new=AsyncMock(return_value=_MOCK_DATA),
+        ), _patch_grand():
+            r = c.get(_URL, params={"window": "all"})
+        assert r.status_code == 200
+        body = r.text
+        assert "Grand totals" in body
+        assert "146,925" in body
+        assert "21,156" in body
     finally:
         _cleanup()

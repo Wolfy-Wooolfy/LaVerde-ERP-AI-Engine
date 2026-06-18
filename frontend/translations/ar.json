@@ -483,6 +483,11 @@
   "campperf_window_excl_migration": "بدون الترحيل",
   "campperf_window_empty": "لا توجد حملة لديها أي عملاء محتملين في هذه الفترة.",
   "campperf_window_footer_note": "عرض حسب الفترة — هجرة نوفمبر 2025 مستبعَدة. بدّل إلى «كل الوقت» للإجمالي الكامل شاملاً الترحيل.",
+  "campperf_grand_title": "الإجماليات الكلية — كل الحملات",
+  "campperf_grand_caption": "المقياس الكامل، ثابت بغضّ النظر عن النطاق الزمني المختار بالأعلى.",
+  "campperf_grand_incl_label": "كل الوقت — شاملاً الترحيل",
+  "campperf_grand_excl_label": "كل الوقت — بدون الترحيل",
+  "campperf_grand_incl_migration": "يشمل ترحيل نوفمبر 2025 الدفعي",
   "campperf_footer_note": "كل رقم مباشر من Odoo · للقراءة فقط · أعداد ونِسب فقط — بلا عائد على الإنفاق",
 
   "campperf_timeline_label": "الأداء عبر الوقت",
