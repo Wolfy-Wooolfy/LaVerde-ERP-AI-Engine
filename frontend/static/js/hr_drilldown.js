@@ -6,9 +6,9 @@
  *
  * READ-ONLY: never POSTs or modifies Odoo data.
  * Endpoint: GET /api/v1/hr/department/{department_id}
- *           Requires HTTP Basic auth — MUST use credentials: 'same-origin'.
- *           The /hr/dashboard page is behind the same Basic-auth realm, so the
- *           browser has the credentials cached and a same-origin fetch carries them.
+ *           Requires an authenticated session (session cookie via get_current_user)
+ *           plus the "hr" module grant. The fetch MUST use credentials: 'same-origin'
+ *           so the browser sends the session cookie on this same-origin request.
  *           A 401 is surfaced as a readable, recoverable error state.
  *
  * i18n: all user-facing strings read from window.HR_STRINGS (injected server-side
@@ -119,10 +119,9 @@
     if (_state.isLoading || !_state.deptId) return;
     _state.isLoading = true;
 
-    // credentials: 'same-origin' is explicit and required.
-    // This endpoint uses HTTP Basic auth (Depends(get_current_user)).
-    // The /hr/dashboard page is behind the same realm, so the browser has
-    // cached Basic credentials for this origin and will include them here.
+    // credentials: 'same-origin' is explicit and required so the browser sends
+    // the session cookie on this same-origin request. This endpoint is gated by an
+    // authenticated session (Depends(get_current_user)) plus the "hr" module grant.
     fetch('/api/v1/hr/department/' + _state.deptId, { credentials: 'same-origin' })
       .then(function (resp) {
         _state.isLoading = false;

@@ -157,7 +157,8 @@ async def department_staff(
 ) -> dict | JSONResponse:
     """Return named employees + department-level aggregates for one named department.
 
-    Auth: HTTPBasic required — response contains employee names (PII).
+    Auth: authenticated session (session cookie via get_current_user) + the "hr"
+    module grant (require_module_api("hr")) — response contains employee names (PII).
     Cache-Control: private, no-store.
 
     Returns 400 if department_id <= 0.
@@ -262,7 +263,8 @@ async def employee_profile(
 ) -> dict | JSONResponse:
     """Return a board-appropriate profile for one current employee.
 
-    Auth: HTTPBasic required — response contains employee name (PII).
+    Auth: authenticated session (session cookie via get_current_user) + the "hr"
+    module grant (require_module_api("hr")) — response contains employee name (PII).
     Cache-Control: private, no-store.
 
     Returns 400 if employee_id <= 0.

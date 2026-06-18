@@ -126,6 +126,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.ai_client.close()
 
 
+# ── Interactive API docs (production-gated) ───────────────────────────────────
+
+
+def docs_urls_for(environment: str) -> dict:
+    """Return the FastAPI docs-URL kwargs for the given ENVIRONMENT.
+
+    In production the interactive API docs are disabled: returning ``None`` for
+    docs_url/redoc_url/openapi_url removes /docs, /redoc, /openapi.json AND the
+    /docs/oauth2-redirect helper from the route map (they expose the route shapes,
+    no data). In every non-production environment the default paths are served, so
+    local development and the audit / CI guard keep their docs surface intact.
+    """
+    if environment == "production":
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+
+
 # ── App instance ──────────────────────────────────────────────────────────────
 
 app = FastAPI(
@@ -133,6 +150,7 @@ app = FastAPI(
     version=settings.APP_VERSION,
     description="Read-only ERP intelligence dashboard connected to Odoo.",
     lifespan=lifespan,
+    **docs_urls_for(settings.ENVIRONMENT),
 )
 
 # ── Rate limiter exception handler ────────────────────────────────────────────

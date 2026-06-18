@@ -6,7 +6,7 @@
         hr-pf-close-btn, hr-pf-loading-sentinel, hr-pf-content,
         hr-pf-detail-rows, hr-pf-error-msg
    READ-ONLY: no POST or Odoo mutation.
-   Auth: endpoint requires Basic auth; browser carries credentials via same-origin fetch.
+   Auth: endpoint requires an authenticated session (session cookie + "hr" module grant); browser carries the session cookie via same-origin fetch.
    Z-layer: backdrop z-[55] (over dept panel z-50), panel z-[60].
    Focus: does NOT touch #app inert — hrDeptPanel owns it; own focus-trap isolates Tab.
 #}

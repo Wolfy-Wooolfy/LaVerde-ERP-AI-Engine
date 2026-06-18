@@ -4,7 +4,8 @@ Endpoint tests for HR F2 — GET /api/v1/hr/department/{department_id}.
 Uses FastAPI TestClient with get_department_staff and get_department_cost patched.
 No Odoo connection is made.
 
-Auth: same Basic-Auth as sibling HR KPI endpoints (no endpoint-level Depends).
+Auth: authenticated session (session cookie via get_current_user) + the "hr" module
+grant (require_module_api("hr")) — same as sibling HR KPI endpoints.
 Cache-Control: private, no-store — PII response; never max-age.
 
 Coverage:

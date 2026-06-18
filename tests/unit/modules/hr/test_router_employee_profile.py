@@ -4,7 +4,8 @@ Endpoint tests for HR F3 — GET /api/v1/hr/employee/{employee_id}.
 Uses FastAPI TestClient with get_employee_profile patched.
 No Odoo connection is made.
 
-Auth: HTTPBasic required — endpoint returns employee name (PII).
+Auth: authenticated session (session cookie via get_current_user) + the "hr" module
+grant (require_module_api("hr")) — endpoint returns employee name (PII).
 Cache-Control: private, no-store — never max-age.
 
 Coverage:
