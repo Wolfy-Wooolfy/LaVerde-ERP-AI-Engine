@@ -541,5 +541,20 @@
   "projinv_as_of": "as of",
   "projinv_live_rpc": "live read-only query",
   "projinv_portfolio_title": "Portfolio status",
-  "projinv_footnote": "Read-only. Counts by sales status from live Odoo inventory — no pricing or area in this view."
+  "projinv_footnote": "Read-only. Counts by sales status from live Odoo inventory — no pricing or area in this view.",
+  "projinv_dd_phases": "Phases",
+  "projinv_dd_phase": "Phase",
+  "projinv_dd_zones": "Zones",
+  "projinv_dd_zone": "Zone",
+  "projinv_dd_buildings": "Buildings",
+  "projinv_dd_building": "Building",
+  "projinv_dd_units_in": "Units",
+  "projinv_dd_back": "Back",
+  "projinv_dd_breadcrumb_root": "Portfolio",
+  "projinv_dd_no_children": "Nothing to show here",
+  "projinv_dd_loading": "Loading…",
+  "projinv_dd_error": "Failed to load. Try again.",
+  "projinv_dd_try_again": "Try again",
+  "projinv_dd_unit_code": "Code",
+  "projinv_dd_unit_name": "Name"
 }

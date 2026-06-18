@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "components/_badge.html" import badge %}
+{% from "components/_pi_drilldown_panel.html" import pi_drilldown_panel with context %}
 
 {% block title %}{{ _t("projinv_title") }} — LaVerde ERP AI Engine{% endblock %}
 {% block page_title %}{{ _t("projinv_title") }}{% endblock %}
@@ -125,7 +126,14 @@
     <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-3">{{ _t("projinv_by_project") }}</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       {% for p in inv.projects %}
-      <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card p-4 flex flex-col">
+      {# Each card drills into its phases (Slice 1b). Activated via the delegated
+         click / Enter-Space handler in projects_inventory_drill.js. #}
+      <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card p-4 flex flex-col cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors"
+           role="button" tabindex="0"
+           data-pi-drill-level="project"
+           data-pi-drill-id="{{ p.project_id }}"
+           data-pi-drill-name="{{ p.project_name }}"
+           aria-label="{{ p.project_name }} — {{ _t('projinv_dd_phases') }}">
 
         {# Project header: name (+ early-stage badge) · total units #}
         <div class="flex items-start justify-between gap-3 mb-3">
@@ -184,4 +192,37 @@
   </p>
 
 </div>
+{% endblock %}
+
+{# Drill-down panel rendered in the portal block → a direct child of <body>, outside
+   #app, so the #app inert toggle never disables it (see base.html). #}
+{% block portal %}{{ pi_drilldown_panel() }}{% endblock %}
+
+{% block extra_scripts %}
+<script>
+window.PROJINV_STRINGS = {
+  lang:           {{ lang | tojson }},
+  available:      {{ _t("projinv_available")          | tojson }},
+  reserved:       {{ _t("projinv_reserved")           | tojson }},
+  contracted:     {{ _t("projinv_contracted")         | tojson }},
+  sold:           {{ _t("projinv_sold")               | tojson }},
+  units:          {{ _t("projinv_units")              | tojson }},
+  dd_phases:      {{ _t("projinv_dd_phases")          | tojson }},
+  dd_phase:       {{ _t("projinv_dd_phase")           | tojson }},
+  dd_zones:       {{ _t("projinv_dd_zones")           | tojson }},
+  dd_zone:        {{ _t("projinv_dd_zone")            | tojson }},
+  dd_buildings:   {{ _t("projinv_dd_buildings")       | tojson }},
+  dd_building:    {{ _t("projinv_dd_building")        | tojson }},
+  dd_units:       {{ _t("projinv_dd_units_in")        | tojson }},
+  dd_back:        {{ _t("projinv_dd_back")            | tojson }},
+  dd_root:        {{ _t("projinv_dd_breadcrumb_root") | tojson }},
+  dd_no_children: {{ _t("projinv_dd_no_children")     | tojson }},
+  dd_loading:     {{ _t("projinv_dd_loading")         | tojson }},
+  dd_error:       {{ _t("projinv_dd_error")           | tojson }},
+  dd_try_again:   {{ _t("projinv_dd_try_again")       | tojson }},
+  dd_unit_code:   {{ _t("projinv_dd_unit_code")       | tojson }},
+  dd_unit_name:   {{ _t("projinv_dd_unit_name")       | tojson }}
+};
+</script>
+<script src="/static/js/projects_inventory_drill.js"></script>
 {% endblock %}

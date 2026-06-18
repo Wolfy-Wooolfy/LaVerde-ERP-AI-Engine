@@ -31,11 +31,20 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
-from backend.core.exceptions import OdooQueryError, ReadOnlyViolationError
+from backend.core.exceptions import (
+    InventoryScopeNotFoundError,
+    OdooQueryError,
+    ReadOnlyViolationError,
+)
 from backend.modules.projects_inventory import domain
 from backend.modules.projects_inventory.domain import (
     BUCKET_ORDER,
+    CHILD_FIELD,
+    CHILD_LEVEL,
+    DRILL_LEVELS,
     EARLY_STAGE_SOLD_PCT_THRESHOLD,
+    LEAF_LEVEL,
+    LEVEL_FIELD,
     SOLD_BUCKET,
     STATE_TO_BUCKET,
     UNIT_MODEL,
@@ -46,9 +55,17 @@ from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 # Methods that must never appear in ALLOWED_METHODS.
 _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
 
-_UNIT_FIELDS = ["id", "state", "project_id", "phase_id", "zone_id", "building_id"]
+# `code` + `name` carry the human-readable leaf identifier (code is 100% populated and
+# unique, e.g. "AF190-1-101"; name is the short label, e.g. "101"). Both are fetched in
+# the SAME single search_read so the cached unit set is self-sufficient for the leaf
+# list — the drill never issues a per-node query. The overview ignores them.
+_UNIT_FIELDS = ["id", "state", "project_id", "phase_id", "zone_id", "building_id",
+                "code", "name"]
 
 _CACHE_KEY_PREFIX = "projects_inventory:overview"
+# The RAW unit rows are cached under their OWN key, shared by the board overview AND
+# every drill level, so both read identical rows (exact reconciliation by construction).
+_UNITS_CACHE_KEY_PREFIX = "projects_inventory:units"
 _CAIRO_TZ = ZoneInfo("Africa/Cairo")
 _PAGE = 5000
 
@@ -106,6 +123,24 @@ async def _fetch_all_units(client: OdooClient) -> list[dict]:
         if len(page) < _PAGE:
             break
         offset += _PAGE
+    return rows
+
+
+async def _get_units_cached(client: OdooClient) -> list[dict]:
+    """Return every unit's raw rows, cached under a per-Cairo-date key (60s TTL).
+
+    This is the SINGLE source of unit rows for the whole module: get_inventory_overview
+    (the board) and get_inventory_drill (every hierarchy level) both call it, so they
+    operate on identical rows and reconcile exactly by construction. A cache hit makes a
+    drill a pure in-memory filter — zero Odoo round-trips."""
+    cache_key = _cache.make_key(_UNITS_CACHE_KEY_PREFIX)
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Units cache hit: {cache_key}")
+        return cached
+    logger.info(f"Units cache miss: {cache_key} — querying Odoo")
+    rows = await _fetch_all_units(client)
+    _cache.set(cache_key, rows)
     return rows
 
 
@@ -187,7 +222,7 @@ async def get_inventory_overview(client: Optional[OdooClient] = None) -> dict:
 
     t0 = time.monotonic()
     try:
-        units = await _fetch_all_units(_client)
+        units = await _get_units_cached(_client)
     except ReadOnlyViolationError:
         raise
     except Exception as exc:
@@ -262,4 +297,165 @@ async def get_inventory_overview(client: Optional[OdooClient] = None) -> dict:
     }
 
     _cache.set(cache_key, result)
+    return result
+
+
+def _leaf_row(u: dict) -> dict:
+    """One unit leaf row: code (primary, 100% unique) + name (short label) + the raw
+    state AND its board bucket (the UI shows a bucket-coloured badge)."""
+    return {
+        "unit_id": u["id"],
+        "code": u.get("code") or "",
+        "name": u.get("name") or "",
+        "state": u["state"],
+        "bucket": STATE_TO_BUCKET[u["state"]],
+    }
+
+
+async def get_inventory_drill(
+    level: str, parent_id: int, client: Optional[OdooClient] = None
+) -> dict:
+    """Return one drill scope of the Project → Phase → Zone → Building → Unit hierarchy.
+
+    `level` names the level drilled INTO (the parent); `parent_id` is its id. The unit
+    set is loaded once from the SHARED cache (_get_units_cached) and filtered in Python
+    to that scope — no per-drill Odoo query. Group levels (project/phase/zone) return the
+    child breakdown via the same _tally_by primitive the board uses; the building level
+    returns the unit leaf list. Counts only (no pricing/area).
+
+    Args:
+        level: one of domain.DRILL_LEVELS ("project"/"phase"/"zone"/"building").
+        parent_id: the id at that level.
+        client: optional injected OdooClient (tests pass a mock; production opens/closes).
+
+    Returns a dict matching schemas.ProjectsInventoryDrill.
+
+    Raises:
+        ValueError: if `level` is not a known drill level (endpoint maps to 422).
+        InventoryScopeNotFoundError: if no units match (level, parent_id) (→ 404).
+        ReadOnlyViolationError / OdooQueryError: as for the overview.
+        RuntimeError: on an unmapped state or a reconciliation failure (explicit raises
+            so they survive python -O).
+    """
+    _assert_read_only()
+    if level not in DRILL_LEVELS:
+        raise ValueError(
+            f"unknown drill level {level!r}; expected one of {list(DRILL_LEVELS)}."
+        )
+
+    cairo_today = datetime.now(_CAIRO_TZ).date()
+    _client = client if client is not None else OdooClient()
+
+    # cache_status/timing reflect the shared unit fetch: a hit makes the drill RPC-free.
+    units_cache_key = _cache.make_key(_UNITS_CACHE_KEY_PREFIX)
+    was_cached = _cache.get(units_cache_key) is not None
+    t0 = time.monotonic()
+    try:
+        units = await _get_units_cached(_client)
+    except ReadOnlyViolationError:
+        raise
+    except Exception as exc:
+        raise OdooQueryError(f"get_inventory_drill() RPC failed: {exc}") from exc
+    finally:
+        if client is None:
+            await _client.close()
+    rpc_ms = 0 if was_cached else int((time.monotonic() - t0) * 1000)
+
+    # Every state must map to a bucket before we count anything (same guard as the board).
+    _classify_states(units)
+
+    # Filter to the parent scope on the denormalised m2o id, then derive the parent name
+    # from a matched row's m2o pair (no extra lookup — every reachable node has ≥1 unit).
+    level_field = LEVEL_FIELD[level]
+    scope = [u for u in units if _m2o(u.get(level_field))[0] == parent_id]
+    if not scope:
+        raise InventoryScopeNotFoundError(
+            f"No units found for {level}={parent_id}. The node may not exist or is stale."
+        )
+    parent_name = _m2o(scope[0].get(level_field))[1] or "—"
+
+    # Scope header breakdown (the panel's own status bar), via the shared primitive.
+    scope_overall = _tally_by(scope, None)[0]
+    scope_total = scope_overall["total"]
+    scope_counts = scope_overall["buckets"]
+    if sum(scope_counts.values()) != scope_total:
+        raise RuntimeError(
+            f"Drill reconciliation FAILED (scope {level}={parent_id}): bucket sum "
+            f"{sum(scope_counts.values())} != scope total {scope_total}."
+        )
+
+    child_level = CHILD_LEVEL[level]
+    is_leaf = level == LEAF_LEVEL
+
+    result: dict = {
+        "parent_level": level,
+        "parent_id": parent_id,
+        "parent_name": parent_name,
+        "child_level": child_level,
+        "is_leaf": is_leaf,
+        "total_units": scope_total,
+        "buckets": _bucket_rows(scope_counts, scope_total),
+        "sold_pct": _sold_pct(scope_counts, scope_total),
+        "rows": [],
+        "row_count": 0,
+        "units": [],
+        "unit_count": 0,
+        "reference_date": cairo_today.isoformat(),
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "cache_status": "cached" if was_cached else "fresh",
+        "rpc_duration_ms": rpc_ms,
+    }
+
+    if is_leaf:
+        leaf = sorted((_leaf_row(u) for u in scope), key=lambda r: r["code"])
+        # Leaf reconciliation: every scoped unit is listed exactly once.
+        if len(leaf) != scope_total:
+            raise RuntimeError(
+                f"Drill reconciliation FAILED (leaf {level}={parent_id}): "
+                f"len(units) {len(leaf)} != scope total {scope_total}."
+            )
+        result["units"] = leaf
+        result["unit_count"] = len(leaf)
+        logger.info(
+            f"Inventory drill: {level}={parent_id} ({parent_name!r}) → {len(leaf)} units "
+            f"| cache={'hit' if was_cached else 'miss'} rpc={rpc_ms}ms"
+        )
+        return result
+
+    # Group level: tally children with the same primitive, keyed by the child m2o.
+    child_field = CHILD_FIELD[level]
+    rows: list[dict] = []
+    child_total_check = 0
+    for g in _tally_by(scope, child_field):
+        gid, gname, gtotal, gcounts = g["group_id"], g["group_name"], g["total"], g["buckets"]
+        if sum(gcounts.values()) != gtotal:
+            raise RuntimeError(
+                f"Drill reconciliation FAILED for {child_level} {gname!r} (id={gid}): "
+                f"bucket sum {sum(gcounts.values())} != total {gtotal}."
+            )
+        rows.append(
+            {
+                "group_id": gid if gid is not None else 0,
+                "group_name": gname or "—",
+                "total_units": gtotal,
+                "buckets": _bucket_rows(gcounts, gtotal),
+                "sold_pct": _sold_pct(gcounts, gtotal),
+            }
+        )
+        child_total_check += gtotal
+
+    # Σ child totals == scope total (the parent-scope reconciliation).
+    if child_total_check != scope_total:
+        raise RuntimeError(
+            f"Drill reconciliation FAILED (scope {level}={parent_id}): Σ {child_level} "
+            f"totals {child_total_check} != scope total {scope_total}."
+        )
+
+    result["rows"] = rows
+    result["row_count"] = len(rows)
+    logger.info(
+        f"Inventory drill: {level}={parent_id} ({parent_name!r}) → {len(rows)} "
+        f"{child_level}(s), {scope_total:,} units | cache={'hit' if was_cached else 'miss'} "
+        f"rpc={rpc_ms}ms"
+    )
     return result

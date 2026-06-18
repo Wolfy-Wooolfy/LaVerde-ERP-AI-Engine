@@ -15,11 +15,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.core.exceptions import OdooQueryError
+from backend.core.exceptions import InventoryScopeNotFoundError, OdooQueryError
 from backend.modules.projects_inventory.domain import BUCKET_ORDER
 from backend.modules.projects_inventory.services import cache as _cache
 from backend.modules.projects_inventory.services.inventory_service import (
     _tally_by,
+    get_inventory_drill,
     get_inventory_overview,
 )
 
@@ -232,3 +233,236 @@ async def test_rpc_failure_wrapped_as_odoo_query_error():
     client.close = AsyncMock()
     with pytest.raises(OdooQueryError):
         await get_inventory_overview(client=client)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Slice 1b — hierarchy drill-down
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Hierarchy fixtures (structural codes only — no PII).
+_P1 = [10, "Phase#1"]
+_P2 = [11, "Phase#2"]
+_Z1 = [20, "Zone#1"]
+_Z2 = [21, "Zone#2"]
+_Z3 = [22, "Zone#3"]
+_B1 = [30, "Building#1"]
+_B2 = [31, "Building#2"]
+_B3 = [32, "Building#3"]
+_B4 = [33, "Building#4"]
+# A second project whose units must NEVER leak into a New-Capital drill scope.
+_CZP = [90, "Phase#9"]
+_CZZ = [91, "Zone#9"]
+_CZB = [92, "Building#9"]
+
+
+def _hu(uid, state, proj, phase, zone, bldg, code=None, name=None) -> dict:
+    """One fully-qualified hierarchy unit row (structural fields only)."""
+    return {
+        "id": uid,
+        "state": state,
+        "project_id": list(proj),
+        "phase_id": list(phase),
+        "zone_id": list(zone),
+        "building_id": list(bldg),
+        "code": code if code is not None else f"U{uid}",
+        "name": name if name is not None else str(uid),
+    }
+
+
+def _drill_dataset() -> list[dict]:
+    """New Capital (9 units) across 2 phases / 3 zones / 4 buildings + a separate
+    Cassette node (2 units) used to prove parent-scope isolation.
+
+      NC / P1 / Z1 / B1 : available, available, contracted        (B1 = 3)
+      NC / P1 / Z1 / B2 : reserved,  contracted                    (B2 = 2)
+      NC / P1 / Z2 / B3 : available, contracted, contracted        (B3 = 3)
+      NC / P2 / Z3 / B4 : available                                (B4 = 1)
+      Cassette / P9 / Z9 / B9 : contracted, available              (excluded from NC)
+
+    NC totals: available=4, reserved=1, contracted=4 → 9.
+      P1 = 8 (a3, r1, c4) ; P2 = 1 (a1)
+      Z1 = 5 (a2, r1, c2) ; Z2 = 3 (a1, c2)   (within P1)
+      B1 = 3 (a2, c1)     ; B2 = 2 (r1, c1)    (within Z1)
+    """
+    return [
+        # NC / P1 / Z1 / B1 — codes deliberately out of id order to test code sorting.
+        _hu(1, "available", _NC, _P1, _Z1, _B1, code="NC-B1-C"),
+        _hu(2, "available", _NC, _P1, _Z1, _B1, code="NC-B1-A"),
+        _hu(3, "contracted", _NC, _P1, _Z1, _B1, code="NC-B1-B"),
+        # NC / P1 / Z1 / B2
+        _hu(4, "reserved", _NC, _P1, _Z1, _B2),
+        _hu(5, "contracted", _NC, _P1, _Z1, _B2),
+        # NC / P1 / Z2 / B3
+        _hu(6, "available", _NC, _P1, _Z2, _B3),
+        _hu(7, "contracted", _NC, _P1, _Z2, _B3),
+        _hu(8, "delivered", _NC, _P1, _Z2, _B3),   # delivered → contracted bucket
+        # NC / P2 / Z3 / B4
+        _hu(9, "available", _NC, _P2, _Z3, _B4),
+        # Cassette node (must be excluded from any NC scope)
+        _hu(10, "contracted", _CAS, _CZP, _CZZ, _CZB),
+        _hu(11, "available", _CAS, _CZP, _CZZ, _CZB),
+    ]
+
+
+def _bsum(buckets: list[dict]) -> int:
+    return sum(b["count"] for b in buckets)
+
+
+# ── project → phases ──────────────────────────────────────────────────────────
+
+
+async def test_drill_project_returns_phases_with_scope_reconciliation():
+    client = _make_client(_drill_dataset())
+    res = await get_inventory_drill("project", 1, client=client)
+
+    assert res["parent_level"] == "project"
+    assert res["parent_id"] == 1
+    assert res["parent_name"] == "Project#New Capital"
+    assert res["child_level"] == "phase"
+    assert res["is_leaf"] is False
+    # Scope = only New Capital's 9 units (Cassette excluded).
+    assert res["total_units"] == 9
+    assert _bsum(res["buckets"]) == 9
+    assert res["units"] == [] and res["unit_count"] == 0
+
+    # Two phases, sorted by total desc (P1=8 before P2=1).
+    assert [r["group_id"] for r in res["rows"]] == [10, 11]
+    assert [r["total_units"] for r in res["rows"]] == [8, 1]
+    assert res["row_count"] == 2
+    # Σ child totals == scope total ; each row Σ buckets == its total.
+    assert sum(r["total_units"] for r in res["rows"]) == res["total_units"]
+    for r in res["rows"]:
+        assert _bsum(r["buckets"]) == r["total_units"]
+        assert [b["key"] for b in r["buckets"]] == list(BUCKET_ORDER)
+    p1 = next(r for r in res["rows"] if r["group_id"] == 10)
+    assert {b["key"]: b["count"] for b in p1["buckets"]} == {
+        "available": 3, "reserved": 1, "contracted": 4,
+    }
+    assert p1["sold_pct"] == round(100.0 * 4 / 8, 2)   # 50.0
+
+
+# ── phase → zones ─────────────────────────────────────────────────────────────
+
+
+async def test_drill_phase_returns_zones():
+    client = _make_client(_drill_dataset())
+    res = await get_inventory_drill("phase", 10, client=client)
+
+    assert res["child_level"] == "zone"
+    assert res["is_leaf"] is False
+    assert res["parent_name"] == "Phase#1"
+    assert res["total_units"] == 8
+    assert {r["group_id"]: r["total_units"] for r in res["rows"]} == {20: 5, 21: 3}
+    assert sum(r["total_units"] for r in res["rows"]) == res["total_units"]
+
+
+# ── zone → buildings ──────────────────────────────────────────────────────────
+
+
+async def test_drill_zone_returns_buildings():
+    client = _make_client(_drill_dataset())
+    res = await get_inventory_drill("zone", 20, client=client)
+
+    assert res["child_level"] == "building"
+    assert res["is_leaf"] is False
+    assert res["parent_name"] == "Zone#1"
+    assert res["total_units"] == 5
+    assert {r["group_id"]: r["total_units"] for r in res["rows"]} == {30: 3, 31: 2}
+    assert sum(r["total_units"] for r in res["rows"]) == res["total_units"]
+
+
+# ── building → unit leaf ──────────────────────────────────────────────────────
+
+
+async def test_drill_building_returns_unit_leaf_sorted_by_code():
+    client = _make_client(_drill_dataset())
+    res = await get_inventory_drill("building", 30, client=client)
+
+    assert res["is_leaf"] is True
+    assert res["child_level"] == "unit"
+    assert res["parent_name"] == "Building#1"
+    assert res["rows"] == [] and res["row_count"] == 0
+
+    units = res["units"]
+    assert res["unit_count"] == len(units) == 3
+    # Leaf len == scope total (per-unit reconciliation).
+    assert res["total_units"] == 3
+    # Sorted by code (codes were inserted out of order).
+    assert [u["code"] for u in units] == ["NC-B1-A", "NC-B1-B", "NC-B1-C"]
+    # Each leaf row carries code + name + raw state + board bucket.
+    for u in units:
+        assert set(u) == {"unit_id", "code", "name", "state", "bucket"}
+    a = next(u for u in units if u["code"] == "NC-B1-A")
+    assert a["state"] == "available" and a["bucket"] == "available"
+    b = next(u for u in units if u["code"] == "NC-B1-B")
+    assert b["state"] == "contracted" and b["bucket"] == "contracted"
+    # Leaf bucket parity vs the scope header.
+    assert {bk["key"]: bk["count"] for bk in res["buckets"]} == {
+        "available": 2, "reserved": 0, "contracted": 1,
+    }
+
+
+async def test_drill_building_leaf_delivered_folds_to_contracted():
+    """A delivered unit appears with raw state 'delivered' but bucket 'contracted'."""
+    client = _make_client(_drill_dataset())
+    res = await get_inventory_drill("building", 32, client=client)   # B3 has a delivered unit
+    delivered = [u for u in res["units"] if u["state"] == "delivered"]
+    assert len(delivered) == 1
+    assert delivered[0]["bucket"] == "contracted"
+
+
+# ── parent-scope isolation ────────────────────────────────────────────────────
+
+
+async def test_drill_scope_excludes_other_projects():
+    """Drilling New Capital must never include the Cassette node's units."""
+    client = _make_client(_drill_dataset())
+    res = await get_inventory_drill("project", 1, client=client)
+    # Cassette phase id 90 must not appear among NC's phase rows.
+    assert 90 not in {r["group_id"] for r in res["rows"]}
+    assert res["total_units"] == 9   # not 11
+
+
+# ── 404 / validation / guards ─────────────────────────────────────────────────
+
+
+async def test_drill_unknown_scope_raises_not_found():
+    client = _make_client(_drill_dataset())
+    with pytest.raises(InventoryScopeNotFoundError):
+        await get_inventory_drill("project", 999, client=client)
+
+
+async def test_drill_bad_level_raises_value_error():
+    client = _make_client(_drill_dataset())
+    with pytest.raises(ValueError, match="unknown drill level"):
+        await get_inventory_drill("street", 1, client=client)
+
+
+async def test_drill_unknown_state_raises():
+    bad = [_hu(1, "available", _NC, _P1, _Z1, _B1),
+           _hu(2, "frozen", _NC, _P1, _Z1, _B1)]
+    with pytest.raises(RuntimeError, match="state value"):
+        await get_inventory_drill("building", 30, client=_make_client(bad))
+
+
+# ── shared units cache (Locked decision 2) ────────────────────────────────────
+
+
+async def test_overview_and_drill_share_one_units_query():
+    """The board overview and a drill read the SAME cached unit rows — exactly one
+    search_read across both calls."""
+    client = _make_client(_drill_dataset())
+    ov = await get_inventory_overview(client=client)
+    assert ov["cache_status"] == "fresh"
+    drill = await get_inventory_drill("project", 1, client=client)
+    # Units came from the shared cache populated by the overview → no second RPC.
+    assert client.execute_kw.await_count == 1
+    assert drill["cache_status"] == "cached"
+    assert drill["rpc_duration_ms"] == 0
+
+
+async def test_drill_cold_cache_reports_fresh():
+    client = _make_client(_drill_dataset())
+    drill = await get_inventory_drill("project", 1, client=client)
+    assert drill["cache_status"] == "fresh"
+    assert client.execute_kw.await_count == 1

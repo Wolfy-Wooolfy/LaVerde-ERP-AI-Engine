@@ -1,0 +1,141 @@
+{# _pi_drilldown_panel.html
+   Usage: {% from "components/_pi_drilldown_panel.html" import pi_drilldown_panel with context %}
+          {{ pi_drilldown_panel() }}
+   Projects Inventory — Slice 1b hierarchy drill-down side panel (read-only).
+   Triggered by window.piDrill.open(level, id, name, triggerEl).
+   Animation and visibility are managed by projects_inventory_drill.js.
+   IDs: pi-dd-backdrop, pi-dd-panel, pi-dd-panel-inner, pi-dd-breadcrumb, pi-dd-crumbs,
+        pi-dd-back-btn, pi-dd-close-btn, pi-dd-scope, pi-dd-child-heading,
+        pi-dd-loading, pi-dd-rows, pi-dd-units, pi-dd-empty, pi-dd-error
+   Mirrors components/_drilldown_panel.html (Collections): desktop side panel ≥lg,
+   full-screen overlay <lg, RTL-aware, #app inert, Esc-to-close, focus trap.
+#}
+
+{% macro pi_drilldown_panel() %}
+
+{# ── Backdrop ─────────────────────────────────────────────────────────────── #}
+<div id="pi-dd-backdrop"
+     class="fixed inset-0 z-40 bg-black/50 hidden"
+     aria-hidden="true">
+</div>
+
+{# ── Panel shell ──────────────────────────────────────────────────────────── #}
+{# At ≥lg: fixed side panel from the inline-end edge (right LTR / left RTL).     #}
+{# At  <lg: full-screen overlay. Translate animation injected by the JS.         #}
+<aside id="pi-dd-panel"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="pi-dd-breadcrumb"
+       class="fixed inset-y-0 end-0 z-50
+              w-full lg:w-[440px]
+              bg-white dark:bg-neutral-900
+              border-s border-neutral-200 dark:border-neutral-800
+              shadow-2xl
+              transition-transform duration-300 ease-in-out"
+       hidden
+       tabindex="-1">
+
+  <div id="pi-dd-panel-inner" class="flex flex-col h-full">
+
+    {# ── Header: back + breadcrumb + close ──────────────────────────────────── #}
+    <header class="flex items-center gap-2 px-5 py-4 shrink-0
+                   border-b border-neutral-200 dark:border-neutral-700">
+
+      {# Back one level (hidden at the root by the JS). #}
+      <button id="pi-dd-back-btn"
+              type="button"
+              class="shrink-0 p-1.5 rounded-lg hidden
+                     text-neutral-500 dark:text-neutral-400
+                     hover:bg-neutral-100 dark:hover:bg-neutral-800
+                     focus-visible:ring-2 focus-visible:ring-primary-500
+                     transition-colors"
+              aria-label="{{ _t('projinv_dd_back') }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+             class="rtl:rotate-180" aria-hidden="true">
+          <path d="M15 18l-6-6 6-6"/>
+        </svg>
+      </button>
+
+      {# Breadcrumb: a static root crumb (→ closes back to the board) then the JS-filled
+         path crumbs. The last crumb is the current scope (non-interactive). #}
+      <nav id="pi-dd-breadcrumb" aria-label="Breadcrumb"
+           class="flex-1 min-w-0 flex items-center gap-1 text-sm overflow-x-auto whitespace-nowrap">
+        <button type="button" id="pi-dd-root-crumb"
+                class="shrink-0 text-neutral-500 dark:text-neutral-400
+                       hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
+          {{ _t("projinv_dd_breadcrumb_root") }}
+        </button>
+        <span id="pi-dd-crumbs" class="flex items-center gap-1 min-w-0"></span>
+      </nav>
+
+      <button id="pi-dd-close-btn"
+              type="button"
+              class="shrink-0 p-1.5 rounded-lg
+                     text-neutral-500 dark:text-neutral-400
+                     hover:bg-neutral-100 dark:hover:bg-neutral-800
+                     focus-visible:ring-2 focus-visible:ring-primary-500
+                     transition-colors"
+              aria-label="{{ _t('Close') }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </header>
+
+    {# ── Scope summary: this node's own status bar + counts + sold% (JS-rendered) #}
+    <div id="pi-dd-scope" class="px-5 py-4 shrink-0
+                                 border-b border-neutral-200 dark:border-neutral-700 hidden">
+    </div>
+
+    {# ── Scrollable list body ─────────────────────────────────────────────── #}
+    <div class="flex-1 overflow-y-auto min-h-0">
+
+      {# Child-level heading (e.g. "Phases" / "Zones" / "Buildings" / "Units"). #}
+      <p id="pi-dd-child-heading"
+         class="px-5 pt-4 pb-1 hidden text-[10px] font-semibold uppercase tracking-wide
+                text-neutral-400 dark:text-neutral-500">
+      </p>
+
+      {# Loading skeleton #}
+      <div id="pi-dd-loading" class="px-5 py-6 space-y-4 hidden">
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-3/4"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-1/2"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-5/6"></div>
+        <div class="h-3 rounded animate-pulse bg-neutral-200 dark:bg-neutral-700 w-2/3"></div>
+      </div>
+
+      {# Group-level child rows (phases / zones / buildings). #}
+      <ul id="pi-dd-rows"
+          class="divide-y divide-neutral-100 dark:divide-neutral-800"
+          aria-live="polite">
+      </ul>
+
+      {# Leaf unit rows (building level). #}
+      <ul id="pi-dd-units"
+          class="divide-y divide-neutral-100 dark:divide-neutral-800"
+          aria-live="polite">
+      </ul>
+
+      {# Empty state #}
+      <p id="pi-dd-empty"
+         class="hidden px-5 py-10 text-sm text-center
+                text-neutral-400 dark:text-neutral-500">
+        {{ _t("projinv_dd_no_children") }}
+      </p>
+
+      {# Error state — message text set by JS #}
+      <p id="pi-dd-error"
+         class="hidden px-5 py-10 text-sm text-center
+                text-danger-600 dark:text-danger-400">
+      </p>
+
+    </div>{# /.scrollable body #}
+
+  </div>{# /#pi-dd-panel-inner #}
+
+</aside>
+
+{% endmacro %}

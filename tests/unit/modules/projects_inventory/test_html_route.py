@@ -140,3 +140,38 @@ def test_200_with_scoped_module_grant() -> None:
         assert 'href="/projects-inventory/dashboard"' in body
     finally:
         _cleanup()
+
+
+# ── Slice 1b — drill-down wiring rendered into the page ────────────────────────
+
+
+def test_drill_wiring_present_in_page() -> None:
+    """Project cards are drill triggers; the panel partial, controller JS, the strings
+    object, and the breadcrumb root are all rendered."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
+            new=AsyncMock(return_value=_MOCK_DATA),
+        ):
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        # Each project card carries the drill trigger data-attributes.
+        assert 'data-pi-drill-level="project"' in body
+        assert 'data-pi-drill-id="1"' in body
+        assert 'data-pi-drill-id="3"' in body
+        assert 'data-pi-drill-name="Project#New Capital"' in body
+        # The drill panel partial is rendered (portal block).
+        assert 'id="pi-dd-panel"' in body
+        assert 'id="pi-dd-breadcrumb"' in body
+        # The breadcrumb root crumb + its label.
+        assert 'id="pi-dd-root-crumb"' in body
+        assert "Portfolio" in body
+        # The controller JS is included and the strings object injected.
+        assert "/static/js/projects_inventory_drill.js" in body
+        assert "window.PROJINV_STRINGS" in body
+        # A level label string is present in the strings block.
+        assert "Phases" in body
+    finally:
+        _cleanup()

@@ -16,6 +16,41 @@ UNIT_MODEL = "rs.structure.unit"
 # phase_id / zone_id / building_id are ready for the next slice with no service change.
 GROUP_FIELDS: tuple[str, ...] = ("project_id", "phase_id", "zone_id", "building_id")
 
+# ── Slice 1b — hierarchy drill-down (LOCKED) ──────────────────────────────────
+# The drill walks Project → Phase → Zone → Building → Unit. A drill request names the
+# level you drill INTO (the parent); the response returns that scope's children.
+DRILL_LEVELS: tuple[str, ...] = ("project", "phase", "zone", "building")
+
+# The denormalised m2o on rs.structure.unit that identifies each level — used to filter
+# the unit set down to one parent scope (e.g. level="phase" → keep units whose
+# phase_id == parent_id). 100% populated on every unit (§1/§3.1).
+LEVEL_FIELD: dict[str, str] = {
+    "project": "project_id",
+    "phase": "phase_id",
+    "zone": "zone_id",
+    "building": "building_id",
+}
+
+# For a GROUP level (project/phase/zone), the unit m2o to group its children by.
+# "building" has no entry — it is the LEAF (units are listed, not grouped).
+CHILD_FIELD: dict[str, str] = {
+    "project": "phase_id",
+    "phase": "zone_id",
+    "zone": "building_id",
+}
+
+# The name of the child level each level produces (drives the panel labels). The
+# building level produces the unit leaf list.
+CHILD_LEVEL: dict[str, str] = {
+    "project": "phase",
+    "phase": "zone",
+    "zone": "building",
+    "building": "unit",
+}
+
+# The single leaf level — its children are individual units, not a grouped breakdown.
+LEAF_LEVEL = "building"
+
 # ── Status buckets (LOCKED — §2). Stable keys used by the API + template. ──────
 BUCKET_AVAILABLE = "available"
 BUCKET_RESERVED = "reserved"

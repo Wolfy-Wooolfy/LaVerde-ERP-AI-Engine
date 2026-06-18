@@ -1,8 +1,11 @@
 """
-Projects Inventory endpoint (Slice 1 — Inventory & Availability).
+Projects Inventory endpoints.
 
 GET /api/v1/projects-inventory/overview — unit counts by sales status, overall and
-    per project (counts only; no pricing/area/value). Read-only.
+    per project (counts only; no pricing/area/value). Read-only. [Slice 1]
+GET /api/v1/projects-inventory/drill/{level}/{parent_id} — one hierarchy scope of
+    Project → Phase → Zone → Building → Unit: the scope's status breakdown plus its
+    child rows (or the unit leaf list at the building level). Read-only. [Slice 1b]
 
 RBAC: module-gated at include_router level in router.py via
 require_module_api("projects_inventory"); additionally requires an authenticated
@@ -10,15 +13,20 @@ session (get_current_user). Returns 401 without a session, 403 without the modul
 grant.
 """
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
 from fastapi.responses import JSONResponse
 from loguru import logger
 
 from backend.api.deps import get_current_user
-from backend.core.exceptions import OdooQueryError
+from backend.core.exceptions import InventoryScopeNotFoundError, OdooQueryError
 from backend.core.limiter import limiter
-from backend.modules.projects_inventory.schemas import ProjectsInventoryOverview
+from backend.modules.projects_inventory.schemas import (
+    DrillLevel,
+    ProjectsInventoryDrill,
+    ProjectsInventoryOverview,
+)
 from backend.modules.projects_inventory.services.inventory_service import (
+    get_inventory_drill,
     get_inventory_overview,
 )
 
@@ -26,6 +34,7 @@ router = APIRouter(prefix="/projects-inventory", tags=["projects-inventory"])
 
 _ERR_503 = {"error": {"code": "odoo_unavailable", "message": "Odoo is unavailable or the query failed. Try again shortly."}}
 _ERR_500 = {"error": {"code": "internal_error", "message": "An unexpected error occurred."}}
+_ERR_404 = {"error": {"code": "scope_not_found", "message": "No units found for that node. It may not exist or is stale."}}
 
 
 @router.get(
@@ -46,6 +55,45 @@ async def overview(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("Projects inventory overview — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/drill/{level}/{parent_id}",
+    summary="Projects Inventory — drill one hierarchy scope (phases/zones/buildings/units)",
+    response_model=ProjectsInventoryDrill,
+)
+@limiter.limit("60/minute")
+async def drill(
+    request: Request,
+    response: Response,
+    level: DrillLevel,
+    parent_id: int = Path(ge=1, description="The id at `level` (project/phase/zone/building)."),
+    _user: str = Depends(get_current_user),
+) -> dict | JSONResponse:
+    """Group levels (project/phase/zone) return the scope total/buckets/sold% plus the
+    child rows; the building level returns is_leaf + the unit list. `level` is a Literal,
+    so a bad value yields 422 before the handler runs. Empty/unknown scope → 404."""
+    try:
+        data = await get_inventory_drill(level, parent_id)
+    except InventoryScopeNotFoundError:
+        return JSONResponse(status_code=404, content=_ERR_404)
+    except ValueError:
+        # Defense-in-depth: the Literal path param already 422s on a bad level, but the
+        # service re-validates and we map its ValueError to 422 too.
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": "invalid_level", "message": "Unknown drill level."}},
+        )
+    except OdooQueryError:
+        logger.warning("Projects inventory drill — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("Projects inventory drill — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"

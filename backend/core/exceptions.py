@@ -24,3 +24,8 @@ class StageResolutionError(LaVerdeERPError):
 
 class UnknownProjectError(LaVerdeERPError):
     """Raised when read_group returns a project_id not in _PROJECT_NAMES."""
+
+
+class InventoryScopeNotFoundError(LaVerdeERPError):
+    """Raised when a Projects Inventory drill names a (level, parent_id) scope that
+    matches no units — an unknown or stale node. The endpoint maps this to HTTP 404."""

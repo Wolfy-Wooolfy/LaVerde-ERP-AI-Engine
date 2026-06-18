@@ -541,5 +541,20 @@
   "projinv_as_of": "حتى تاريخ",
   "projinv_live_rpc": "استعلام مباشر للقراءة فقط",
   "projinv_portfolio_title": "حالة المحفظة",
-  "projinv_footnote": "للقراءة فقط. الأعداد حسب حالة البيع من مخزون Odoo المباشر — بدون أسعار أو مساحات في هذا العرض."
+  "projinv_footnote": "للقراءة فقط. الأعداد حسب حالة البيع من مخزون Odoo المباشر — بدون أسعار أو مساحات في هذا العرض.",
+  "projinv_dd_phases": "المراحل",
+  "projinv_dd_phase": "مرحلة",
+  "projinv_dd_zones": "المناطق",
+  "projinv_dd_zone": "منطقة",
+  "projinv_dd_buildings": "المباني",
+  "projinv_dd_building": "مبنى",
+  "projinv_dd_units_in": "الوحدات",
+  "projinv_dd_back": "رجوع",
+  "projinv_dd_breadcrumb_root": "المحفظة",
+  "projinv_dd_no_children": "لا يوجد ما يعرض هنا",
+  "projinv_dd_loading": "جارٍ التحميل…",
+  "projinv_dd_error": "تعذّر التحميل. حاول مجددًا.",
+  "projinv_dd_try_again": "حاول مجددًا",
+  "projinv_dd_unit_code": "الكود",
+  "projinv_dd_unit_name": "الاسم"
 }

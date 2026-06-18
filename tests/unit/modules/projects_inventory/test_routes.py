@@ -13,10 +13,11 @@ from fastapi.testclient import TestClient
 
 from backend.api.deps import get_current_user
 from backend.auth.models import UserRecord
-from backend.core.exceptions import OdooQueryError
+from backend.core.exceptions import InventoryScopeNotFoundError, OdooQueryError
 from backend.main import app
 
 _URL = "/api/v1/projects-inventory/overview"
+_DRILL_URL = "/api/v1/projects-inventory/drill/project/1"
 
 _TESTADMIN_RECORD = UserRecord(
     username="testadmin", password_hash="", modules=["*"],
@@ -181,6 +182,126 @@ def test_200_with_scoped_module_grant() -> None:
         ):
             r = c.get(_URL)
         assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Slice 1b — drill endpoint GET /api/v1/projects-inventory/drill/{level}/{parent_id}
+# ══════════════════════════════════════════════════════════════════════════════
+
+_MOCK_DRILL = {
+    "parent_level": "project",
+    "parent_id": 1,
+    "parent_name": "Project#New Capital",
+    "child_level": "phase",
+    "is_leaf": False,
+    "total_units": 9,
+    "buckets": [
+        {"key": "available", "count": 4, "pct": 44.44},
+        {"key": "reserved", "count": 1, "pct": 11.11},
+        {"key": "contracted", "count": 4, "pct": 44.44},
+    ],
+    "sold_pct": 44.44,
+    "rows": [
+        {
+            "group_id": 10, "group_name": "Phase#1", "total_units": 8,
+            "buckets": [
+                {"key": "available", "count": 3, "pct": 37.5},
+                {"key": "reserved", "count": 1, "pct": 12.5},
+                {"key": "contracted", "count": 4, "pct": 50.0},
+            ],
+            "sold_pct": 50.0,
+        },
+    ],
+    "row_count": 1,
+    "units": [],
+    "unit_count": 0,
+    "reference_date": "2026-06-18",
+    "as_of": "2026-06-18T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 12,
+}
+
+
+def test_drill_200_and_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_inventory_drill",
+        new=AsyncMock(return_value=_MOCK_DRILL),
+    ) as m:
+        r = client.get(_DRILL_URL)
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "parent_level", "parent_id", "parent_name", "child_level", "is_leaf",
+        "total_units", "buckets", "sold_pct", "rows", "row_count", "units",
+        "unit_count", "cache_status", "rpc_duration_ms",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+    assert body["child_level"] == "phase"
+    assert body["rows"][0]["group_id"] == 10
+    # The service was called with the parsed path params.
+    m.assert_awaited_once_with("project", 1)
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_drill_422_on_bad_level(client: TestClient) -> None:
+    """`level` is a Literal path param → FastAPI 422 before the handler runs."""
+    r = client.get("/api/v1/projects-inventory/drill/street/1")
+    assert r.status_code == 422
+
+
+def test_drill_422_on_non_positive_id(client: TestClient) -> None:
+    """parent_id has ge=1 → 422 for 0 / negative."""
+    r = client.get("/api/v1/projects-inventory/drill/project/0")
+    assert r.status_code == 422
+
+
+def test_drill_404_on_empty_scope(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_inventory_drill",
+        new=AsyncMock(side_effect=InventoryScopeNotFoundError("nope")),
+    ):
+        r = client.get(_DRILL_URL)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "scope_not_found"
+
+
+def test_drill_503_on_odoo_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_inventory_drill",
+        new=AsyncMock(side_effect=OdooQueryError("boom")),
+    ):
+        r = client.get(_DRILL_URL)
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+def test_drill_500_on_unexpected(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_inventory_drill",
+        new=AsyncMock(side_effect=RuntimeError("kaboom")),
+    ):
+        r = client.get(_DRILL_URL)
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
+
+
+def test_drill_401_when_unauthenticated() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_DRILL_URL)
+    assert r.status_code == 401
+
+
+def test_drill_403_without_module_grant() -> None:
+    c = _client_with(_OTHER_MODULE_RECORD)
+    try:
+        r = c.get(_DRILL_URL)
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         if hasattr(app.state, "user_repo"):
