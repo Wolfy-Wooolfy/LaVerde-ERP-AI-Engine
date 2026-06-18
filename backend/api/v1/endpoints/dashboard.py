@@ -28,6 +28,7 @@ from backend.modules.campaign_performance.services.timeline_service import (
     get_campaign_timeline,
 )
 from backend.modules.marketing_attribution.services.attribution_service import (
+    get_attribution_grand_coverage,
     get_attribution_overview,
     get_attribution_overview_windowed,
 )
@@ -208,12 +209,20 @@ async def marketing_attribution_dashboard(
         # Windowed remainder = the unattributed share of THIS window's leads.
         coverage_remainder_pct = round(100 - data["coverage_pct"], 1)
 
+    # Grand coverage is window-INDEPENDENT: the full-scale all-time attribution
+    # INCLUDING the Nov-2025 migration plus the same EXCLUDING it. Called in EVERY
+    # branch (all-time / preset / custom) so the pinned footer block is byte-identical
+    # whatever window is on screen — never the windowed coverage line above it. Mirrors
+    # the campaign grand-totals footer (f8f27bf).
+    grand_coverage = await get_attribution_grand_coverage()
+
     ctx = _base_ctx(request, user)
     ctx.update({
         "page": "marketing_attribution_dashboard",
         "attr": data,
         "win": win,
         "coverage_remainder_pct": coverage_remainder_pct,
+        "grand_coverage": grand_coverage,
     })
     return templates.TemplateResponse(request, "marketing_attribution/dashboard.html", ctx)
 

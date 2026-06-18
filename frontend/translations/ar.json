@@ -462,6 +462,11 @@
   "mktattr_window_unattributed_title": "غير مُسند في هذا النطاق",
   "mktattr_window_unattributed_caption": "عملاء في حملات بلا ميديا باير مؤكَّد — قنوات غير مربوطة أو محظورة، خارج قائمة الميديا باير بحكم التصميم.",
   "mktattr_window_footer_note": "عرض بنطاق زمني — هجرة نوفمبر ٢٠٢٥ القديمة مستبعَدة. بدّل إلى «كل الوقت» لتغطية كاملة شاملة الهجرة.",
+  "mktattr_grand_title": "تغطية الإسناد — كل الوقت",
+  "mktattr_grand_caption": "الصورة الكاملة للإسناد، ثابتة بغضّ النظر عن النطاق الزمني المختار بالأعلى.",
+  "mktattr_grand_incl_label": "كل الوقت — شاملاً الترحيل",
+  "mktattr_grand_excl_label": "كل الوقت — بدون الترحيل",
+  "mktattr_grand_incl_migration": "يشمل ترحيل نوفمبر 2025 الدفعي",
 
   "campperf_title": "أداء الحملات التسويقية",
   "nav_campperf": "الحملات التسويقية",

@@ -69,6 +69,55 @@ _MOCK_DATA = {
 }
 
 
+# The pinned all-time grand-coverage footer is window-INDEPENDENT and is called in
+# EVERY branch of the route, so it must be mocked for every 200 test (otherwise the
+# handler would hit live Odoo). Two clearly-labelled lines: incl (full population) +
+# excl (migration removed). Groups sum to each line's attributed_total.
+_MOCK_GRAND_COVERAGE = {
+    "incl": {
+        "attributed_total": 77164,
+        "population": 146925,
+        "coverage_pct": 52.52,
+        "groups": [
+            {"group": "جديد", "count": 40000, "pct": 51.84},
+            {"group": "مهتم", "count": 12000, "pct": 15.55},
+            {"group": "اشترى", "count": 5164, "pct": 6.69},
+            {"group": "بلا نتيجة", "count": 20000, "pct": 25.92},
+        ],
+    },
+    "excl": {
+        "attributed_total": 18000,
+        "population": 21156,
+        "coverage_pct": 85.08,
+        "groups": [
+            {"group": "جديد", "count": 9000, "pct": 50.0},
+            {"group": "مهتم", "count": 4000, "pct": 22.22},
+            {"group": "اشترى", "count": 2000, "pct": 11.11},
+            {"group": "بلا نتيجة", "count": 3000, "pct": 16.67},
+        ],
+    },
+    "migration_attributed_total": 59164,
+    "migration_total": 125769,
+    "legacy_days": ["2025-11-15", "2025-11-16", "2025-11-26"],
+    "reference_date": "2026-06-18",
+    "as_of": "2026-06-18T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 12,
+}
+
+
+@pytest.fixture(autouse=True)
+def _patch_grand_coverage():
+    """The route calls get_attribution_grand_coverage() in every branch — mock it so no
+    200 test reaches live Odoo. Harmless for the 302/403 tests (the handler body never
+    runs there)."""
+    with patch(
+        "backend.api.v1.endpoints.dashboard.get_attribution_grand_coverage",
+        new=AsyncMock(return_value=_MOCK_GRAND_COVERAGE),
+    ):
+        yield
+
+
 def _client_with(record: UserRecord) -> TestClient:
     app.dependency_overrides[get_current_user_html] = lambda: record.username
     mock_repo = MagicMock()
@@ -249,5 +298,50 @@ def test_invalid_custom_range_falls_back_to_default() -> None:
         assert r.status_code == 200
         assert calls["n"] == 2                           # bad range, then default fallback
         assert "Ahmed Aymen" in r.text
+    finally:
+        _cleanup()
+
+
+# ── pinned grand-coverage footer (window-INDEPENDENT, always present) ──────────
+
+
+def test_grand_coverage_footer_renders_in_all_time_view() -> None:
+    """The pinned all-time attribution-coverage footer renders in the all-time view:
+    the title, BOTH line labels, and BOTH coverage %s (incl + excl) from the mock."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_attribution_overview",
+            new=AsyncMock(return_value=_MOCK_DATA),
+        ):
+            r = c.get(_URL, params={"window": "all"})
+        assert r.status_code == 200
+        body = r.text
+        assert "All-time attribution coverage" in body        # mktattr_grand_title
+        assert "All-time — including the migration" in body    # mktattr_grand_incl_label
+        assert "All-time — excluding the migration" in body    # mktattr_grand_excl_label
+        assert "52.5" in body                                  # incl coverage_pct, round(1)
+        assert "85.1" in body                                  # excl coverage_pct, round(1)
+    finally:
+        _cleanup()
+
+
+def test_grand_coverage_footer_renders_in_windowed_view() -> None:
+    """The SAME pinned footer renders in a windowed view — it is NOT gated on
+    win.is_windowed, so it is present whatever period the buyer list is scoped to."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_attribution_overview_windowed",
+            new=AsyncMock(return_value=_MOCK_WINDOWED),
+        ):
+            r = c.get(_URL)                                    # no params → windowed default
+        assert r.status_code == 200
+        body = r.text
+        assert "All-time attribution coverage" in body        # mktattr_grand_title
+        assert "All-time — including the migration" in body
+        assert "All-time — excluding the migration" in body
+        assert "52.5" in body                                  # incl coverage_pct
+        assert "85.1" in body                                  # excl coverage_pct
     finally:
         _cleanup()

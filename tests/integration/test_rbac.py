@@ -40,6 +40,28 @@ _MKTATTR_MOCK = {
     "rpc_duration_ms": 0,
 }
 
+# The pinned all-time grand-coverage footer is called in every branch of the route,
+# so the mktattr-allowed RBAC check must mock it too (otherwise the handler hits Odoo).
+_GRAND_COVERAGE_MOCK = {
+    "incl": {
+        "attributed_total": 0, "population": 0, "coverage_pct": 0.0,
+        "groups": [{"group": g, "count": 0, "pct": 0.0}
+                   for g in ("جديد", "مهتم", "اشترى", "بلا نتيجة")],
+    },
+    "excl": {
+        "attributed_total": 0, "population": 0, "coverage_pct": 0.0,
+        "groups": [{"group": g, "count": 0, "pct": 0.0}
+                   for g in ("جديد", "مهتم", "اشترى", "بلا نتيجة")],
+    },
+    "migration_attributed_total": 0,
+    "migration_total": 0,
+    "legacy_days": [],
+    "reference_date": "2026-06-14",
+    "as_of": "2026-06-14T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 0,
+}
+
 
 # ── A. API Module Gating ──────────────────────────────────────────────────────
 
@@ -184,6 +206,9 @@ class TestHtmlModuleGating:
         with patch(
             "backend.api.v1.endpoints.dashboard.get_attribution_overview",
             new=AsyncMock(return_value=_MKTATTR_MOCK),
+        ), patch(
+            "backend.api.v1.endpoints.dashboard.get_attribution_grand_coverage",
+            new=AsyncMock(return_value=_GRAND_COVERAGE_MOCK),
         ):
             r = mktattr_only_client.get(
                 "/marketing-attribution/dashboard", params={"window": "all"}

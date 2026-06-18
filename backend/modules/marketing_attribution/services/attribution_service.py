@@ -57,6 +57,17 @@ from backend.modules.campaign_performance.domain import (
     WINDOW_CUSTOM,
     WINDOW_PRESET_MONTHS,
 )
+# The all-time grand-coverage footer mirrors the campaign grand-totals footer
+# (f8f27bf): the incl/excl-migration split is built from the SAME positive
+# legacy-days OR-domain (_legacy_days_domain) and the SAME reconciling group+pct
+# helper (_outcomes). Both are reused VERBATIM so the migration slice and the
+# funnel shape are byte-identical to the campaign page (single source of truth);
+# campaign_service does not import this service, so this one-way import adds no cycle.
+from backend.modules.campaign_performance.services.campaign_service import (
+    _GRAND_TTL_SECONDS,
+    _legacy_days_domain,
+    _outcomes,
+)
 from backend.modules.campaign_performance.services.timeline_service import (
     InvalidTimelineRangeError,
     _month_range,
@@ -77,6 +88,12 @@ _STAGE_MODEL = "crm.stage"
 
 _CACHE_KEY_PREFIX = "marketing_attribution:overview"
 _CACHE_KEY_PREFIX_WINDOWED = "marketing_attribution:windowed"
+# The pinned all-time grand-coverage footer re-reads the cached overview plus two
+# tiny migration read-aggregations, yet loads on every page view while the figures
+# only change ~daily. Hold it for an hour (the SAME TTL the campaign grand-totals
+# footer uses, imported as the single source of truth). The cache key is Cairo-date
+# stamped, so it still refreshes at most once per Cairo day.
+_CACHE_KEY_PREFIX_GRAND = "marketing_attribution:grand_coverage"
 _CAIRO_TZ = ZoneInfo("Africa/Cairo")
 _PAGE = 5000
 
@@ -514,6 +531,249 @@ async def get_attribution_overview(
 
     if default_config:
         _cache.set(cache_key, result)
+    return result
+
+
+async def get_attribution_grand_coverage(
+    client: Optional[OdooClient] = None,
+    confirmed_campaigns: Optional[frozenset[str]] = None,
+    denylist_campaigns: Optional[frozenset[str]] = None,
+    legacy_days: Optional[set[str]] = None,
+    now_cairo: Optional[datetime] = None,
+) -> dict:
+    """Return the window-INDEPENDENT all-time ATTRIBUTION-coverage footer.
+
+    The buyer-page parallel of the campaign grand-totals footer (f8f27bf): two
+    all-time lines that stay CONSTANT regardless of the window switcher, so the
+    full-scale attribution picture is always on screen beneath whatever period the
+    buyer list is scoped to. Each line = an attributed total + a coverage % + the
+    aggregate 4-group attributed funnel:
+
+      - incl: the shipped all-time attribution INCLUDING the Nov-2025 migration —
+        attributed / population (ties 1:1 to get_attribution_overview's
+        total_attributed / total_leads_population / attribution_pct).
+      - excl: the same with the legacy migration SUBTRACTED — attributed-excl /
+        population-excl, the ongoing (non-migration) attribution coverage.
+
+    Cheap & GROUPED (never a row scan). The incl side REUSES the cached overview:
+    its per-buyer outcomes Σ to the incl attributed funnel, and the attributing
+    campaign ids come from its confirmed_campaigns. Only the migration slice costs
+    extra RPCs — one read_group on (attributing campaigns AND the legacy days' UTC
+    ranges) by stage_id (the migration-attributed funnel, classified through the
+    SAME stage_info + classify_stage), and one search_count on the legacy days' UTC
+    ranges (the total migration population). excl-attributed[g] = incl[g] −
+    migration-attributed[g], guarded >= 0 (explicit raise — survives -O);
+    population_excl = population − migration_total.
+
+    Args:
+        client: optional injected OdooClient (tests pass a mock; production opens
+            and closes its own — the reused overview shares this same client so it
+            does NOT open or close a second connection).
+        confirmed_campaigns / denylist_campaigns: optional gate overrides for tests,
+            forwarded to get_attribution_overview so the incl side reflects the same
+            gate. When provided the cache is bypassed (a test config never poisons
+            the production cache key).
+        legacy_days: optional injected migration-day set (tests) — bypasses the live
+            detection RPC entirely.
+        now_cairo: optional injected Cairo-local "now" (tests) — pins reference_date.
+
+    The result is cached ONLY for the default configuration (no overrides) under its
+    own key with the SAME 1h TTL as the campaign grand-totals footer.
+
+    Returns:
+        {
+          "incl": {"attributed_total": int, "population": int,
+                   "coverage_pct": float, "groups": [{group, count, pct}, ...]},
+          "excl": {"attributed_total": int, "population": int,
+                   "coverage_pct": float, "groups": [{group, count, pct}, ...]},
+          "migration_attributed_total": int,
+          "migration_total": int,
+          "legacy_days": [str, ...],
+          "reference_date": str, "as_of": str,
+          "cache_status": str, "rpc_duration_ms": int,
+        }
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any Odoo RPC fails.
+        RuntimeError: if a funnel fails to reconcile, or any excl group would go
+            negative (migration-attributed exceeds the all-time attributed count).
+    """
+    _assert_read_only()
+
+    default_config = (
+        confirmed_campaigns is None
+        and denylist_campaigns is None
+        and legacy_days is None
+        and now_cairo is None
+    )
+
+    ref = now_cairo if now_cairo is not None else datetime.now(_CAIRO_TZ)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=_CAIRO_TZ)
+    cairo_today = ref.date()
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_GRAND)
+    if default_config:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit: {cache_key}")
+            return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+        logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # ── incl side — REUSE the cached overview (same gate, same population) ──
+        # Passing _client (not None) means the overview never opens/closes its own
+        # connection; we own _client and close it once in finally.
+        overview = await get_attribution_overview(
+            client=_client,
+            confirmed_campaigns=confirmed_campaigns,
+            denylist_campaigns=denylist_campaigns,
+        )
+        attributing_ids = sorted(
+            {int(c["campaign_id"]) for c in overview["confirmed_campaigns"]}
+        )
+
+        # ── stages — classify the migration-attributed slice (shared mapping) ──
+        stages = await _client.execute_kw(
+            _STAGE_MODEL,
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["id", "name", "is_won"]},
+        )
+
+        # ── legacy migration days (cached long; injectable for tests) ──────────
+        resolved_legacy = (
+            set(legacy_days) if legacy_days is not None
+            else await get_legacy_migration_days(_client)
+        )
+        legacy_domain = _legacy_days_domain(resolved_legacy)
+
+        # ── migration-ATTRIBUTED funnel: (attributing campaigns) AND legacy days ─
+        # Positive OR-domain (no negation), AND-ed with the attributing-campaign
+        # filter. Skipped when nothing attributes or no legacy day was detected.
+        migration_attr_rows: list = []
+        if legacy_domain is not None and attributing_ids:
+            migration_attr_domain = [
+                "&",
+                (CAMPAIGN_FIELD, "in", attributing_ids),
+                *legacy_domain,
+            ]
+            migration_attr_rows = await _client.execute_kw(
+                _LEAD_MODEL,
+                "read_group",
+                args=[migration_attr_domain, ["stage_id"], ["stage_id"]],
+                kwargs={"context": _CTX_ALL, "lazy": False},
+            )
+
+        # ── total MIGRATION population: ALL leads on the legacy days ────────────
+        migration_total = 0
+        if legacy_domain is not None:
+            migration_total = await _client.execute_kw(
+                _LEAD_MODEL,
+                "search_count",
+                args=[legacy_domain],
+                kwargs={"context": _CTX_ALL},
+            )
+    except ReadOnlyViolationError:
+        raise
+    except Exception as exc:
+        raise OdooQueryError(
+            f"get_attribution_grand_coverage() RPC failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+
+    # ── stage info for classify_stage (identical to the overview) ─────────────
+    stage_info: dict[int, dict] = {}
+    for s in stages:
+        stage_info[int(s["id"])] = {
+            "name": str(s.get("name") or ""),
+            "is_won": bool(s.get("is_won")),
+        }
+
+    # ── incl-attributed funnel = Σ the overview's per-buyer outcomes ───────────
+    incl_attr_groups = {g: 0 for g in GROUP_ORDER}
+    for b in overview["buyers"]:
+        for o in b["outcomes"]:
+            incl_attr_groups[o["group"]] += int(o["count"])
+    incl_attr_total = int(overview["total_attributed"])
+    population = int(overview["total_leads_population"])
+
+    # ── migration-attributed funnel (classified by stage, shared mapping) ──────
+    migration_attr_groups = {g: 0 for g in GROUP_ORDER}
+    migration_attr_total = 0
+    for r in migration_attr_rows:
+        cnt = int(r.get("__count") or 0)
+        migration_attr_total += cnt
+        sid, _ = _m2o(r.get("stage_id"))   # stage_id may be False -> None -> جديد
+        migration_attr_groups[classify_stage(sid, stage_info)] += cnt
+
+    # ── excl = incl − migration-attributed, per group, guarded non-negative ────
+    excl_attr_groups: dict[str, int] = {}
+    for g in GROUP_ORDER:
+        diff = incl_attr_groups[g] - migration_attr_groups[g]
+        if diff < 0:
+            raise RuntimeError(
+                f"Grand-coverage reconciliation FAILED for group {g!r}: "
+                f"migration-attributed {migration_attr_groups[g]} exceeds all-time "
+                f"attributed {incl_attr_groups[g]} (excl would be {diff} < 0). "
+                f"Refusing an inconsistent funnel."
+            )
+        excl_attr_groups[g] = diff
+    excl_attr_total = incl_attr_total - migration_attr_total
+    population_excl = population - migration_total
+
+    coverage_incl = (
+        round(100.0 * incl_attr_total / population, 2) if population else 0.0
+    )
+    coverage_excl = (
+        round(100.0 * excl_attr_total / population_excl, 2)
+        if population_excl else 0.0
+    )
+
+    logger.info(
+        f"Marketing attribution grand coverage: incl={incl_attr_total:,}/"
+        f"{population:,} ({coverage_incl:.1f}%) migration_attr={migration_attr_total:,} "
+        f"migration_total={migration_total:,} | excl={excl_attr_total:,}/"
+        f"{population_excl:,} ({coverage_excl:.1f}%) | legacy_days={len(resolved_legacy)} "
+        f"| RPCs in {rpc_ms}ms | cache_key={cache_key}"
+    )
+
+    result: dict = {
+        "incl": {
+            "attributed_total": incl_attr_total,
+            "population": population,
+            "coverage_pct": coverage_incl,
+            "groups": _outcomes(
+                incl_attr_groups, incl_attr_total, "grand_coverage incl migration"
+            ),
+        },
+        "excl": {
+            "attributed_total": excl_attr_total,
+            "population": population_excl,
+            "coverage_pct": coverage_excl,
+            "groups": _outcomes(
+                excl_attr_groups, excl_attr_total, "grand_coverage excl migration"
+            ),
+        },
+        "migration_attributed_total": migration_attr_total,
+        "migration_total": migration_total,
+        "legacy_days": sorted(resolved_legacy),
+        "reference_date": cairo_today.isoformat(),
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "cache_status": "fresh",
+        "rpc_duration_ms": rpc_ms,
+    }
+
+    if default_config:
+        _cache.set(cache_key, result, ttl=_GRAND_TTL_SECONDS)
     return result
 
 

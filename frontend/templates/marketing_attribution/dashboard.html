@@ -355,6 +355,82 @@
 
   </div>
 
+  {# ── 4b. GRAND COVERAGE — PINNED, window-INDEPENDENT (full-scale, always shown) ─
+     The buyer-page parallel of the campaign grand-totals footer (f8f27bf). These two
+     lines are CONSTANT regardless of the window switcher above: line 1 is the all-time
+     attribution INCLUDING the Nov-2025 migration (attributed / full population), line 2
+     the same EXCLUDING it (much higher coverage — the migration drags the incl % down).
+     Each shows the coverage % + the attributed/population split + the aggregate 4-group
+     attributed funnel, reusing the SAME composition bar + legend markup as the buyer
+     rows (same classes → no CSS rebuild). ALWAYS rendered (not gated on win.is_windowed)
+     and clearly labelled so it never reads as the windowed coverage line above. #}
+  {% set gc = grand_coverage %}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card">
+    <div class="px-6 pt-5 pb-3 border-b border-neutral-100 dark:border-neutral-700">
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("mktattr_grand_title") }}</h2>
+      <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">{{ _t("mktattr_grand_caption") }}</p>
+    </div>
+    <div class="px-6 py-5 space-y-5">
+      {% set gc_lines = [
+        (_t("mktattr_grand_incl_label"), gc.incl, _t("mktattr_grand_incl_migration")),
+        (_t("mktattr_grand_excl_label"), gc.excl, _t("campperf_window_excl_migration"))
+      ] %}
+      {% for lbl, line, tag in gc_lines %}
+      <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+
+        {# Header: which all-time attribution this is + the migration tag · coverage % + attributed/population #}
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ lbl }}</p>
+            <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{{ tag }}</p>
+          </div>
+          <div class="shrink-0 text-right rtl:text-left">
+            <p class="text-2xl font-bold font-mono tabular-nums text-primary-600 dark:text-primary-400 leading-none">{{ line.coverage_pct | round(1) }}%</p>
+            <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500 font-mono tabular-nums">{{ "{:,}".format(line.attributed_total) }} / {{ "{:,}".format(line.population) }} {{ _t("mktattr_leads") }}</p>
+          </div>
+        </div>
+
+        {# 4-segment attributed funnel bar — identical classes to the buyer rows. #}
+        <div class="h-5 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-3">
+          {% for o in line.groups %}
+            {% if o.group == "جديد" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set glbl = _t("mktattr_group_new") %}
+            {% elif o.group == "مهتم" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set glbl = _t("mktattr_group_interested") %}
+            {% elif o.group == "اشترى" %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set glbl = _t("mktattr_group_bought") %}
+            {% elif o.group == "بلا نتيجة" %}{% set seg_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set glbl = _t("mktattr_group_noresult") %}
+            {% else %}{% set seg_cls = "bg-neutral-400" %}{% set glbl = o.group %}{% endif %}
+            {% if o.pct > 0 %}
+            <div class="h-full {{ seg_cls }}" style="width: {{ o.pct }}%;"
+                 title="{{ glbl }}: {{ o.pct | round(1) }}% · {{ o.count }}"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+
+        {# Legend — same grid + dot/count/pct shape as the buyer rows (count first). #}
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {% for o in line.groups %}
+            {% if o.group == "جديد" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set glbl = _t("mktattr_group_new") %}
+            {% elif o.group == "مهتم" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set glbl = _t("mktattr_group_interested") %}
+            {% elif o.group == "اشترى" %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set glbl = _t("mktattr_group_bought") %}
+            {% elif o.group == "بلا نتيجة" %}{% set dot_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set glbl = _t("mktattr_group_noresult") %}
+            {% else %}{% set dot_cls = "bg-neutral-400" %}{% set glbl = o.group %}{% endif %}
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-sm shrink-0 {{ dot_cls }}"></span>
+                <span class="text-xs text-neutral-500 dark:text-neutral-400 truncate" title="{{ glbl }}">{{ glbl }}</span>
+              </div>
+              <p class="mt-1 ms-4">
+                <span class="text-base font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(o.count) }}</span>
+                <span class="text-xs text-neutral-400 dark:text-neutral-500 ms-1">{{ o.pct | round(1) }}%</span>
+              </p>
+            </div>
+          {% endfor %}
+        </div>
+
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
   {# ── 5. FOOTER ──────────────────────────────────────────────────────────── #}
   <footer class="pt-4 pb-2 border-t border-neutral-200 dark:border-neutral-700 space-y-1">
     {% if win.is_windowed and attr.legacy_days_excluded | length > 0 %}
