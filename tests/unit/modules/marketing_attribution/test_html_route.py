@@ -262,7 +262,7 @@ def test_default_page_is_windowed_and_renders_switcher() -> None:
         assert "Time window" in body                    # campperf_window_label
         assert "All-time" in body                       # campperf_window_all pill
         assert "Last 3 months" in body                  # campperf_window_last3 pill
-        assert "migration excluded" in body             # windowed coverage caption tag
+        assert "imported historical data excluded" in body  # windowed coverage caption tag
         # Windowed coverage + buyer + unattributed honesty row.
         assert "86.5" in body                           # coverage_pct, round(1)
         assert "Ahmed Aymen" in body
@@ -318,8 +318,8 @@ def test_grand_coverage_footer_renders_in_all_time_view() -> None:
         assert r.status_code == 200
         body = r.text
         assert "All-time attribution coverage" in body        # mktattr_grand_title
-        assert "All-time — including the migration" in body    # mktattr_grand_incl_label
-        assert "All-time — excluding the migration" in body    # mktattr_grand_excl_label
+        assert "All-time — including imported historical data" in body    # mktattr_grand_incl_label
+        assert "All-time — excluding imported historical data" in body    # mktattr_grand_excl_label
         assert "52.5" in body                                  # incl coverage_pct, round(1)
         assert "85.1" in body                                  # excl coverage_pct, round(1)
     finally:
@@ -339,8 +339,8 @@ def test_grand_coverage_footer_renders_in_windowed_view() -> None:
         assert r.status_code == 200
         body = r.text
         assert "All-time attribution coverage" in body        # mktattr_grand_title
-        assert "All-time — including the migration" in body
-        assert "All-time — excluding the migration" in body
+        assert "All-time — including imported historical data" in body
+        assert "All-time — excluding imported historical data" in body
         assert "52.5" in body                                  # incl coverage_pct
         assert "85.1" in body                                  # excl coverage_pct
     finally:

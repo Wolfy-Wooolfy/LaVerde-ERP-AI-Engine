@@ -316,7 +316,7 @@ def test_default_page_is_windowed_and_renders_switcher() -> None:
         assert "Time window" in body                    # campperf_window_label
         assert "All-time" in body                       # campperf_window_all pill
         assert "Last 3 months" in body                  # campperf_window_last3 pill
-        assert "migration excluded" in body             # windowed list caption
+        assert "imported historical data excluded" in body  # windowed list caption
         # The active campaign row renders (same row shape as all-time).
         assert "FB-AY" in body
         assert "Ahmed Aymen" in body
@@ -393,8 +393,8 @@ def test_grand_totals_block_renders_in_windowed_view() -> None:
         assert r.status_code == 200
         body = r.text
         assert "Grand totals" in body                   # campperf_grand_title (EN)
-        assert "All-time — including the migration" in body
-        assert "All-time — excluding the migration" in body
+        assert "All-time — including imported historical data" in body
+        assert "All-time — excluding imported historical data" in body
         assert "146,925" in body                         # incl total (migration INCLUDED)
         assert "21,156" in body                          # excl total (migration EXCLUDED)
     finally:

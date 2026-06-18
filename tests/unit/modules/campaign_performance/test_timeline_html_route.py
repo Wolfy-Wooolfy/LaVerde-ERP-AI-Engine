@@ -156,7 +156,7 @@ def test_200_renders_timeline_content() -> None:
         assert "Too early to assess" in body                 # too_early month badge
         # Footer caveat (real data, not "illustrative"): the human-readable
         # migration note replaces the old raw "N migration days excluded" counter.
-        assert "one-time bulk import from a legacy CRM" in body
+        assert "a one-time batch from the previous system" in body
         assert "migration days excluded" not in body
     finally:
         _cleanup()
