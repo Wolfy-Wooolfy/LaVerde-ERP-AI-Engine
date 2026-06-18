@@ -29,6 +29,7 @@ from backend.modules.campaign_performance.services.timeline_service import (
 )
 from backend.modules.marketing_attribution.services.attribution_service import (
     get_attribution_overview,
+    get_attribution_overview_windowed,
 )
 
 router = APIRouter(tags=["ui"])
@@ -165,17 +166,53 @@ async def hr_dashboard(
 )
 async def marketing_attribution_dashboard(
     request: Request,
+    window: str = Query(campperf_domain.DEFAULT_WINDOW),
+    start_month: str | None = Query(None),
+    end_month: str | None = Query(None),
     user: str = Depends(get_current_user_html),
 ) -> HTMLResponse:
-    # Server-side render, mirroring the HR page: call the read-only service and pass the
-    # result straight to the template. No new backend logic — display only.
-    data = await get_attribution_overview()
-    # Remainder = leads with no media buyer by nature (events/expos/organic/place-based).
-    coverage_remainder_pct = round(100 - data["attribution_pct"], 1)
+    # Server-side render. The buyer list is scoped to a Cairo WINDOW (locked default:
+    # last 3 months). "all" routes to the shipped un-windowed attribution (incl. the
+    # Nov-2025 migration — unchanged); every dated preset / valid custom range routes to
+    # the windowed aggregator (migration excluded). An invalid/partial custom range
+    # silently falls back to the default preset (this HTML page never 422s a hand-edited
+    # URL — same policy as the campaign list / timeline). All paths are read-only; the
+    # template branches on win.is_windowed.
+    has_custom = bool(start_month) and bool(end_month)
+    if not has_custom and window not in campperf_domain.WINDOW_PRESETS:
+        window = campperf_domain.DEFAULT_WINDOW
+
+    if window == campperf_domain.WINDOW_ALL and not has_custom:
+        data = await get_attribution_overview()
+        win = {
+            "active": campperf_domain.WINDOW_ALL, "is_windowed": False,
+            "is_custom_range": False, "start": "", "end": "",
+            "ref_month": data["reference_date"][:7],
+        }
+        # Remainder = leads with no media buyer by nature (events/expos/organic).
+        coverage_remainder_pct = round(100 - data["attribution_pct"], 1)
+    else:
+        try:
+            data = await get_attribution_overview_windowed(
+                window=window, start_month=start_month, end_month=end_month,
+            )
+        except InvalidTimelineRangeError:
+            data = await get_attribution_overview_windowed(window=campperf_domain.DEFAULT_WINDOW)
+        win = {
+            "active": data["window"], "is_windowed": True,
+            "is_custom_range": data["is_custom_range"],
+            "start": data["window_start_month"] if data["is_custom_range"] else "",
+            "end": data["window_end_month"] if data["is_custom_range"] else "",
+            "ref_month": data["reference_date"][:7],
+        }
+        # Windowed remainder = the unattributed share of THIS window's leads.
+        coverage_remainder_pct = round(100 - data["coverage_pct"], 1)
+
     ctx = _base_ctx(request, user)
     ctx.update({
         "page": "marketing_attribution_dashboard",
         "attr": data,
+        "win": win,
         "coverage_remainder_pct": coverage_remainder_pct,
     })
     return templates.TemplateResponse(request, "marketing_attribution/dashboard.html", ctx)

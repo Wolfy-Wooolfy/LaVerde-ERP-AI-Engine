@@ -6,7 +6,7 @@
 {% block content %}
 <div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
 
-  {# ── 1. COVERAGE STRIP ──────────────────────────────────────────────────── #}
+  {# ── 1. HEADER STRIP ────────────────────────────────────────────────────── #}
   <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
     <div>
       <div class="flex items-center gap-2.5 mb-1">
@@ -24,7 +24,126 @@
     </div>
   </div>
 
-  {# Headline coverage — read LIVE from attribution_pct (never hardcoded). #}
+  {# ── 1b. WINDOW SWITCHER — presets + custom range (full page reload, query param) ─
+     The buyer list is scoped to a Cairo window (default: last 3 months). "All-time" is
+     the shipped un-windowed view (migration included); every dated window excludes the
+     Nov-2025 migration. A custom range NEVER lights a preset pill: preset-active =
+     (not win.is_custom_range and win.active == key). The Custom pill is active when
+     win.is_custom_range. Apply is guarded client-side (both set · start ≤ end · span ≤
+     24mo); the dropdowns list only the last 24 Cairo months, so the backend can never
+     be sent a range it would reject (and a hand-edited bad URL silently falls back to
+     default). Mirrors the campaign list switcher; reuses the campperf_window_* keys. #}
+  <div class="space-y-3"
+       x-data="{
+         showCustom: {{ 'true' if win.is_custom_range else 'false' }},
+         start: '{{ win.start }}',
+         end: '{{ win.end }}',
+         maxMonth: '{{ win.ref_month }}',
+         maxSpan: 24,
+         get monthList() {
+           const [y, m] = this.maxMonth.split('-').map(Number);
+           const out = [];
+           for (let i = 0; i < this.maxSpan; i++) {
+             const total = (y * 12 + (m - 1)) - i;
+             out.push(Math.floor(total / 12) + '-' + String((total % 12) + 1).padStart(2, '0'));
+           }
+           return out;
+         },
+         span() {
+           if (!this.start || !this.end) return 0;
+           const [sy, sm] = this.start.split('-').map(Number);
+           const [ey, em] = this.end.split('-').map(Number);
+           return (ey * 12 + em) - (sy * 12 + sm) + 1;
+         },
+         get valid() { const s = this.span(); return s >= 1 && s <= this.maxSpan; },
+         apply() {
+           if (!this.valid) return;
+           window.location.href = '/marketing-attribution/dashboard?start_month=' +
+             this.start + '&end_month=' + this.end;
+         }
+       }">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">{{ _t("campperf_window_label") }}</span>
+      {% for key, lbl_key in [("current", "campperf_window_current"), ("last3", "campperf_window_last3"), ("all", "campperf_window_all")] %}
+      <a href="/marketing-attribution/dashboard?window={{ key }}"
+         class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                {% if not win.is_custom_range and win.active == key %}bg-primary-600 border-primary-600 text-white
+                {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+         {% if not win.is_custom_range and win.active == key %}aria-current="page"{% endif %}>
+        {{ _t(lbl_key) }}
+      </a>
+      {% endfor %}
+      {# Custom pill — toggles the pickers; primary-filled when a custom range drives the view. #}
+      <button type="button" @click="showCustom = !showCustom"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                     {% if win.is_custom_range %}bg-primary-600 border-primary-600 text-white
+                     {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+              {% if win.is_custom_range %}aria-current="page"{% endif %}>
+        {{ _t("campperf_timeline_preset_custom") }}
+      </button>
+    </div>
+
+    {# Month dropdowns — revealed by the Custom pill. Each lists the last 24 Cairo
+       months; the Apply guard enforces start ≤ end. Inline display:none (when not
+       already custom) avoids a flash before Alpine initialises. #}
+    <div x-show="showCustom"{% if not win.is_custom_range %} style="display: none;"{% endif %}
+         class="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-4 py-3">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_start") }}</label>
+        <select x-model="start" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_end") }}</label>
+        <select x-model="end" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <button type="button" @click="apply()" :disabled="!valid"
+              class="px-4 py-1.5 rounded-lg text-xs font-medium border border-primary-600 bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed">
+        {{ _t("campperf_timeline_custom_apply") }}
+      </button>
+      <p x-show="start && end && !valid" class="basis-full text-[11px] text-warning-600 dark:text-warning-400">
+        {{ _t("campperf_timeline_custom_invalid") }}
+      </p>
+    </div>
+  </div>
+
+  {# ── 2. COVERAGE STRIP — windowed coverage OR the shipped all-time coverage ── #}
+  {% if win.is_windowed %}
+  {# Windowed coverage: attributed / windowed-total for THIS period (migration excluded). #}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div>
+        <p class="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+          {{ _t("mktattr_window_coverage_label") }}
+          <span class="ms-1 text-neutral-400 dark:text-neutral-500 normal-case font-normal">&middot; {{ attr.window_start_month }}{% if attr.window_start_month != attr.window_end_month %} → {{ attr.window_end_month }}{% endif %} &middot; {{ _t("campperf_window_excl_migration") }}</span>
+        </p>
+        <p class="mt-2 flex items-baseline gap-2">
+          <span class="text-4xl font-bold font-mono tabular-nums text-primary-600 dark:text-primary-400">{{ attr.coverage_pct | round(1) }}%</span>
+          <span class="text-sm text-neutral-600 dark:text-neutral-300">{{ _t("mktattr_window_coverage_headline") }}</span>
+        </p>
+        <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500 font-mono tabular-nums">
+          {{ "{:,}".format(attr.total_attributed) }} / {{ "{:,}".format(attr.total_leads_population) }} {{ _t("mktattr_leads") }}
+        </p>
+      </div>
+      <div class="sm:max-w-md sm:text-right rtl:sm:text-left">
+        <p class="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+          <span class="font-semibold text-neutral-700 dark:text-neutral-300 font-mono tabular-nums">~{{ coverage_remainder_pct }}%</span>
+          {{ _t("mktattr_window_coverage_caption") }}
+        </p>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  {# Shipped all-time coverage — read LIVE from attribution_pct (never hardcoded). #}
   <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div>
@@ -47,15 +166,17 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
-  {# ── 2. PER-MEDIA-BUYER (CORE) ──────────────────────────────────────────── #}
+  {# ── 3. PER-MEDIA-BUYER (CORE) ──────────────────────────────────────────── #}
   <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card">
 
     <div class="px-6 pt-5 pb-4 border-b border-neutral-100 dark:border-neutral-700">
       <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("mktattr_per_buyer_title") }}</h2>
       <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
         {{ attr.buyers | length }} {{ _t("mktattr_media_buyer") if attr.buyers | length == 1 else _t("mktattr_media_buyers") }}
-        &middot; {{ _t("mktattr_ordered_by_volume") }}
+        &middot;
+        {% if win.is_windowed %}{{ _t("mktattr_window_list_caption") }}{% else %}{{ _t("mktattr_ordered_by_volume") }}{% endif %}
       </p>
       {# اشترى denominator caption — once at section level so it isn't lost or repeated per card. #}
       <p class="mt-2 text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed">
@@ -70,7 +191,7 @@
           <svg class="w-10 h-10 text-neutral-300 dark:text-neutral-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
           </svg>
-          <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ _t("mktattr_no_buyers") }}</p>
+          <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ _t("mktattr_window_empty") if win.is_windowed else _t("mktattr_no_buyers") }}</p>
         </div>
       {% endif %}
 
@@ -138,15 +259,48 @@
       </div>
       {% endfor %}
 
+      {# Unattributed bucket — windowed views only. ONE de-emphasized summary row so the
+         coverage above is honest: these windowed leads are in campaigns with no confirmed
+         media buyer (unmapped / denylisted channels) and are off the buyer list by design. #}
+      {% if win.is_windowed and attr.unattributed.lead_count > 0 %}
+      {% set ua = attr.unattributed %}
+      <div class="rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 bg-neutral-50/60 dark:bg-neutral-800/40 px-4 py-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ _t("mktattr_window_unattributed_title") }}</p>
+            <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed">{{ _t("mktattr_window_unattributed_caption") }}</p>
+          </div>
+          <div class="shrink-0 text-right rtl:text-left">
+            <p class="text-lg font-bold font-mono tabular-nums text-neutral-500 dark:text-neutral-400 leading-none">{{ "{:,}".format(ua.lead_count) }}</p>
+            <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("mktattr_leads") }}</p>
+          </div>
+        </div>
+        {# Thin, de-emphasized aggregate bar (no full legend — this is a summary row). #}
+        <div class="h-2 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mt-3 opacity-70">
+          {% for o in ua.outcomes %}
+            {% if o.group == "جديد" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("mktattr_group_new") %}
+            {% elif o.group == "مهتم" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("mktattr_group_interested") %}
+            {% elif o.group == "اشترى" %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("mktattr_group_bought") %}
+            {% elif o.group == "بلا نتيجة" %}{% set seg_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set lbl = _t("mktattr_group_noresult") %}
+            {% else %}{% set seg_cls = "bg-neutral-400" %}{% set lbl = o.group %}{% endif %}
+            {% if o.pct > 0 %}
+            <div class="h-full {{ seg_cls }}" style="width: {{ o.pct }}%;"
+                 title="{{ lbl }}: {{ o.pct | round(1) }}% · {{ o.count }}"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
     </div>
   </div>
 
-  {# ── 3. DATA-QUALITY STRIP (board FYI) ───────────────────────────────────── #}
+  {# ── 4. DATA-QUALITY STRIP (board FYI) ───────────────────────────────────── #}
   <div class="space-y-4">
 
-    {# Integrity alerts — LOUD when non-empty (locked-decision drift). #}
+    {# Integrity alerts — LOUD when non-empty (locked-decision drift). Shared by both views. #}
     {% if attr.integrity_alerts | length > 0 %}
-    <div class="bg-danger-50 dark:bg-danger-950/30 border border-danger-200 dark:border-danger-800 rounded-xl px-5 py-4">
+    <div class="bg-danger-50 dark:bg-danger-900/30 border border-danger-200 dark:border-danger-800 rounded-xl px-5 py-4">
       <div class="flex items-center gap-2 mb-2">
         <svg class="w-4 h-4 text-danger-600 dark:text-danger-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
           <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
@@ -161,8 +315,8 @@
     </div>
     {% endif %}
 
-    {# Pending channels — awaiting confirmation. Quiet, informational. #}
-    {% if attr.pending_campaigns | length > 0 %}
+    {# Pending channels — all-time view only (a window-independent, map-level concept). #}
+    {% if not win.is_windowed and attr.pending_campaigns | length > 0 %}
     <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card">
       <div class="px-6 pt-5 pb-3 border-b border-neutral-100 dark:border-neutral-700">
         <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("mktattr_pending_title") }}</h3>
@@ -187,7 +341,7 @@
     </div>
     {% endif %}
 
-    {# Config warnings — quiet muted note. #}
+    {# Config warnings — quiet muted note. Shared by both views. #}
     {% if attr.config_warnings | length > 0 %}
     <div class="px-1">
       <p class="text-xs font-semibold text-neutral-400 dark:text-neutral-500 mb-1">{{ _t("mktattr_config_note") }}</p>
@@ -201,8 +355,13 @@
 
   </div>
 
-  {# ── 4. FOOTER ──────────────────────────────────────────────────────────── #}
+  {# ── 5. FOOTER ──────────────────────────────────────────────────────────── #}
   <footer class="pt-4 pb-2 border-t border-neutral-200 dark:border-neutral-700 space-y-1">
+    {% if win.is_windowed and attr.legacy_days_excluded | length > 0 %}
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      {{ _t("mktattr_window_footer_note") }}
+    </p>
+    {% endif %}
     {% if attr.is_won_stage_names | length > 0 %}
     <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
       {{ _t("mktattr_won_stages") }}: {{ attr.is_won_stage_names | join(" · ") }}

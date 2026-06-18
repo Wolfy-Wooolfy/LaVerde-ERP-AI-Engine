@@ -178,12 +178,16 @@ class TestHtmlModuleGating:
         assert "text/html" in r.headers.get("content-type", "")
 
     def test_marketing_attribution_html_allowed_for_mktattr_only(self, mktattr_only_client):
-        # Patch the read-only service so the allowed path does not require Odoo.
+        # Patch the read-only service so the allowed path does not require Odoo. The
+        # default page is now WINDOWED; request ?window=all to exercise the un-windowed
+        # overview path this RBAC check mocks (gating is identical on both paths).
         with patch(
             "backend.api.v1.endpoints.dashboard.get_attribution_overview",
             new=AsyncMock(return_value=_MKTATTR_MOCK),
         ):
-            r = mktattr_only_client.get("/marketing-attribution/dashboard")
+            r = mktattr_only_client.get(
+                "/marketing-attribution/dashboard", params={"window": "all"}
+            )
         assert r.status_code == 200
         assert "text/html" in r.headers.get("content-type", "")
 

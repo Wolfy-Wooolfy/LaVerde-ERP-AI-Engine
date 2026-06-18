@@ -46,6 +46,26 @@ from backend.modules.marketing_attribution.domain import (
     classify_stage,
 )
 from backend.modules.marketing_attribution.services import cache as _cache
+# Window primitives + the dated-window contract are REUSED VERBATIM from the campaign
+# performance windowing (single source of truth for Cairo bucketing, the custom-range
+# validation contract, and dynamic legacy-migration detection) — never re-declared
+# here. One-way import: campaign_performance imports marketing_attribution.domain (not
+# this service), so this introduces NO cycle. The buyer→campaign attribution map stays
+# all-time (RPC 4 below); only the LEADS feeding the funnel are windowed.
+from backend.modules.campaign_performance.domain import (
+    DEFAULT_WINDOW,
+    WINDOW_CUSTOM,
+    WINDOW_PRESET_MONTHS,
+)
+from backend.modules.campaign_performance.services.timeline_service import (
+    InvalidTimelineRangeError,
+    _month_range,
+    _month_str,
+    _resolve_custom_window,
+    _shift_months,
+    _to_cairo,
+    get_legacy_migration_days,
+)
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 
 # Methods that must never appear in ALLOWED_METHODS.
@@ -56,7 +76,9 @@ _CAMPAIGN_MODEL = "utm.campaign"
 _STAGE_MODEL = "crm.stage"
 
 _CACHE_KEY_PREFIX = "marketing_attribution:overview"
+_CACHE_KEY_PREFIX_WINDOWED = "marketing_attribution:windowed"
 _CAIRO_TZ = ZoneInfo("Africa/Cairo")
+_PAGE = 5000
 
 # All counts include archived leads (board attribution must include Lost/closed).
 _CTX_ALL = {"active_test": False}
@@ -84,6 +106,112 @@ def _qualifies(dominant_count: int, both_set_count: int) -> bool:
     if both_set_count <= 0:
         return False
     return dominant_count * 100 >= both_set_count * 90
+
+
+def _build_campaign_map(both_set_rows: list) -> dict[int, dict]:
+    """Derive campaign_map[cid] = {both_set, buyers Counter, buyer_names} from the
+    BOTH-SET read_group rows (leads with both campaign_id AND media_buyer_id). The
+    single source of truth for the campaign→buyer map, shared by the all-time overview
+    and the windowed view (so a buyer's mapping never differs between them)."""
+    campaign_map: dict[int, dict] = {}
+    for r in both_set_rows:
+        cid, _ = _m2o(r.get(CAMPAIGN_FIELD))
+        if cid is None:
+            continue
+        bid, bname = _m2o(r.get(BUYER_FIELD))
+        if bid is None:
+            continue
+        cnt = int(r.get("__count") or 0)
+        entry = campaign_map.setdefault(
+            cid, {"both_set": 0, "buyers": Counter(), "buyer_names": {}}
+        )
+        entry["both_set"] += cnt
+        entry["buyers"][bid] += cnt
+        entry["buyer_names"][bid] = bname
+    return campaign_map
+
+
+def _dominant(
+    campaign_map: dict[int, dict], cid: int
+) -> tuple[Optional[int], Optional[str], int, int]:
+    """(buyer_id, buyer_name, dominant_count, both_set_count) for a campaign."""
+    entry = campaign_map.get(cid)
+    if not entry or not entry["buyers"]:
+        return None, None, 0, 0
+    bid, dom_cnt = entry["buyers"].most_common(1)[0]
+    return bid, entry["buyer_names"].get(bid), dom_cnt, entry["both_set"]
+
+
+def _gate_attributing(
+    confirmed_ids: set[int],
+    denylist_ids: set[int],
+    campaign_map: dict[int, dict],
+    id_to_name: dict[int, str],
+) -> tuple[set[int], list[str]]:
+    """Apply the attribution GATE (A1) — shared by the all-time overview and the
+    windowed view so both attribute EXACTLY the same campaigns.
+
+    attributing_ids = { C in confirmed_ids : qualifies(C) AND C not in denylist }.
+    A confirmed campaign that resolves into the denylist, has no both-set leads, or
+    fails the >=90% concentration gate is NOT attributed and yields a LOUD
+    integrity-alert string (locked-decision drift). The caller logs the alerts.
+    Returns (attributing_ids, integrity_alerts)."""
+    integrity_alerts: list[str] = []
+    attributing_ids: set[int] = set()
+    for cid in sorted(confirmed_ids):
+        cname = id_to_name.get(cid, f"id={cid}")
+        if cid in denylist_ids:
+            integrity_alerts.append(
+                f"INTEGRITY: confirmed campaign {cname!r} (id={cid}) also "
+                f"resolves into the DENYLIST — NOT attributed. Locked-decision "
+                f"drift: a campaign cannot be both confirmed and denied."
+            )
+            continue
+        bid, bname, dom_cnt, both = _dominant(campaign_map, cid)
+        if both == 0:
+            integrity_alerts.append(
+                f"INTEGRITY: confirmed campaign {cname!r} (id={cid}) has NO "
+                f"both-set leads — cannot verify >=90% concentration. "
+                f"NOT attributed."
+            )
+            continue
+        if not _qualifies(dom_cnt, both):
+            pct = 100.0 * dom_cnt / both
+            integrity_alerts.append(
+                f"INTEGRITY: confirmed campaign {cname!r} (id={cid}) "
+                f"concentration {pct:.1f}% < 90% (dominant buyer {bname!r}, "
+                f"{dom_cnt}/{both} both-set) — NOT attributed. Locked decision "
+                f"says a confirmed campaign must hold >=90%."
+            )
+            continue
+        attributing_ids.add(cid)
+    return attributing_ids, integrity_alerts
+
+
+async def _fetch_all_windowed(
+    client: OdooClient, dom: list, fields: list[str]
+) -> list[dict]:
+    """search_read the whole domain in pages of _PAGE, ordered by id — the SAME paged
+    pattern the campaign windowing uses for its single windowed lead fetch."""
+    rows, offset = [], 0
+    while True:
+        page = await client.execute_kw(
+            _LEAD_MODEL,
+            "search_read",
+            args=[dom],
+            kwargs={
+                "fields": fields,
+                "order": "id",
+                "limit": _PAGE,
+                "offset": offset,
+                "context": _CTX_ALL,
+            },
+        )
+        rows.extend(page)
+        if len(page) < _PAGE:
+            break
+        offset += _PAGE
+    return rows
 
 
 async def get_attribution_overview(
@@ -214,62 +342,13 @@ async def get_attribution_overview(
 
         # ── Derive the campaign->buyer map (from RPC 2) ───────────────────────
         # campaign_map[cid] = {"both_set": int, "buyers": Counter(id->cnt),
-        #                      "buyer_names": {id: name}}
-        campaign_map: dict[int, dict] = {}
-        for r in both_set_rows:
-            cid, _ = _m2o(r.get(CAMPAIGN_FIELD))
-            if cid is None:
-                continue
-            bid, bname = _m2o(r.get(BUYER_FIELD))
-            if bid is None:
-                continue
-            cnt = int(r.get("__count") or 0)
-            entry = campaign_map.setdefault(
-                cid, {"both_set": 0, "buyers": Counter(), "buyer_names": {}}
-            )
-            entry["both_set"] += cnt
-            entry["buyers"][bid] += cnt
-            entry["buyer_names"][bid] = bname
-
-        def _dominant(cid: int) -> tuple[Optional[int], Optional[str], int, int]:
-            """(buyer_id, buyer_name, dominant_count, both_set_count) for a campaign."""
-            entry = campaign_map.get(cid)
-            if not entry or not entry["buyers"]:
-                return None, None, 0, 0
-            bid, dom_cnt = entry["buyers"].most_common(1)[0]
-            return bid, entry["buyer_names"].get(bid), dom_cnt, entry["both_set"]
+        #                      "buyer_names": {id: name}} — shared with the windowed view.
+        campaign_map = _build_campaign_map(both_set_rows)
 
         # ── GATE (A1) — compute attributing_ids BEFORE the attribution RPC ────
-        integrity_alerts: list[str] = []
-        attributing_ids: set[int] = set()
-        for cid in sorted(confirmed_ids):
-            cname = id_to_name.get(cid, f"id={cid}")
-            if cid in denylist_ids:
-                integrity_alerts.append(
-                    f"INTEGRITY: confirmed campaign {cname!r} (id={cid}) also "
-                    f"resolves into the DENYLIST — NOT attributed. Locked-decision "
-                    f"drift: a campaign cannot be both confirmed and denied."
-                )
-                continue
-            bid, bname, dom_cnt, both = _dominant(cid)
-            if both == 0:
-                integrity_alerts.append(
-                    f"INTEGRITY: confirmed campaign {cname!r} (id={cid}) has NO "
-                    f"both-set leads — cannot verify >=90% concentration. "
-                    f"NOT attributed."
-                )
-                continue
-            if not _qualifies(dom_cnt, both):
-                pct = 100.0 * dom_cnt / both
-                integrity_alerts.append(
-                    f"INTEGRITY: confirmed campaign {cname!r} (id={cid}) "
-                    f"concentration {pct:.1f}% < 90% (dominant buyer {bname!r}, "
-                    f"{dom_cnt}/{both} both-set) — NOT attributed. Locked decision "
-                    f"says a confirmed campaign must hold >=90%."
-                )
-                continue
-            attributing_ids.add(cid)
-
+        attributing_ids, integrity_alerts = _gate_attributing(
+            confirmed_ids, denylist_ids, campaign_map, id_to_name
+        )
         for alert in integrity_alerts:
             logger.error(alert)
 
@@ -323,7 +402,7 @@ async def get_attribution_overview(
         cid, _ = _m2o(r.get(CAMPAIGN_FIELD))
         if cid is None or cid not in attributing_ids:
             continue
-        bid, bname, _, _ = _dominant(cid)
+        bid, bname, _, _ = _dominant(campaign_map, cid)
         if bid is None:
             continue
         sid, _ = _m2o(r.get("stage_id"))   # stage_id may be False -> None -> جديد
@@ -377,7 +456,7 @@ async def get_attribution_overview(
     # ── Confirmed-campaign detail (transparency / A2 / A5 support) ────────────
     confirmed_campaigns_out: list[dict] = []
     for cid in sorted(attributing_ids):
-        bid, bname, dom_cnt, both = _dominant(cid)
+        bid, bname, dom_cnt, both = _dominant(campaign_map, cid)
         confirmed_campaigns_out.append(
             {
                 "campaign_id": cid,
@@ -396,7 +475,7 @@ async def get_attribution_overview(
     for cid, entry in campaign_map.items():
         if cid in confirmed_ids or cid in denylist_ids:
             continue
-        bid, bname, dom_cnt, both = _dominant(cid)
+        bid, bname, dom_cnt, both = _dominant(campaign_map, cid)
         if both == 0 or not _qualifies(dom_cnt, both):
             continue
         pending_campaigns_out.append(
@@ -424,6 +503,360 @@ async def get_attribution_overview(
         "total_leads_population": total_leads_population,
         "total_attributed": total_attributed,
         "attribution_pct": attribution_pct,
+        "is_won_stage_names": is_won_stage_names,
+        "config_warnings": config_warnings,
+        "integrity_alerts": integrity_alerts,
+        "reference_date": cairo_today.isoformat(),
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "cache_status": "fresh",
+        "rpc_duration_ms": rpc_ms,
+    }
+
+    if default_config:
+        _cache.set(cache_key, result)
+    return result
+
+
+async def get_attribution_overview_windowed(
+    client: Optional[OdooClient] = None,
+    window: str = DEFAULT_WINDOW,
+    start_month: Optional[str] = None,
+    end_month: Optional[str] = None,
+    confirmed_campaigns: Optional[frozenset[str]] = None,
+    denylist_campaigns: Optional[frozenset[str]] = None,
+    legacy_days: Optional[set[str]] = None,
+    now_cairo: Optional[datetime] = None,
+) -> dict:
+    """Return the per-media-buyer attribution overview SCOPED to a Cairo time window.
+
+    Same campaign-driven attribution as the all-time overview, but every funnel is
+    restricted to the leads that AROSE in the window (Cairo create_date), the legacy
+    Nov-2025 migration EXCLUDED (consistent with the campaign windowing + timeline).
+    The campaign→buyer MAP stays ALL-TIME (derived from the all-time both-set slice +
+    the >=90% confirmed gate via the SHARED _build_campaign_map / _gate_attributing), so
+    a buyer's mapping never shifts with the window — only the LEADS feeding the funnel
+    are windowed. Lists every buyer with >=1 attributed windowed lead, sorted by
+    windowed volume; surfaces an UNATTRIBUTED bucket (windowed leads in campaigns with
+    no confirmed buyer — unmapped/denylisted channels) so the windowed coverage is
+    honest. The "all" window is NOT handled here — callers route it to
+    get_attribution_overview() (the shipped un-windowed path, migration included).
+
+    Window resolution:
+      - A valid explicit start_month/end_month range OVERRIDES `window` and drives a
+        custom window (is_custom_range=True), validated by the SAME
+        _resolve_custom_window contract the campaign windowing uses.
+      - Otherwise `window` is a dated preset key in WINDOW_PRESET_MONTHS ("current" /
+        "last3"), a trailing span ending at the current Cairo month.
+
+    Args mirror get_attribution_overview plus the window params and the test injections
+    (legacy_days / now_cairo) the campaign windowing exposes. The result is cached ONLY
+    for the default configuration (no gate/legacy/now overrides), keyed by the window
+    tag, so a custom window never collides with a preset and a test config never poisons
+    the production cache — same pattern as the campaign windowing.
+
+    Returns a dict matching schemas.MarketingAttributionWindowed.
+
+    Raises:
+        InvalidTimelineRangeError: the custom start_month/end_month range is invalid.
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
+        OdooQueryError: if any Odoo RPC fails.
+        RuntimeError: if a buyer/unattributed funnel fails to reconcile, or the windowed
+            attributed + unattributed identity fails.
+    """
+    _assert_read_only()
+
+    # Custom range validated BEFORE any RPC (both-or-neither, span <= cap). None → the
+    # dated preset path.
+    custom_window = _resolve_custom_window(start_month, end_month)
+    is_custom_range = custom_window is not None
+
+    if not is_custom_range and window not in WINDOW_PRESET_MONTHS:
+        raise InvalidTimelineRangeError(
+            f"window must be one of {sorted(WINDOW_PRESET_MONTHS)} or a custom "
+            f"start_month/end_month range — got {window!r}."
+        )
+
+    default_config = (
+        confirmed_campaigns is None
+        and denylist_campaigns is None
+        and legacy_days is None
+        and now_cairo is None
+    )
+    confirmed_names = (
+        confirmed_campaigns if confirmed_campaigns is not None
+        else domain.CONFIRMED_BUYER_CAMPAIGNS
+    )
+    denylist_names = (
+        denylist_campaigns if denylist_campaigns is not None
+        else domain.DENYLIST_CAMPAIGNS
+    )
+
+    ref = now_cairo if now_cairo is not None else datetime.now(_CAIRO_TZ)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=_CAIRO_TZ)
+    cairo_today = ref.date()
+    current_month_start = ref.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # ── resolve the window's [start_dt .. end_dt] Cairo month bounds ──────────
+    if is_custom_range:
+        start_dt, end_dt = custom_window
+        window_tag = f"c{_month_str(start_dt)}_{_month_str(end_dt)}"
+    else:
+        span = WINDOW_PRESET_MONTHS[window]
+        end_dt = current_month_start
+        start_dt = _shift_months(current_month_start, -(span - 1))
+        window_tag = window
+    window_months_list = _month_range(start_dt, end_dt)
+    window_month_set = set(window_months_list)
+    window_months = len(window_months_list)
+
+    cache_key = _cache.make_key(f"{_CACHE_KEY_PREFIX_WINDOWED}:{window_tag}")
+    if default_config:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache hit: {cache_key}")
+            return {**cached, "cache_status": "cached", "rpc_duration_ms": 0}
+        logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    # Coarse UTC fetch bounds (Cairo month-starts → UTC; Odoo stores UTC-naive). The
+    # exact Cairo bucketing / legacy-day drop happens per-lead below — these bounds are
+    # only a fetch filter. Lower = window start; upper = first day after window end.
+    lower_str = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    upper_str = _shift_months(end_dt, 1).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    _client = client if client is not None else OdooClient()
+
+    t0 = time.monotonic()
+    try:
+        # ── RPC 1 — utm.campaign id+name (resolve the gates) ──────────────────
+        campaigns = await _client.execute_kw(
+            _CAMPAIGN_MODEL,
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["id", "name"], "context": _CTX_ALL},
+        )
+
+        # ── RPC 2 — crm.stage id+name+is_won (outcome group mapping) ──────────
+        stages = await _client.execute_kw(
+            _STAGE_MODEL,
+            "search_read",
+            args=[[]],
+            kwargs={"fields": ["id", "name", "is_won"]},
+        )
+
+        # ── RPC 3 — THE windowed query: leads in [lower .. upper) (paged) ─────
+        # ONE search_read of create_date + campaign_id + stage_id, regrouped in
+        # Python by Cairo month (legacy days dropped) — the SAME single-query path
+        # the campaign windowing uses (1 RPC for the whole list, vs N per buyer).
+        windowed_leads = await _fetch_all_windowed(
+            _client,
+            [("create_date", ">=", lower_str), ("create_date", "<", upper_str)],
+            ["create_date", CAMPAIGN_FIELD, "stage_id"],
+        )
+
+        # ── RPC 4 — ALL-TIME both-set slice by (campaign, buyer) ──────────────
+        # Unbounded (no date filter) so the campaign→buyer map == the all-time view.
+        both_set_rows = await _client.execute_kw(
+            _LEAD_MODEL,
+            "read_group",
+            args=[
+                [(CAMPAIGN_FIELD, "!=", False), (BUYER_FIELD, "!=", False)],
+                [CAMPAIGN_FIELD, BUYER_FIELD],
+                [CAMPAIGN_FIELD, BUYER_FIELD],
+            ],
+            kwargs={"context": _CTX_ALL, "lazy": False},
+        )
+
+        # ── RPC 5 — legacy migration days (cached long; injectable for tests) ─
+        resolved_legacy = (
+            set(legacy_days) if legacy_days is not None
+            else await get_legacy_migration_days(_client)
+        )
+    except ReadOnlyViolationError:
+        raise
+    except Exception as exc:
+        raise OdooQueryError(
+            f"get_attribution_overview_windowed() RPC failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    rpc_ms = int((time.monotonic() - t0) * 1000)
+
+    # ── name<->id maps + gate resolution (same _resolve pattern as the overview) ──
+    name_to_ids: dict[str, list[int]] = defaultdict(list)
+    id_to_name: dict[int, str] = {}
+    for c in campaigns:
+        cid = int(c["id"])
+        cname = str(c.get("name") or "")
+        id_to_name[cid] = cname
+        name_to_ids[cname].append(cid)
+
+    config_warnings: list[str] = []
+
+    def _resolve(names: frozenset[str], label: str) -> set[int]:
+        resolved: set[int] = set()
+        for nm in sorted(names):
+            ids = name_to_ids.get(nm, [])
+            if not ids:
+                config_warnings.append(
+                    f"{label} campaign name {nm!r} did not resolve to any "
+                    f"utm.campaign record — ignored."
+                )
+                continue
+            if len(ids) > 1:
+                config_warnings.append(
+                    f"{label} campaign name {nm!r} matched {len(ids)} "
+                    f"utm.campaign records (ids {sorted(ids)}) — all included."
+                )
+            resolved.update(ids)
+        return resolved
+
+    confirmed_ids = _resolve(confirmed_names, "Confirmed")
+    denylist_ids = _resolve(denylist_names, "Denylist")
+
+    # ── stage info + is_won names (RPC 2) ─────────────────────────────────────
+    stage_info: dict[int, dict] = {}
+    is_won_stage_names: list[str] = []
+    for s in stages:
+        sid = int(s["id"])
+        sname = str(s.get("name") or "")
+        is_won = bool(s.get("is_won"))
+        stage_info[sid] = {"name": sname, "is_won": is_won}
+        if is_won:
+            is_won_stage_names.append(sname)
+    is_won_stage_names.sort()
+
+    # ── campaign→buyer map + GATE (ALL-TIME; identical to the overview) ───────
+    campaign_map = _build_campaign_map(both_set_rows)
+    attributing_ids, integrity_alerts = _gate_attributing(
+        confirmed_ids, denylist_ids, campaign_map, id_to_name
+    )
+    for alert in integrity_alerts:
+        logger.error(alert)
+
+    # ── regroup windowed leads by Cairo month, dropping legacy days ───────────
+    # Each attributing campaign's windowed leads attribute to its DERIVED dominant
+    # buyer (the all-time map); everything else falls into the UNATTRIBUTED bucket
+    # (no campaign, junk, denylisted, pending, or unmapped channels).
+    buyer_agg: dict[int, dict] = {}     # bid -> {name, total, groups, campaign_ids}
+    unattributed_groups = {g: 0 for g in GROUP_ORDER}
+    unattributed_total = 0
+    windowed_population = 0
+    for r in windowed_leads:
+        cd = r.get("create_date")
+        if not cd:
+            continue
+        cairo = _to_cairo(cd)
+        if cairo.strftime("%Y-%m-%d") in resolved_legacy:
+            continue                                    # drop the legacy migration
+        if _month_str(cairo) not in window_month_set:   # exact-bound / over-fetch guard
+            continue
+        cid, _ = _m2o(r.get(CAMPAIGN_FIELD))            # cid is None for the no-campaign bucket
+        sid, _ = _m2o(r.get("stage_id"))                # stage_id may be False -> None -> جديد
+        group = classify_stage(sid, stage_info)
+        windowed_population += 1
+        if cid is not None and cid in attributing_ids:
+            bid, bname, _, _ = _dominant(campaign_map, cid)
+            b = buyer_agg.setdefault(
+                bid,
+                {"name": bname, "total": 0,
+                 "groups": {g: 0 for g in GROUP_ORDER}, "campaign_ids": set()},
+            )
+            b["total"] += 1
+            b["groups"][group] += 1
+            b["campaign_ids"].add(cid)
+        else:
+            unattributed_total += 1
+            unattributed_groups[group] += 1
+
+    # ── build buyer rows (windowed funnels), reconcile, sort by windowed volume ─
+    buyers: list[dict] = []
+    total_attributed = 0
+    for bid, b in buyer_agg.items():
+        total = b["total"]
+        group_sum = sum(b["groups"].values())
+        if group_sum != total:
+            raise RuntimeError(
+                f"Windowed outcome reconciliation FAILED for buyer {b['name']!r} "
+                f"(id={bid}): group sum {group_sum} != total {total}. "
+                f"Refusing to return inconsistent attribution."
+            )
+        buyers.append(
+            {
+                "buyer_id": bid,
+                "buyer_name": b["name"] or "",
+                "total_attributed": total,
+                "outcomes": [
+                    {
+                        "group": g,
+                        "count": b["groups"][g],
+                        "pct": round(100.0 * b["groups"][g] / total, 2) if total else 0.0,
+                    }
+                    for g in GROUP_ORDER
+                ],
+                "campaign_ids": sorted(b["campaign_ids"]),
+            }
+        )
+        total_attributed += total
+    buyers.sort(key=lambda x: (-x["total_attributed"], x["buyer_name"]))
+
+    # ── unattributed bucket (windowed coverage honesty) — reconcile ───────────
+    unatt_sum = sum(unattributed_groups.values())
+    if unatt_sum != unattributed_total:
+        raise RuntimeError(
+            f"Windowed unattributed reconciliation FAILED: group sum {unatt_sum} "
+            f"!= total {unattributed_total}."
+        )
+    unattributed = {
+        "lead_count": unattributed_total,
+        "outcomes": [
+            {
+                "group": g,
+                "count": unattributed_groups[g],
+                "pct": round(100.0 * unattributed_groups[g] / unattributed_total, 2)
+                if unattributed_total else 0.0,
+            }
+            for g in GROUP_ORDER
+        ],
+    }
+
+    # ── windowed population identity (explicit raise; survives -O) ────────────
+    if total_attributed + unattributed_total != windowed_population:
+        raise RuntimeError(
+            f"Windowed population reconciliation FAILED: attributed "
+            f"{total_attributed} + unattributed {unattributed_total} != windowed "
+            f"population {windowed_population}."
+        )
+
+    coverage_pct = (
+        round(100.0 * total_attributed / windowed_population, 2)
+        if windowed_population else 0.0
+    )
+
+    logger.info(
+        f"Marketing attribution (windowed): window={window_tag} "
+        f"[{window_months_list[0]}..{window_months_list[-1]}] | buyers={len(buyers)} "
+        f"attributed={total_attributed:,} unattributed={unattributed_total:,} "
+        f"windowed_pop={windowed_population:,} coverage={coverage_pct:.1f}% | "
+        f"legacy_days={len(resolved_legacy)} | RPCs in {rpc_ms}ms | "
+        f"alerts={len(integrity_alerts)} warnings={len(config_warnings)} | "
+        f"cache_key={cache_key}"
+    )
+
+    result: dict = {
+        "buyers": buyers,
+        "unattributed": unattributed,
+        "total_leads_population": windowed_population,
+        "total_attributed": total_attributed,
+        "coverage_pct": coverage_pct,
+        "window": WINDOW_CUSTOM if is_custom_range else window,
+        "is_custom_range": is_custom_range,
+        "window_months": window_months,
+        "window_start_month": window_months_list[0],
+        "window_end_month": window_months_list[-1],
+        "legacy_days_excluded": sorted(resolved_legacy),
         "is_won_stage_names": is_won_stage_names,
         "config_warnings": config_warnings,
         "integrity_alerts": integrity_alerts,
