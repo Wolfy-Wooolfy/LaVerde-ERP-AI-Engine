@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% from "components/_badge.html" import badge %}
+
+{% block title %}{{ _t("projinv_title") }} — LaVerde ERP AI Engine{% endblock %}
+{% block page_title %}{{ _t("projinv_title") }}{% endblock %}
+
+{% block content %}
+<div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
+
+  {# ── 1. HEADER STRIP ────────────────────────────────────────────────────── #}
+  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-2.5 mb-1">
+        <span class="live-dot bg-primary-500" style="--pulse-color: rgba(99, 102, 241, 0.6);"></span>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
+          La Verde &mdash; {{ _t("projinv_title") }}
+        </h1>
+      </div>
+      <p class="text-sm text-neutral-500 dark:text-neutral-400">
+        {{ inv.project_count }} {{ _t("projinv_projects") if inv.project_count != 1 else _t("projinv_project") }}
+        &middot; {{ "{:,}".format(inv.total_units) }} {{ _t("projinv_units") }}
+        &middot; {{ _t("projinv_as_of") }} {{ inv.reference_date }} &middot; {{ inv.cache_status }}
+      </p>
+    </div>
+    <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono sm:text-right rtl:sm:text-left sm:pt-1 shrink-0">
+      {{ inv.rpc_duration_ms }} ms &middot; {{ _t("projinv_live_rpc") }}
+    </div>
+  </div>
+
+  {# ── 2. KPI CARDS — Total / Available / Reserved / Contracted ────────────── #}
+  {# Total is neutral; the 3 buckets carry the locked status colours (info / warning /
+     success) reused 1:1 by the bars below, so card colour == bar colour everywhere. #}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+    {# Total units #}
+    <div class="kpi-card border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("projinv_total_units") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400">
+          <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+        </div>
+      </div>
+      <p class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(inv.total_units) }}</p>
+    </div>
+
+    {# Available / Reserved / Contracted — driven off inv.buckets (BUCKET_ORDER). #}
+    {% for b in inv.buckets %}
+      {% if b.key == "available" %}
+        {% set border_cls = "border-primary-200 dark:border-primary-800" %}
+        {% set icon_cls = "bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400" %}
+        {% set value_cls = "text-primary-700 dark:text-primary-400" %}
+        {% set lbl = _t("projinv_available") %}
+      {% elif b.key == "reserved" %}
+        {% set border_cls = "border-warning-200 dark:border-warning-800" %}
+        {% set icon_cls = "bg-warning-100 dark:bg-warning-900/40 text-warning-600 dark:text-warning-400" %}
+        {% set value_cls = "text-warning-700 dark:text-warning-400" %}
+        {% set lbl = _t("projinv_reserved") %}
+      {% else %}
+        {% set border_cls = "border-success-200 dark:border-success-800" %}
+        {% set icon_cls = "bg-success-100 dark:bg-success-900/40 text-success-600 dark:text-success-400" %}
+        {% set value_cls = "text-success-700 dark:text-success-400" %}
+        {% set lbl = _t("projinv_contracted") %}
+      {% endif %}
+      <div class="kpi-card border {{ border_cls }} flex flex-col overflow-hidden">
+        <div class="flex items-start justify-between mb-3">
+          <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ lbl }}</p>
+          <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center {{ icon_cls }}">
+            <span class="w-2.5 h-2.5 rounded-sm bg-current"></span>
+          </div>
+        </div>
+        <div class="flex items-end justify-between gap-2">
+          <p class="text-3xl font-bold tabular {{ value_cls }}">{{ "{:,}".format(b.count) }}</p>
+          <p class="text-sm font-semibold font-mono tabular-nums text-neutral-400 dark:text-neutral-500 pb-1">{{ b.pct | round(1) }}%</p>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# ── 3. PORTFOLIO STATUS BAR ─────────────────────────────────────────────── #}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("projinv_portfolio_title") }}</h2>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400">
+        <span class="font-semibold text-success-700 dark:text-success-400 font-mono tabular-nums">{{ inv.sold_pct | round(1) }}%</span>
+        {{ _t("projinv_sold") }}
+      </p>
+    </div>
+
+    {# Stacked 100% composition bar — segment widths = each bucket's pct of total.
+       flex-row reverses automatically under dir=rtl. Colours match the KPI cards. #}
+    <div class="h-5 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-4">
+      {% for b in inv.buckets %}
+        {% if b.key == "available" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
+        {% elif b.key == "reserved" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
+        {% else %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+        {% if b.pct > 0 %}
+        <div class="h-full {{ seg_cls }}" style="width: {{ b.pct }}%;"
+             title="{{ lbl }}: {{ "{:,}".format(b.count) }} ({{ b.pct | round(1) }}%)"></div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {# 3-item legend — dot + label + count + %. #}
+    <div class="grid grid-cols-3 gap-3">
+      {% for b in inv.buckets %}
+        {% if b.key == "available" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
+        {% elif b.key == "reserved" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
+        {% else %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-sm shrink-0 {{ dot_cls }}"></span>
+            <span class="text-xs text-neutral-500 dark:text-neutral-400 truncate" title="{{ lbl }}">{{ lbl }}</span>
+          </div>
+          <p class="mt-1 ms-4">
+            <span class="text-base font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(b.count) }}</span>
+            <span class="text-xs text-neutral-400 dark:text-neutral-500 ms-1">{{ b.pct | round(1) }}%</span>
+          </p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── 4. BY PROJECT ───────────────────────────────────────────────────────── #}
+  <div>
+    <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-3">{{ _t("projinv_by_project") }}</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {% for p in inv.projects %}
+      <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card p-4 flex flex-col">
+
+        {# Project header: name (+ early-stage badge) · total units #}
+        <div class="flex items-start justify-between gap-3 mb-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 min-w-0">
+              <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate" title="{{ p.project_name }}">{{ p.project_name }}</p>
+              {% if p.is_early_stage %}{{ badge(_t("projinv_early_stage"), "neutral") }}{% endif %}
+            </div>
+            <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">
+              <span class="font-semibold text-success-700 dark:text-success-400 font-mono tabular-nums">{{ p.sold_pct | round(1) }}%</span>
+              {{ _t("projinv_sold") }}
+            </p>
+          </div>
+          <div class="shrink-0 text-right rtl:text-left">
+            <p class="text-2xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 leading-none">{{ "{:,}".format(p.total_units) }}</p>
+            <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("projinv_units") }}</p>
+          </div>
+        </div>
+
+        {# Status stacked bar #}
+        <div class="h-4 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-3">
+          {% for b in p.buckets %}
+            {% if b.key == "available" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
+            {% elif b.key == "reserved" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
+            {% else %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+            {% if b.pct > 0 %}
+            <div class="h-full {{ seg_cls }}" style="width: {{ b.pct }}%;"
+                 title="{{ lbl }}: {{ "{:,}".format(b.count) }} ({{ b.pct | round(1) }}%)"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+
+        {# Compact legend — count per bucket #}
+        <div class="grid grid-cols-3 gap-2 mt-auto">
+          {% for b in p.buckets %}
+            {% if b.key == "available" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
+            {% elif b.key == "reserved" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
+            {% else %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-sm shrink-0 {{ dot_cls }}"></span>
+                <span class="text-[11px] text-neutral-500 dark:text-neutral-400 truncate" title="{{ lbl }}">{{ lbl }}</span>
+              </div>
+              <p class="mt-0.5 ms-3.5 text-sm font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(b.count) }}</p>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── 5. FOOTNOTE — read-only + scope ─────────────────────────────────────── #}
+  <p class="text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed">
+    {{ _t("projinv_footnote") }}
+  </p>
+
+</div>
+{% endblock %}

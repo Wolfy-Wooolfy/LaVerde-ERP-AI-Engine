@@ -525,5 +525,21 @@
   "campperf_timeline_maturation_too_early": "Too early to assess",
   "campperf_timeline_no_leads": "No leads this month",
   "campperf_timeline_legacy_days": "November 2025 includes imported historical data — a one-time batch from the previous system, not real marketing activity, so it's excluded from this timeline.",
-  "campperf_timeline_footer": "The funnel is the CURRENT state of the leads that arrived that month (Odoo keeps no stage history)."
+  "campperf_timeline_footer": "The funnel is the CURRENT state of the leads that arrived that month (Odoo keeps no stage history).",
+  "nav_projects_inventory": "Inventory & Availability",
+  "projinv_title": "Inventory & Availability",
+  "projinv_total_units": "Total units",
+  "projinv_available": "Available",
+  "projinv_reserved": "Reserved",
+  "projinv_contracted": "Contracted",
+  "projinv_by_project": "By project",
+  "projinv_sold": "Sold",
+  "projinv_early_stage": "Early stage",
+  "projinv_projects": "projects",
+  "projinv_project": "project",
+  "projinv_units": "units",
+  "projinv_as_of": "as of",
+  "projinv_live_rpc": "live read-only query",
+  "projinv_portfolio_title": "Portfolio status",
+  "projinv_footnote": "Read-only. Counts by sales status from live Odoo inventory — no pricing or area in this view."
 }

@@ -27,6 +27,7 @@ _ORDERED_MODULE_DASHBOARDS: list[tuple[str, str]] = [
     ("marketing_attribution", "/marketing-attribution/dashboard"),
     ("collections",           "/collections/dashboard"),
     ("customer_accounts",     "/customer-accounts/dashboard"),
+    ("projects_inventory",    "/projects-inventory/dashboard"),
 ]
 
 _PATH_MODULE_MAP: dict[str, str] = {
@@ -36,6 +37,7 @@ _PATH_MODULE_MAP: dict[str, str] = {
     "/marketing-attribution": "marketing_attribution",
     "/collections":           "collections",
     "/customer-accounts":     "customer_accounts",
+    "/projects-inventory":    "projects_inventory",
 }
 
 

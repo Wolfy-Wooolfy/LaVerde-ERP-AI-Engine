@@ -11,6 +11,7 @@ from backend.api.v1.endpoints.dashboard_api import router as dashboard_api_route
 from backend.api.v1.endpoints.hr import router as hr_router
 from backend.api.v1.endpoints.marketing_attribution import router as marketing_attribution_router
 from backend.api.v1.endpoints.metrics_endpoint import router as metrics_router
+from backend.api.v1.endpoints.projects_inventory import router as projects_inventory_router
 from backend.api.v1.endpoints.settings import router as settings_router
 
 api_v1_router = APIRouter()
@@ -56,6 +57,12 @@ api_v1_router.include_router(
 api_v1_router.include_router(
     campaign_performance_router,
     dependencies=[Depends(require_module_api("campaign_performance"))],
+)
+
+# ── projects_inventory ────────────────────────────────────────────────────────
+api_v1_router.include_router(
+    projects_inventory_router,
+    dependencies=[Depends(require_module_api("projects_inventory"))],
 )
 
 # ── settings (admin-only) ─────────────────────────────────────────────────────

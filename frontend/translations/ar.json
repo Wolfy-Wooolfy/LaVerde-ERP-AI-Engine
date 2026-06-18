@@ -525,5 +525,21 @@
   "campperf_timeline_maturation_too_early": "بدري للتقييم",
   "campperf_timeline_no_leads": "لا عملاء محتملين هذا الشهر",
   "campperf_timeline_legacy_days": "بيانات نوفمبر 2025 فيها بيانات تاريخية مستوردة دفعة واحدة من النظام السابق — مش نشاط تسويقي فعلي، ومستبعدة من المخطط الزمني.",
-  "campperf_timeline_footer": "الفانل = الحالة الحالية للـ leads اللي دخلت في الشهر (Odoo مايحتفظش بتاريخ المراحل)"
+  "campperf_timeline_footer": "الفانل = الحالة الحالية للـ leads اللي دخلت في الشهر (Odoo مايحتفظش بتاريخ المراحل)",
+  "nav_projects_inventory": "المخزون والتوافر",
+  "projinv_title": "المخزون والتوافر",
+  "projinv_total_units": "إجمالي الوحدات",
+  "projinv_available": "متاح",
+  "projinv_reserved": "محجوز",
+  "projinv_contracted": "متعاقد",
+  "projinv_by_project": "حسب المشروع",
+  "projinv_sold": "مباع",
+  "projinv_early_stage": "مرحلة مبكرة",
+  "projinv_projects": "مشاريع",
+  "projinv_project": "مشروع",
+  "projinv_units": "وحدة",
+  "projinv_as_of": "حتى تاريخ",
+  "projinv_live_rpc": "استعلام مباشر للقراءة فقط",
+  "projinv_portfolio_title": "حالة المحفظة",
+  "projinv_footnote": "للقراءة فقط. الأعداد حسب حالة البيع من مخزون Odoo المباشر — بدون أسعار أو مساحات في هذا العرض."
 }

@@ -32,6 +32,9 @@ from backend.modules.marketing_attribution.services.attribution_service import (
     get_attribution_overview,
     get_attribution_overview_windowed,
 )
+from backend.modules.projects_inventory.services.inventory_service import (
+    get_inventory_overview,
+)
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="frontend/templates")
@@ -333,6 +336,27 @@ async def campaign_performance_timeline(
         "tl": data,
     })
     return templates.TemplateResponse(request, "campaign_performance/timeline.html", ctx)
+
+
+@router.get(
+    "/projects-inventory/dashboard",
+    response_class=HTMLResponse,
+    summary="Projects Inventory — Inventory & Availability (HTML)",
+    dependencies=[Depends(require_module_html("projects_inventory"))],
+)
+async def projects_inventory_dashboard(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Server-side render of the inventory-by-status board (Slice 1: counts only —
+    # overall + per project). Read-only; the service owns all bucketing/reconciliation.
+    data = await get_inventory_overview()
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "projects_inventory_dashboard",
+        "inv": data,
+    })
+    return templates.TemplateResponse(request, "projects_inventory/dashboard.html", ctx)
 
 
 @router.get(
