@@ -142,3 +142,42 @@ class ValueAreaOverview(ValueAreaMetrics):
     as_of: str                                 # UTC ISO 8601 of the query
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int                       # 0 when served from cache
+
+
+# ── Inventory Data Quality (admin-only; read-only review tool, all 3 projects) ─
+# A — sold unit with no contract; B — broken hierarchy chain; C — sold unit with no
+# list price. Each flagged unit is one DataQualityItem with a stable defect_type and a
+# concise, language-neutral technical `detail`. La Puerta's unpriced AVAILABLE units are
+# never flagged (Check C looks at sold units only).
+
+# Stable per-item defect kinds. A → no_contract; B → one of the three chain breaks;
+# C → no_list_price.
+DefectType = Literal[
+    "no_contract", "phase_project", "zone_phase", "building_zone", "no_list_price"
+]
+# Stable per-check keys (drive the localized section names + CSV file names).
+CheckKey = Literal["no_contract", "broken_hierarchy", "no_list_price"]
+
+
+class DataQualityItem(BaseModel):
+    unit_id: int
+    code: str                          # human-readable unique unit code (e.g. "AF135-7-404")
+    project_name: str
+    defect_type: DefectType
+    detail: str                        # concise technical string (may be empty, e.g. Check C)
+
+
+class DataQualityCheck(BaseModel):
+    key: CheckKey
+    count: int                         # == len(items)
+    items: list[DataQualityItem]       # sorted by project_name then code
+
+
+class DataQualityOverview(BaseModel):
+    checks: list[DataQualityCheck]     # A (no_contract), B (broken_hierarchy), C (no_list_price)
+    total_issues: int                  # Σ per-check counts
+
+    reference_date: str                # Cairo-local YYYY-MM-DD
+    as_of: str                         # UTC ISO 8601 of the query
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int               # 0 when served from cache

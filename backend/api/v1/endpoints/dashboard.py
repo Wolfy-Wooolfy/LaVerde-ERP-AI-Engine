@@ -38,6 +38,9 @@ from backend.modules.projects_inventory.services.inventory_service import (
 from backend.modules.projects_inventory.services.value_service import (
     get_value_area_overview,
 )
+from backend.modules.projects_inventory.services.data_quality_service import (
+    get_data_quality_overview,
+)
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="frontend/templates")
@@ -383,6 +386,29 @@ async def projects_inventory_value_area(
         "va": data,
     })
     return templates.TemplateResponse(request, "projects_inventory/value_area.html", ctx)
+
+
+@router.get(
+    "/projects-inventory/data-quality",
+    response_class=HTMLResponse,
+    summary="Projects Inventory — Inventory Data Quality (admin only, HTML)",
+    include_in_schema=False,
+    dependencies=[Depends(require_admin_html)],
+)
+async def projects_inventory_data_quality(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Server-side render of the Inventory Data Quality review (admin only): sold units
+    # with no contract (A), broken hierarchy chains (B), and sold units with no list price
+    # (C) across all projects. Read-only; the service owns every check + reconciliation.
+    data = await get_data_quality_overview()
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "projects_inventory_data_quality",
+        "dq": data,
+    })
+    return templates.TemplateResponse(request, "projects_inventory/data_quality.html", ctx)
 
 
 @router.get(

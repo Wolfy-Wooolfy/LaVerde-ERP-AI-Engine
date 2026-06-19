@@ -33,6 +33,13 @@ _OTHER_MODULE_RECORD = UserRecord(
     created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
 )
 
+# An admin user (modules=['*'], is_admin=True) — required for the admin-only DQ page.
+_ADMIN_RECORD = UserRecord(
+    username="admin", password_hash="", modules=["*"],
+    is_admin=True, is_active=True,
+    created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
+)
+
 _MOCK_DATA = {
     "total_units": 23,
     "buckets": [
@@ -268,5 +275,77 @@ def test_value_area_403_without_module_grant() -> None:
 def test_value_area_unauthenticated_redirects_to_login() -> None:
     c = TestClient(app, raise_server_exceptions=True, follow_redirects=False)
     r = c.get(_VALUE_URL)
+    assert r.status_code == 302
+    assert "/login" in r.headers.get("location", "")
+
+
+# ── Inventory Data Quality HTML page (admin only) ──────────────────────────────
+
+_DQ_URL = "/projects-inventory/data-quality"
+
+_MOCK_DQ = {
+    "checks": [
+        {"key": "no_contract", "count": 1, "items": [
+            {"unit_id": 3637, "code": "AF135-7-404", "project_name": "New Capital",
+             "defect_type": "no_contract", "detail": "amount 1,620,000"},
+        ]},
+        {"key": "broken_hierarchy", "count": 1, "items": [
+            {"unit_id": 4321, "code": "AF155-3-702", "project_name": "New Capital",
+             "defect_type": "zone_phase", "detail": "zone 26 'Zone#1' phase 4; unit phase_id=2"},
+        ]},
+        {"key": "no_list_price", "count": 0, "items": []},
+    ],
+    "total_issues": 2,
+    "reference_date": "2026-06-19",
+    "as_of": "2026-06-19T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 70,
+}
+
+
+def test_data_quality_200_with_admin() -> None:
+    """An admin gets the rendered Data Quality page with the section labels + rows."""
+    c = _client_with(_ADMIN_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_data_quality_overview",
+            new=AsyncMock(return_value=_MOCK_DQ),
+        ):
+            r = c.get(_DQ_URL)
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("content-type", "")
+        body = r.text
+        # Page title + section names (EN default).
+        assert "Inventory Data Quality" in body
+        assert "Sold units without a contract" in body
+        assert "Broken hierarchy chains" in body
+        # Flagged rows rendered from the mock.
+        assert "AF135-7-404" in body
+        assert "AF155-3-702" in body
+        # A localized defect summary + the technical detail line.
+        assert "Zone not under" in body
+        assert "phase 4; unit phase_id=2" in body
+        # CSV export wiring (embedded JSON + button label).
+        assert "window.DQ_ROWS" in body
+        assert "Download CSV" in body
+        # Admin-only sidebar entry present.
+        assert 'href="/projects-inventory/data-quality"' in body
+    finally:
+        _cleanup()
+
+
+def test_data_quality_403_without_admin() -> None:
+    """A non-admin (even with the module) is denied the admin-only page."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        r = c.get(_DQ_URL, headers={"Accept": "text/html"})
+        assert r.status_code == 403
+    finally:
+        _cleanup()
+
+
+def test_data_quality_unauthenticated_redirects_to_login() -> None:
+    c = TestClient(app, raise_server_exceptions=True, follow_redirects=False)
+    r = c.get(_DQ_URL)
     assert r.status_code == 302
     assert "/login" in r.headers.get("location", "")

@@ -20,14 +20,18 @@ from fastapi import APIRouter, Depends, Path, Request, Response
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from backend.api.deps import get_current_user
+from backend.api.deps import get_current_user, require_admin_api
 from backend.core.exceptions import InventoryScopeNotFoundError, OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.projects_inventory.schemas import (
+    DataQualityOverview,
     DrillLevel,
     ProjectsInventoryDrill,
     ProjectsInventoryOverview,
     ValueAreaOverview,
+)
+from backend.modules.projects_inventory.services.data_quality_service import (
+    get_data_quality_overview,
 )
 from backend.modules.projects_inventory.services.inventory_service import (
     get_inventory_drill,
@@ -90,6 +94,35 @@ async def value_area_overview(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("Projects inventory value-area — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/data-quality/overview",
+    summary="Projects Inventory — Inventory Data Quality (admin only; all projects)",
+    response_model=DataQualityOverview,
+    dependencies=[Depends(require_admin_api)],
+)
+@limiter.limit("60/minute")
+async def data_quality_overview(
+    request: Request,
+    response: Response,
+    _user: str = Depends(get_current_user),
+) -> dict | JSONResponse:
+    """Read-only data-completeness review across ALL projects: sold units with no
+    contract (A), broken hierarchy chains (B), and sold units with no list price (C).
+    Admin-only (require_admin_api, on top of the module gate). Never writes to Odoo."""
+    try:
+        data = await get_data_quality_overview()
+    except OdooQueryError:
+        logger.warning("Projects inventory data-quality — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("Projects inventory data-quality — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"

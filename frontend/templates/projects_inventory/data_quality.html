@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t("dq_title") }} — LaVerde ERP AI Engine{% endblock %}
+{% block page_title %}{{ _t("dq_title") }}{% endblock %}
+
+{# Find each check by its stable key (service emits A, B, C in this order anyway). #}
+{% set check_a = dq.checks | selectattr('key', 'equalto', 'no_contract') | first %}
+{% set check_b = dq.checks | selectattr('key', 'equalto', 'broken_hierarchy') | first %}
+{% set check_c = dq.checks | selectattr('key', 'equalto', 'no_list_price') | first %}
+
+{# A full check section: header (name + count badge + hint + CSV button), then either a
+   table of flagged units or a green "no issues found ✓" empty state. Used for A, B, and
+   for C only if it ever has rows. #}
+{% macro check_section(check) %}
+<section class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card overflow-hidden">
+  <div class="px-5 py-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800">
+    <div class="min-w-0">
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+        {{ _t('dq_check_' + check.key) }}
+        {% if check.count > 0 %}
+        <span class="text-[11px] bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300 px-2 py-0.5 rounded-full font-semibold tabular-nums">{{ check.count }}</span>
+        {% else %}
+        <span class="text-[11px] bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-400 px-2 py-0.5 rounded-full font-semibold">✓</span>
+        {% endif %}
+      </h2>
+      <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">{{ _t('dq_check_' + check.key + '_hint') }}</p>
+    </div>
+    {% if check.count > 0 %}
+    <button type="button" onclick="dqExportCSV('{{ check.key }}')"
+            class="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      {{ _t('dq_download_csv') }}
+    </button>
+    {% endif %}
+  </div>
+
+  {% if check.count > 0 %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-neutral-100 dark:border-neutral-800">
+          <th class="px-5 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t('dq_col_code') }}</th>
+          <th class="px-5 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t('dq_col_project') }}</th>
+          <th class="px-5 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t('dq_col_defect') }}</th>
+          <th class="px-5 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t('dq_col_detail') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in check['items'] %}
+        <tr class="border-b border-neutral-50 dark:border-neutral-800/50 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors">
+          <td class="px-5 py-2.5 font-mono text-neutral-900 dark:text-neutral-100 whitespace-nowrap">{{ it.code }}</td>
+          <td class="px-5 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ it.project_name }}</td>
+          <td class="px-5 py-2.5 text-neutral-700 dark:text-neutral-200">{{ _t('dq_defect_' + it.defect_type) }}</td>
+          <td class="px-5 py-2.5 font-mono text-xs text-neutral-400 dark:text-neutral-500">{{ it.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="px-5 py-8 text-center text-sm text-success-600 dark:text-success-400 font-medium">
+    {{ _t('dq_no_issues') }}
+  </div>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% block content %}
+<div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
+
+  {# ── 1. HEADER STRIP ────────────────────────────────────────────────────── #}
+  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-2.5 mb-1">
+        <span class="live-dot bg-primary-500" style="--pulse-color: rgba(99, 102, 241, 0.6);"></span>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
+          La Verde &mdash; {{ _t("dq_title") }}
+        </h1>
+      </div>
+      <p class="text-sm text-neutral-500 dark:text-neutral-400">
+        {{ _t("dq_subtitle") }}
+        &middot; {{ _t("projinv_as_of") }} {{ dq.reference_date }} &middot; {{ dq.cache_status }}
+      </p>
+    </div>
+    <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono sm:text-right rtl:sm:text-left sm:pt-1 shrink-0">
+      {{ dq.rpc_duration_ms }} ms &middot; {{ _t("projinv_live_rpc") }}
+    </div>
+  </div>
+
+  {# ── 2. SUMMARY STRIP — total issues + a per-check count badge ───────────── #}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div class="flex items-baseline gap-2 shrink-0">
+      <span class="text-3xl font-bold tabular {% if dq.total_issues > 0 %}text-danger-700 dark:text-danger-400{% else %}text-success-700 dark:text-success-400{% endif %}">{{ dq.total_issues }}</span>
+      <span class="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("dq_total_issues") }}</span>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      {% for check in dq.checks %}
+      <span class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300">
+        {{ _t('dq_check_' + check.key) }}
+        {% if check.count > 0 %}
+        <span class="text-[11px] bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300 px-2 py-0.5 rounded-full font-semibold tabular-nums">{{ check.count }}</span>
+        {% else %}
+        <span class="text-[11px] bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-400 px-2 py-0.5 rounded-full font-semibold">0 ✓</span>
+        {% endif %}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── 3. SECTION A — sold units without a contract ────────────────────────── #}
+  {{ check_section(check_a) }}
+
+  {# ── 4. SECTION B — broken hierarchy chains ──────────────────────────────── #}
+  {{ check_section(check_b) }}
+
+  {# ── 5. SECTION C — sold units with no list price (silent standing guard) ──
+     Compact green line when clean (0 today); promotes to a full table + CSV if it
+     ever flags a unit. #}
+  {% if check_c.count > 0 %}
+  {{ check_section(check_c) }}
+  {% else %}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-5 py-3 flex items-center gap-2 text-sm">
+    <span class="text-success-600 dark:text-success-400 font-semibold">✓</span>
+    <span class="text-neutral-600 dark:text-neutral-300">{{ _t("dq_check_no_list_price") }}</span>
+    <span class="text-neutral-400 dark:text-neutral-500">&mdash; 0 {{ _t("dq_issues") }}</span>
+  </div>
+  {% endif %}
+
+  {# ── 6. FOOTER CAVEAT ────────────────────────────────────────────────────── #}
+  <div class="text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed pt-1">
+    <p>&middot; {{ _t("dq_footnote_readonly") }}</p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+{# Per-section rows embedded as JSON → client-side CSV export (code, project, defect_type,
+   detail). Reuses the existing exportTableCSV mechanics (BOM + Blob + toast) but emits the
+   stable defect_type column rather than the localized cell text. No new dependencies. #}
+<script>
+  window.DQ_ROWS = {
+    {% for check in dq.checks %}"{{ check.key }}": {{ check['items'] | tojson }}{% if not loop.last %},
+    {% endif %}{% endfor %}
+  };
+  window.dqExportCSV = function (key) {
+    var rows = window.DQ_ROWS[key] || [];
+    var headers = ["code", "project", "defect_type", "detail"];
+    var esc = function (v) { return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"'; };
+    var lines = [headers.map(esc).join(",")];
+    rows.forEach(function (r) {
+      lines.push([r.code, r.project_name, r.defect_type, r.detail].map(esc).join(","));
+    });
+    var blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "inventory-data-quality-" + key + "-" + new Date().toISOString().slice(0, 10) + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    if (window.toast) { window.toast.show("CSV exported", "success", 2000); }
+  };
+</script>
+{% endblock %}

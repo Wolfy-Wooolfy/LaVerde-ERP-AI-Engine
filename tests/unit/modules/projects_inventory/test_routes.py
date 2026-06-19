@@ -404,3 +404,91 @@ def test_value_area_403_without_module_grant() -> None:
         app.dependency_overrides.pop(get_current_user, None)
         if hasattr(app.state, "user_repo"):
             del app.state.user_repo
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Inventory Data Quality — GET /api/v1/projects-inventory/data-quality/overview
+# Admin-only (require_admin_api on top of the module gate).
+# ══════════════════════════════════════════════════════════════════════════════
+
+_DQ_URL = "/api/v1/projects-inventory/data-quality/overview"
+
+_MOCK_DQ = {
+    "checks": [
+        {"key": "no_contract", "count": 1, "items": [
+            {"unit_id": 3637, "code": "AF135-7-404", "project_name": "New Capital",
+             "defect_type": "no_contract", "detail": "amount 1,620,000"},
+        ]},
+        {"key": "broken_hierarchy", "count": 1, "items": [
+            {"unit_id": 4321, "code": "AF155-3-702", "project_name": "New Capital",
+             "defect_type": "zone_phase", "detail": "zone 26 'Zone#1' → phase 4; unit phase_id=2"},
+        ]},
+        {"key": "no_list_price", "count": 0, "items": []},
+    ],
+    "total_issues": 2,
+    "reference_date": "2026-06-19",
+    "as_of": "2026-06-19T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 70,
+}
+
+
+def test_data_quality_200_with_admin(client: TestClient) -> None:
+    """The default `client` fixture is the admin record (modules=['*'], is_admin=True)."""
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_data_quality_overview",
+        new=AsyncMock(return_value=_MOCK_DQ),
+    ):
+        r = client.get(_DQ_URL)
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("checks", "total_issues", "reference_date", "as_of",
+                "cache_status", "rpc_duration_ms"):
+        assert key in body, f"Response missing key: {key!r}"
+    assert body["total_issues"] == 2
+    assert {c["key"] for c in body["checks"]} == {
+        "no_contract", "broken_hierarchy", "no_list_price"}
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_data_quality_403_without_admin() -> None:
+    """A non-admin WITH the projects_inventory module passes the module gate but fails
+    the admin gate → 403. (The app's global 403 handler maps every 403 to the same
+    MODULE_ACCESS_DENIED envelope for API requests, so the 403 itself — not the code — is
+    what proves the admin gate fired: a user who already holds the module is still denied.)"""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        r = c.get(_DQ_URL)
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+def test_data_quality_401_when_unauthenticated() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_DQ_URL)
+    assert r.status_code == 401
+
+
+def test_data_quality_503_on_odoo_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_data_quality_overview",
+        new=AsyncMock(side_effect=OdooQueryError("boom")),
+    ):
+        r = client.get(_DQ_URL)
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+def test_data_quality_500_on_unexpected(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_data_quality_overview",
+        new=AsyncMock(side_effect=RuntimeError("kaboom")),
+    ):
+        r = client.get(_DQ_URL)
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
