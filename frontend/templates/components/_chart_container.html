@@ -2,7 +2,7 @@
    Usage: {% from "components/_chart_container.html" import chart_container %}
    {% call chart_container("Activity Distribution", "activityChart") %}{% endcall %} #}
 
-{% macro chart_container(title, chart_id, height="h-56", subtitle="") %}
+{% macro chart_container(title, chart_id, height="h-56", subtitle="", empty_text="") %}
 <div class="chart-panel flex flex-col">
   <div class="flex items-start justify-between mb-4">
     <div>
@@ -19,7 +19,7 @@
     <canvas id="{{ chart_id }}" class="w-full h-full"></canvas>
     <div id="{{ chart_id }}-empty"
       class="hidden absolute inset-0 flex items-center justify-center text-sm text-neutral-400">
-      No data
+      {{ empty_text }}
     </div>
   </div>
   {% if caller is defined %}{{ caller() }}{% endif %}

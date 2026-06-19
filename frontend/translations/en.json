@@ -608,5 +608,6 @@
   "dq_issues": "issues",
   "dq_no_issues": "No issues found ✓",
   "dq_download_csv": "Download CSV",
-  "dq_footnote_readonly": "Read-only review from live Odoo — this view never writes. Fixes are made directly in Odoo."
+  "dq_footnote_readonly": "Read-only review from live Odoo — this view never writes. Fixes are made directly in Odoo.",
+  "No data": "No data"
 }
