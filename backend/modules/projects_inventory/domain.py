@@ -77,3 +77,40 @@ SOLD_BUCKET = BUCKET_CONTRACTED
 # neutral badge). Display-only — it changes no count. La Puerta (≈3.6% sold, the
 # not-yet-loaded project) is the live example this surfaces.
 EARLY_STAGE_SOLD_PCT_THRESHOLD = 10.0
+
+
+# ── Slice 2 — Value & Area (LOCKED) ───────────────────────────────────────────
+# Confirmed live project IDs (read-only discovery 2026-06-19,
+# docs/PROJECTS_INVENTORY_PRICING_DISCOVERY.md): New Capital = 1, Cassette = 2 are
+# fully priced on `amount` (99.9% / 100%). La Puerta = 3 is EXCLUDED from every value
+# figure — only 9/138 of its units carry an `amount` (its `meter_price` is a decoy).
+# The value page is scoped to these two projects ONLY.
+VALUE_SCOPE_PROJECT_IDS: tuple[int, ...] = (1, 2)
+VALUE_EXCLUDED_PROJECT_IDS: tuple[int, ...] = (3,)   # La Puerta — pricing incomplete
+
+# Pricing/area fields on rs.structure.unit (all stored — confirmed via fields_get).
+#   amount     — LIST price ("Total Unit Price", May-2026 reload, indicative).
+#   total_area — unit area in m² ("Total Unit Area"); 100% on NC+Cassette.
+# net_area is deliberately NOT used (≈7% coverage — a trap).
+UNIT_AMOUNT_FIELD = "amount"
+UNIT_AREA_FIELD = "total_area"
+
+# The realized side — rs.contract. sales_price is the authoritative CONTRACTED deal
+# value per sold unit (== installments_total). It is the value the customer committed
+# to over the plan — NOT cash collected. unit_id joins one hop back to the unit.
+CONTRACT_MODEL = "rs.contract"
+CONTRACT_PRICE_FIELD = "sales_price"
+CONTRACT_UNIT_FIELD = "unit_id"
+CONTRACT_STATE_FIELD = "state"
+# A cancelled contract carries no committed value — excluded from the realized join.
+CONTRACT_CANCEL_STATE = "cancel"
+
+# The unit states that count as SOLD for the value join (the LOCKED contracted bucket:
+# contracted + delivered). Realized value is summed only over units in these states.
+SOLD_STATES: frozenset[str] = frozenset(
+    s for s, b in STATE_TO_BUCKET.items() if b == SOLD_BUCKET
+)
+# The single state that counts as AVAILABLE for list-value/area (the available bucket).
+AVAILABLE_STATES: frozenset[str] = frozenset(
+    s for s, b in STATE_TO_BUCKET.items() if b == BUCKET_AVAILABLE
+)

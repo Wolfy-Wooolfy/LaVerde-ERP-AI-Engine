@@ -18,6 +18,7 @@ from backend.main import app
 
 _URL = "/api/v1/projects-inventory/overview"
 _DRILL_URL = "/api/v1/projects-inventory/drill/project/1"
+_VALUE_URL = "/api/v1/projects-inventory/value-area/overview"
 
 _TESTADMIN_RECORD = UserRecord(
     username="testadmin", password_hash="", modules=["*"],
@@ -300,6 +301,93 @@ def test_drill_403_without_module_grant() -> None:
     c = _client_with(_OTHER_MODULE_RECORD)
     try:
         r = c.get(_DRILL_URL)
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Slice 2 — value-area endpoint GET /api/v1/projects-inventory/value-area/overview
+# ══════════════════════════════════════════════════════════════════════════════
+
+_MOCK_VALUE = {
+    "total_units": 1735, "available_units_count": 287, "sold_units_count": 1400,
+    "sold_units_with_contract_count": 1395, "sold_units_below_list_count": 664,
+    "available_list_value": 4_606_666_395.0, "available_area": 67_724.07,
+    "sold_realized_value": 5_709_600_379.98, "sold_contracted_area": 286_960.70,
+    "sold_list_value": 6_345_001_260.75, "gap_abs": 635_400_880.77, "gap_pct": 10.01,
+    "capture_pct": 89.99, "pct_units_below_list": 47.60,
+    "avg_price_per_m2_realized": 19_896.80, "sold_pct_units": 80.69,
+    "projects": [
+        {
+            "project_id": 1, "project_name": "New Capital",
+            "total_units": 1401, "available_units_count": 201, "sold_units_count": 1166,
+            "sold_units_with_contract_count": 1163, "sold_units_below_list_count": 538,
+            "available_list_value": 2_572_283_895.0, "available_area": 45_003.07,
+            "sold_realized_value": 3_404_246_935.98, "sold_contracted_area": 214_856.70,
+            "sold_list_value": 3_752_961_960.75, "gap_abs": 348_715_024.77, "gap_pct": 9.29,
+            "capture_pct": 90.71, "pct_units_below_list": 46.26,
+            "avg_price_per_m2_realized": 15_844.27, "sold_pct_units": 83.23,
+        },
+    ],
+    "project_count": 1,
+    "reference_date": "2026-06-19", "as_of": "2026-06-19T10:00:00+00:00",
+    "cache_status": "fresh", "rpc_duration_ms": 80,
+}
+
+
+def test_value_area_returns_200_and_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_value_area_overview",
+        new=AsyncMock(return_value=_MOCK_VALUE),
+    ):
+        r = client.get(_VALUE_URL)
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "available_list_value", "sold_realized_value", "sold_list_value", "gap_abs",
+        "gap_pct", "pct_units_below_list", "avg_price_per_m2_realized",
+        "sold_units_count", "sold_units_with_contract_count", "projects", "project_count",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+    assert body["sold_realized_value"] == 5_709_600_379.98
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_value_area_503_on_odoo_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_value_area_overview",
+        new=AsyncMock(side_effect=OdooQueryError("boom")),
+    ):
+        r = client.get(_VALUE_URL)
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+def test_value_area_500_on_unexpected(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_value_area_overview",
+        new=AsyncMock(side_effect=RuntimeError("kaboom")),
+    ):
+        r = client.get(_VALUE_URL)
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
+
+
+def test_value_area_401_when_unauthenticated() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_VALUE_URL)
+    assert r.status_code == 401
+
+
+def test_value_area_403_without_module_grant() -> None:
+    c = _client_with(_OTHER_MODULE_RECORD)
+    try:
+        r = c.get(_VALUE_URL)
         assert r.status_code == 403
         assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
     finally:

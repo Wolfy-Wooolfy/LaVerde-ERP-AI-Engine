@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t("va_title") }} — LaVerde ERP AI Engine{% endblock %}
+{% block page_title %}{{ _t("va_title") }}{% endblock %}
+
+{# Format a monetary EGP value as "X.XX bn EGP". The precise value rides along as a
+   title tooltip wherever this is used. Realized = contracted value, never cash. #}
+{% macro money(v) -%}
+{{ "%.2f"|format(v / 1000000000) }} <span class="text-base font-semibold text-neutral-400 dark:text-neutral-500">{{ _t("va_bn") }} {{ _t("va_egp") }}</span>
+{%- endmacro %}
+
+{% block content %}
+<div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
+
+  {# ── 1. HEADER STRIP ────────────────────────────────────────────────────── #}
+  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-2.5 mb-1">
+        <span class="live-dot bg-primary-500" style="--pulse-color: rgba(99, 102, 241, 0.6);"></span>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
+          La Verde &mdash; {{ _t("va_title") }}
+        </h1>
+      </div>
+      <p class="text-sm text-neutral-500 dark:text-neutral-400">
+        {{ _t("va_subtitle") }}
+        &middot; {{ "{:,}".format(va.sold_units_count) }} {{ _t("projinv_sold") }}
+        &middot; {{ _t("projinv_as_of") }} {{ va.reference_date }} &middot; {{ va.cache_status }}
+      </p>
+    </div>
+    <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono sm:text-right rtl:sm:text-left sm:pt-1 shrink-0">
+      {{ va.rpc_duration_ms }} ms &middot; {{ _t("projinv_live_rpc") }}
+    </div>
+  </div>
+
+  {# ── 2. KPI CARDS — Available list / Sold actual / Sold-at-list / Gap ──────
+     Inlined (not via _kpi_card) so the big figure can carry a small unit suffix —
+     matching how projects_inventory/dashboard.html builds its own KPI cards. #}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+    {# Available — list value (primary/info) #}
+    <div class="kpi-card border border-primary-200 dark:border-primary-800 flex flex-col overflow-hidden">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("va_kpi_available_list") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400">
+          <span class="w-2.5 h-2.5 rounded-sm bg-current"></span>
+        </div>
+      </div>
+      <p class="text-3xl font-bold tabular text-primary-700 dark:text-primary-400" title="{{ "{:,.0f}".format(va.available_list_value) }} {{ _t('va_egp') }}">{{ money(va.available_list_value) }}</p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ "{:,}".format(va.available_units_count) }} {{ _t("projinv_available") }}</p>
+    </div>
+
+    {# Sold — actual (contracted) value (success) #}
+    <div class="kpi-card border border-success-200 dark:border-success-800 flex flex-col overflow-hidden">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("va_kpi_sold_actual") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-success-100 dark:bg-success-900/40 text-success-600 dark:text-success-400">
+          <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+      </div>
+      <p class="text-3xl font-bold tabular text-success-700 dark:text-success-400" title="{{ "{:,.0f}".format(va.sold_realized_value) }} {{ _t('va_egp') }}">{{ money(va.sold_realized_value) }}</p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ "{:,}".format(va.sold_units_with_contract_count) }} / {{ "{:,}".format(va.sold_units_count) }} {{ _t("va_coverage_suffix") }}</p>
+    </div>
+
+    {# Sold — if at list price (neutral; the honest "list" counterfactual) #}
+    <div class="kpi-card border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("va_kpi_sold_at_list") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400">
+          <span class="w-2.5 h-2.5 rounded-sm bg-current"></span>
+        </div>
+      </div>
+      <p class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100" title="{{ "{:,.0f}".format(va.sold_list_value) }} {{ _t('va_egp') }}">{{ money(va.sold_list_value) }}</p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("va_kpi_sold_at_list") }}</p>
+    </div>
+
+    {# List → actual gap (warning) #}
+    <div class="kpi-card border border-warning-200 dark:border-warning-800 flex flex-col overflow-hidden">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("va_kpi_gap") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-warning-100 dark:bg-warning-900/40 text-warning-600 dark:text-warning-400">
+          <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+      </div>
+      <div class="flex items-end justify-between gap-2">
+        <p class="text-3xl font-bold tabular text-warning-700 dark:text-warning-400">{{ va.gap_pct | round(1) }}<span class="text-base font-semibold text-neutral-400 dark:text-neutral-500">%</span></p>
+      </div>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500" title="{{ "{:,.0f}".format(va.gap_abs) }} {{ _t('va_egp') }}">{{ money(va.gap_abs) }}</p>
+    </div>
+  </div>
+
+  {# ── 3. LIST vs ACTUAL — value-captured bar ──────────────────────────────── #}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("va_capture_title") }}</h2>
+      <p class="text-xs text-neutral-500 dark:text-neutral-400">
+        <span class="font-semibold text-success-700 dark:text-success-400 font-mono tabular-nums">{{ va.capture_pct | round(1) }}%</span>
+        {{ _t("va_captured") }}
+        &middot;
+        <span class="font-semibold text-warning-700 dark:text-warning-400 font-mono tabular-nums">{{ va.gap_pct | round(1) }}%</span>
+        {{ _t("va_gap") }}
+      </p>
+    </div>
+
+    {# Captured (realized) vs gap — widths are % of sold-at-list value. RTL-aware flex. #}
+    <div class="h-5 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-4">
+      {% if va.capture_pct > 0 %}
+      <div class="h-full bg-success-500 dark:bg-success-600" style="width: {{ va.capture_pct }}%;"
+           title="{{ _t('va_captured') }}: {{ va.capture_pct | round(1) }}%"></div>
+      {% endif %}
+      {% if va.gap_pct > 0 %}
+      <div class="h-full bg-warning-400 dark:bg-warning-500" style="width: {{ va.gap_pct }}%;"
+           title="{{ _t('va_gap') }}: {{ va.gap_pct | round(1) }}%"></div>
+      {% endif %}
+    </div>
+
+    {# % of sold units below list. #}
+    <p class="text-sm text-neutral-600 dark:text-neutral-300">
+      <span class="font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ va.pct_units_below_list | round(1) }}%</span>
+      {{ _t("va_below_list_suffix") }}
+      <span class="text-xs text-neutral-400 dark:text-neutral-500">({{ "{:,}".format(va.sold_units_below_list_count) }} / {{ "{:,}".format(va.sold_units_with_contract_count) }})</span>
+    </p>
+  </div>
+
+  {# ── 4. AREA + avg price/m² ───────────────────────────────────────────────── #}
+  <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+
+    {# Contracted area #}
+    <div class="kpi-card border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("va_contracted_area") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-success-100 dark:bg-success-900/40 text-success-600 dark:text-success-400">
+          <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+        </div>
+      </div>
+      <p class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100">{{ "{:,.0f}".format(va.sold_contracted_area) }} <span class="text-base font-semibold text-neutral-400 dark:text-neutral-500">{{ _t("va_sqm") }}</span></p>
+    </div>
+
+    {# Available area #}
+    <div class="kpi-card border border-primary-200 dark:border-primary-800 flex flex-col overflow-hidden">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("va_available_area") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400">
+          <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+        </div>
+      </div>
+      <p class="text-3xl font-bold tabular text-primary-700 dark:text-primary-400">{{ "{:,.0f}".format(va.available_area) }} <span class="text-base font-semibold text-neutral-400 dark:text-neutral-500">{{ _t("va_sqm") }}</span></p>
+    </div>
+
+    {# Avg realized price / m² (overall) #}
+    <div class="kpi-card border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden col-span-2 lg:col-span-1">
+      <div class="flex items-start justify-between mb-3">
+        <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("va_avg_m2") }} &middot; {{ _t("va_overall") }}</p>
+        <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400">
+          <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+        </div>
+      </div>
+      <p class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100">{{ "{:,.0f}".format(va.avg_price_per_m2_realized) }} <span class="text-base font-semibold text-neutral-400 dark:text-neutral-500">{{ _t("va_egp") }}/{{ _t("va_sqm") }}</span></p>
+    </div>
+  </div>
+
+  {# ── 5. BY PROJECT ───────────────────────────────────────────────────────── #}
+  <div>
+    <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-3">{{ _t("projinv_by_project") }}</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {% for p in va.projects %}
+      <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card p-5 flex flex-col">
+
+        {# Header: name · sold% (units) #}
+        <div class="flex items-start justify-between gap-3 mb-4">
+          <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate" title="{{ p.project_name }}">{{ p.project_name }}</p>
+          <p class="shrink-0 text-xs text-neutral-400 dark:text-neutral-500">
+            <span class="font-semibold text-success-700 dark:text-success-400 font-mono tabular-nums">{{ p.sold_pct_units | round(1) }}%</span>
+            {{ _t("projinv_sold") }}
+          </p>
+        </div>
+
+        {# Per-project capture mini-bar #}
+        <div class="h-3 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-4">
+          {% if p.capture_pct > 0 %}<div class="h-full bg-success-500 dark:bg-success-600" style="width: {{ p.capture_pct }}%;" title="{{ _t('va_captured') }}: {{ p.capture_pct | round(1) }}%"></div>{% endif %}
+          {% if p.gap_pct > 0 %}<div class="h-full bg-warning-400 dark:bg-warning-500" style="width: {{ p.gap_pct }}%;" title="{{ _t('va_gap') }}: {{ p.gap_pct | round(1) }}%"></div>{% endif %}
+        </div>
+
+        {# Stat grid: list value · actual value · gap · contracted area · avg/m² #}
+        <div class="grid grid-cols-2 gap-x-4 gap-y-3">
+          <div>
+            <p class="text-[11px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("va_list_value") }}</p>
+            <p class="text-lg font-bold tabular text-neutral-900 dark:text-neutral-100" title="{{ "{:,.0f}".format(p.sold_list_value) }} {{ _t('va_egp') }}">{{ money(p.sold_list_value) }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("va_actual_value") }}</p>
+            <p class="text-lg font-bold tabular text-success-700 dark:text-success-400" title="{{ "{:,.0f}".format(p.sold_realized_value) }} {{ _t('va_egp') }}">{{ money(p.sold_realized_value) }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("va_kpi_gap") }}</p>
+            <p class="text-lg font-bold tabular text-warning-700 dark:text-warning-400">{{ p.gap_pct | round(1) }}%</p>
+          </div>
+          <div>
+            <p class="text-[11px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("va_contracted_area") }}</p>
+            <p class="text-lg font-bold tabular text-neutral-900 dark:text-neutral-100">{{ "{:,.0f}".format(p.sold_contracted_area) }} <span class="text-xs font-semibold text-neutral-400 dark:text-neutral-500">{{ _t("va_sqm") }}</span></p>
+          </div>
+          <div class="col-span-2 pt-3 border-t border-neutral-100 dark:border-neutral-800">
+            <p class="text-[11px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("va_avg_m2") }}</p>
+            <p class="text-lg font-bold tabular text-neutral-900 dark:text-neutral-100">{{ "{:,.0f}".format(p.avg_price_per_m2_realized) }} <span class="text-xs font-semibold text-neutral-400 dark:text-neutral-500">{{ _t("va_egp") }}/{{ _t("va_sqm") }}</span></p>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── 6. FOOTER CAVEATS ───────────────────────────────────────────────────── #}
+  <div class="text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed space-y-1 pt-1">
+    <p>&middot; {{ _t("va_caveat_contracted") }}</p>
+    <p>&middot; {{ _t("va_caveat_list") }}</p>
+    <p>&middot; {{ _t("va_caveat_lapuerta") }}</p>
+    <p>&middot; {{ _t("va_footnote_readonly") }}</p>
+  </div>
+
+</div>
+{% endblock %}

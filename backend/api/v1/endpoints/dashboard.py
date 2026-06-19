@@ -35,6 +35,9 @@ from backend.modules.marketing_attribution.services.attribution_service import (
 from backend.modules.projects_inventory.services.inventory_service import (
     get_inventory_overview,
 )
+from backend.modules.projects_inventory.services.value_service import (
+    get_value_area_overview,
+)
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="frontend/templates")
@@ -357,6 +360,29 @@ async def projects_inventory_dashboard(
         "inv": data,
     })
     return templates.TemplateResponse(request, "projects_inventory/dashboard.html", ctx)
+
+
+@router.get(
+    "/projects-inventory/value-area",
+    response_class=HTMLResponse,
+    summary="Projects Inventory — Value & Area (HTML)",
+    dependencies=[Depends(require_module_html("projects_inventory"))],
+)
+async def projects_inventory_value_area(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Server-side render of the Value & Area board (Slice 2: list value of available
+    # inventory, realized/contracted value of sold units, the list-vs-realized gap, and
+    # area metrics — New Capital + Cassette, La Puerta excluded). Read-only; the service
+    # owns all computation, the contract join and reconciliation.
+    data = await get_value_area_overview()
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "projects_inventory_value_area",
+        "va": data,
+    })
+    return templates.TemplateResponse(request, "projects_inventory/value_area.html", ctx)
 
 
 @router.get(

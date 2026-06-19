@@ -6,6 +6,9 @@ GET /api/v1/projects-inventory/overview — unit counts by sales status, overall
 GET /api/v1/projects-inventory/drill/{level}/{parent_id} — one hierarchy scope of
     Project → Phase → Zone → Building → Unit: the scope's status breakdown plus its
     child rows (or the unit leaf list at the building level). Read-only. [Slice 1b]
+GET /api/v1/projects-inventory/value-area/overview — LIST value of available inventory,
+    CONTRACTED (realized) value of sold units, the list-vs-realized gap, and area
+    metrics, for New Capital + Cassette (La Puerta excluded). Read-only. [Slice 2]
 
 RBAC: module-gated at include_router level in router.py via
 require_module_api("projects_inventory"); additionally requires an authenticated
@@ -24,10 +27,14 @@ from backend.modules.projects_inventory.schemas import (
     DrillLevel,
     ProjectsInventoryDrill,
     ProjectsInventoryOverview,
+    ValueAreaOverview,
 )
 from backend.modules.projects_inventory.services.inventory_service import (
     get_inventory_drill,
     get_inventory_overview,
+)
+from backend.modules.projects_inventory.services.value_service import (
+    get_value_area_overview,
 )
 
 router = APIRouter(prefix="/projects-inventory", tags=["projects-inventory"])
@@ -55,6 +62,34 @@ async def overview(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("Projects inventory overview — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/value-area/overview",
+    summary="Projects Inventory — Value & Area (list vs realized), NC + Cassette",
+    response_model=ValueAreaOverview,
+)
+@limiter.limit("60/minute")
+async def value_area_overview(
+    request: Request,
+    response: Response,
+    _user: str = Depends(get_current_user),
+) -> dict | JSONResponse:
+    """LIST value of available inventory, CONTRACTED (realized) value of sold units, the
+    list-vs-realized gap and area metrics — combined + per project for New Capital +
+    Cassette. La Puerta is excluded. Realized is contracted value, not cash collected."""
+    try:
+        data = await get_value_area_overview()
+    except OdooQueryError:
+        logger.warning("Projects inventory value-area — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("Projects inventory value-area — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"

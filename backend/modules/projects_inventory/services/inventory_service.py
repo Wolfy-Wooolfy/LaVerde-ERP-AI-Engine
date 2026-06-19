@@ -59,8 +59,11 @@ _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
 # unique, e.g. "AF190-1-101"; name is the short label, e.g. "101"). Both are fetched in
 # the SAME single search_read so the cached unit set is self-sufficient for the leaf
 # list — the drill never issues a per-node query. The overview ignores them.
+# `amount` (LIST price) + `total_area` (m²) are fetched here too so the SINGLE cached
+# unit set also feeds Slice 2 (value_service) — both slices share one units query. The
+# Slice-1 board/drill ignore these two fields; they only matter to value_service.
 _UNIT_FIELDS = ["id", "state", "project_id", "phase_id", "zone_id", "building_id",
-                "code", "name"]
+                "code", "name", domain.UNIT_AMOUNT_FIELD, domain.UNIT_AREA_FIELD]
 
 _CACHE_KEY_PREFIX = "projects_inventory:overview"
 # The RAW unit rows are cached under their OWN key, shared by the board overview AND
