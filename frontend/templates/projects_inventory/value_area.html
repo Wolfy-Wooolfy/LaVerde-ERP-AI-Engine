@@ -69,8 +69,8 @@
           <span class="w-2.5 h-2.5 rounded-sm bg-current"></span>
         </div>
       </div>
-      <p class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100" title="{{ "{:,.0f}".format(va.sold_list_value) }} {{ _t('va_egp') }}">{{ money(va.sold_list_value) }}</p>
-      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("va_kpi_sold_at_list") }}</p>
+      <p class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100" title="{{ "{:,.0f}".format(va.sold_with_contract_list_value) }} {{ _t('va_egp') }}">{{ money(va.sold_with_contract_list_value) }}</p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("va_same_units") }}</p>
     </div>
 
     {# List → actual gap (warning) #}
@@ -119,6 +119,14 @@
       {{ _t("va_below_list_suffix") }}
       <span class="text-xs text-neutral-400 dark:text-neutral-500">({{ "{:,}".format(va.sold_units_below_list_count) }} / {{ "{:,}".format(va.sold_units_with_contract_count) }})</span>
     </p>
+
+    {# Sold units carrying no contract — excluded from the list↔actual comparison above
+       (their list value would have no realized counterpart, inflating the gap). #}
+    {% if va.no_contract_count > 0 %}
+    <p class="mt-3 text-xs text-neutral-400 dark:text-neutral-500">
+      {{ "{:,}".format(va.no_contract_count) }} {{ _t("va_no_contract_note") }} (≈ {{ money(va.no_contract_list_value) }})
+    </p>
+    {% endif %}
   </div>
 
   {# ── 4. AREA + avg price/m² ───────────────────────────────────────────────── #}
@@ -184,7 +192,7 @@
         <div class="grid grid-cols-2 gap-x-4 gap-y-3">
           <div>
             <p class="text-[11px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("va_list_value") }}</p>
-            <p class="text-lg font-bold tabular text-neutral-900 dark:text-neutral-100" title="{{ "{:,.0f}".format(p.sold_list_value) }} {{ _t('va_egp') }}">{{ money(p.sold_list_value) }}</p>
+            <p class="text-lg font-bold tabular text-neutral-900 dark:text-neutral-100" title="{{ "{:,.0f}".format(p.sold_with_contract_list_value) }} {{ _t('va_egp') }}">{{ money(p.sold_with_contract_list_value) }}</p>
           </div>
           <div>
             <p class="text-[11px] text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("va_actual_value") }}</p>

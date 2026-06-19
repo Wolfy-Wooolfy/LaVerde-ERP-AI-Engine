@@ -112,14 +112,19 @@ async def test_combined_values():
     assert r["available_list_value"] == 13_000_000
     assert r["available_area"] == 1_300
     assert r["sold_realized_value"] == 30_100_000     # 12.1M (NC) + 18M (Cas)
-    assert r["sold_contracted_area"] == 3_800
-    assert r["sold_list_value"] == 38_000_000
-    assert r["gap_abs"] == 7_900_000
-    assert r["gap_pct"] == round(7_900_000 / 38_000_000 * 100, 2)   # 20.79
-    assert r["capture_pct"] == round(30_100_000 / 38_000_000 * 100, 2)
+    assert r["sold_contracted_area"] == 3_800          # ALL sold (incl. no-contract u6)
+    assert r["sold_list_value"] == 38_000_000          # ALL sold @ list
+    # Apples-to-apples: gap/capture/avg over the SAME with-contract population only.
+    assert r["sold_with_contract_list_value"] == 32_000_000   # 12M (NC) + 20M (Cas)
+    assert r["sold_with_contract_area"] == 3_200              # 1,200 (NC) + 2,000 (Cas)
+    assert r["no_contract_count"] == 1                        # u6 (NC) only
+    assert r["no_contract_list_value"] == 6_000_000          # u6's 6M list = 38M − 32M
+    assert r["gap_abs"] == 1_900_000                          # 32M − 30.1M
+    assert r["gap_pct"] == round(1_900_000 / 32_000_000 * 100, 2)    # 5.94
+    assert r["capture_pct"] == round(30_100_000 / 32_000_000 * 100, 2)  # 94.06 (== 100 − gap)
     assert r["sold_units_below_list_count"] == 2       # u4, u9
     assert r["pct_units_below_list"] == 50.0           # 2 / 4 with-contract
-    assert r["avg_price_per_m2_realized"] == round(30_100_000 / 3_800, 2)
+    assert r["avg_price_per_m2_realized"] == round(30_100_000 / 3_200, 2)  # over with-contract area
     assert r["project_count"] == 2
 
 
@@ -135,16 +140,34 @@ async def test_per_project_values_and_sort_order():
     assert nc["available_area"] == 300
     assert nc["sold_realized_value"] == 12_100_000     # cancel on u4 excluded
     assert nc["sold_list_value"] == 18_000_000          # all 4 sold (incl u6)
-    assert nc["sold_contracted_area"] == 1_800
+    assert nc["sold_contracted_area"] == 1_800          # all 4 sold (incl u6's 600)
     assert nc["sold_units_count"] == 4
     assert nc["sold_units_with_contract_count"] == 3
     assert nc["sold_units_below_list_count"] == 1       # u4 only
     assert nc["pct_units_below_list"] == round(1 / 3 * 100, 2)
     assert nc["sold_pct_units"] == round(4 / 7 * 100, 2)
+    # NEW with-contract population (u3,u4,u5 — u6 split out as no-contract).
+    assert nc["sold_with_contract_list_value"] == 12_000_000   # 3M + 4M + 5M
+    assert nc["sold_with_contract_area"] == 1_200              # 300 + 400 + 500
+    assert nc["no_contract_count"] == 1                        # u6
+    assert nc["no_contract_list_value"] == 6_000_000          # u6's 6M = 18M − 12M
+    assert nc["gap_abs"] == -100_000                           # 12M − 12.1M (slight premium)
+    assert nc["gap_pct"] == round(-100_000 / 12_000_000 * 100, 2)
+    assert nc["capture_pct"] == round(12_100_000 / 12_000_000 * 100, 2)
+    assert nc["avg_price_per_m2_realized"] == round(12_100_000 / 1_200, 2)
 
     assert cas["sold_realized_value"] == 18_000_000     # 0 + 18M dedup-sum
     assert cas["sold_list_value"] == 20_000_000
     assert cas["pct_units_below_list"] == 100.0
+    # Cassette has no no-contract sold unit → with-contract == all sold.
+    assert cas["sold_with_contract_list_value"] == 20_000_000
+    assert cas["sold_with_contract_area"] == 2_000
+    assert cas["no_contract_count"] == 0
+    assert cas["no_contract_list_value"] == 0
+    assert cas["gap_abs"] == 2_000_000
+    assert cas["gap_pct"] == 10.0
+    assert cas["capture_pct"] == 90.0
+    assert cas["avg_price_per_m2_realized"] == round(18_000_000 / 2_000, 2)
 
 
 async def test_la_puerta_fully_excluded():
@@ -210,9 +233,12 @@ def test_reconcile_raises_on_bad_gap():
     scope = {
         "total_units": 1, "available_units_count": 0, "sold_units_count": 1,
         "sold_units_with_contract_count": 1, "sold_units_below_list_count": 0,
+        "no_contract_count": 0,
         "available_list_value": 0.0, "available_area": 0.0,
         "sold_realized_value": 90.0, "sold_contracted_area": 1.0,
-        "sold_list_value": 100.0, "gap_abs": 999.0,   # should be 10.0
+        "sold_list_value": 100.0, "sold_with_contract_list_value": 100.0,
+        "sold_with_contract_area": 1.0, "no_contract_list_value": 0.0,
+        "gap_abs": 999.0,   # should be 10.0 (sold_with_contract_list_value − sold_realized)
     }
     with pytest.raises(RuntimeError, match="gap_abs"):
         _reconcile(scope, [scope])

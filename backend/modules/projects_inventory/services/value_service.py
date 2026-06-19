@@ -20,18 +20,27 @@ scripts/verify_projects_inventory_value_live.py and asserted identity-equal):
      sales_price over that unit's NON-cancel contracts (one is the norm; the lone live
      duplicate carries a 0 sibling, so the sum is clean). A sold unit with no contract
      contributes 0 realized and is reported in the coverage counts — never dropped.
-  3. Per project (NC, Cassette) AND combined, compute a–i:
+  3. Per project (NC, Cassette) AND combined, compute the value/area metrics:
        a available_list_value     = Σ amount over AVAILABLE units
        b available_area           = Σ total_area over AVAILABLE units
-       c sold_realized_value      = Σ realized over SOLD units (contract join)
-       d sold_contracted_area     = Σ total_area over SOLD units
-       e sold_list_value          = Σ amount over SOLD units (ALL sold; "if sold at list")
-       f gap_abs / gap_pct        = (e − c) and (e − c)/e
+       c sold_realized_value      = Σ realized over SOLD-WITH-CONTRACT units (contract join)
+       d sold_contracted_area     = Σ total_area over ALL SOLD units
+       e sold_list_value          = Σ amount over ALL SOLD units (incl. no-contract)
+       e′ sold_with_contract_list_value = Σ amount over SOLD-WITH-CONTRACT units — the list
+                                     side of the apples-to-apples list↔actual comparison.
+       e″ sold_with_contract_area = Σ total_area over SOLD-WITH-CONTRACT units.
+       f gap_abs / gap_pct        = (e′ − c) and (e′ − c)/e′ — list↔actual over the SAME
+                                     (with-contract) population, so sold units that carry
+                                     no contract never inflate the discount.
+       n no_contract_count        = sold_units_count − sold_units_with_contract_count
+       n′ no_contract_list_value  = e − e′ (list value of the sold units that carry no
+                                     contract — surfaced as a separate note, not in the gap)
        g pct_units_below_list     = below / sold_with_contract  (shared population —
                                      the no-contract units have no realized to compare)
-       h avg_price_per_m2_realized= c / d  (guarded)
+       h avg_price_per_m2_realized= c / e″ (guarded; both sides over with-contract)
        i sold_units_count, sold_units_with_contract_count (coverage)
-  4. Reconcile: Σ per-project == combined for a/b/c/d/e and the counts; gap_abs == e−c.
+  4. Reconcile: Σ per-project == combined for the additive metrics and the counts;
+     gap_abs == e′ − c; no_contract_count == sold − with-contract; e == e′ + n′.
      Every reconciliation is an explicit raise (survives python -O), mirroring Slice 1.
 
 READ-ONLY: _assert_read_only() runs at entry; only search_read is issued. No method
@@ -151,9 +160,18 @@ def _compute_scope(units: list[dict], realized: dict[int, float]) -> dict:
     sold_with_contract = [u for u in sold if u["id"] in realized]
     sold_realized_value = sum(realized[u["id"]] for u in sold_with_contract)
 
-    gap_abs = sold_list_value - sold_realized_value
-    gap_pct = (gap_abs / sold_list_value * 100.0) if sold_list_value else 0.0
-    capture_pct = (sold_realized_value / sold_list_value * 100.0) if sold_list_value else 0.0
+    # Apples-to-apples list↔actual: the gap/capture compare LIST against REALIZED over the
+    # SAME population — only sold units that carry a contract. A sold unit with no contract
+    # has its list value but a 0 realized; counting it would inflate the gap, so it is split
+    # out into no_contract_* (surfaced as a note) instead of widening the comparison.
+    sold_with_contract_list_value = sum(_num(u.get(UNIT_AMOUNT_FIELD)) for u in sold_with_contract)
+    sold_with_contract_area = sum(_num(u.get(UNIT_AREA_FIELD)) for u in sold_with_contract)
+    no_contract_count = len(sold) - len(sold_with_contract)
+    no_contract_list_value = sold_list_value - sold_with_contract_list_value
+
+    gap_abs = sold_with_contract_list_value - sold_realized_value
+    gap_pct = (gap_abs / sold_with_contract_list_value * 100.0) if sold_with_contract_list_value else 0.0
+    capture_pct = (sold_realized_value / sold_with_contract_list_value * 100.0) if sold_with_contract_list_value else 0.0
 
     # % below list — over the with-contract population only (realized known). Cents-
     # rounded strict <, so equality-at-list never counts as a discount.
@@ -164,7 +182,7 @@ def _compute_scope(units: list[dict], realized: dict[int, float]) -> dict:
     pct_units_below_list = (below / len(sold_with_contract) * 100.0) if sold_with_contract else 0.0
 
     avg_price_per_m2_realized = (
-        sold_realized_value / sold_contracted_area if sold_contracted_area else 0.0
+        sold_realized_value / sold_with_contract_area if sold_with_contract_area else 0.0
     )
     sold_pct_units = (len(sold) / len(units) * 100.0) if units else 0.0
 
@@ -179,6 +197,10 @@ def _compute_scope(units: list[dict], realized: dict[int, float]) -> dict:
         "sold_realized_value": round(sold_realized_value, 2),
         "sold_contracted_area": round(sold_contracted_area, 2),
         "sold_list_value": round(sold_list_value, 2),
+        "sold_with_contract_list_value": round(sold_with_contract_list_value, 2),
+        "sold_with_contract_area": round(sold_with_contract_area, 2),
+        "no_contract_count": no_contract_count,
+        "no_contract_list_value": round(no_contract_list_value, 2),
         "gap_abs": round(gap_abs, 2),
         "gap_pct": round(gap_pct, 2),
         "capture_pct": round(capture_pct, 2),
@@ -191,14 +213,18 @@ def _compute_scope(units: list[dict], realized: dict[int, float]) -> dict:
 _SUM_KEYS = (
     "total_units", "available_units_count", "sold_units_count",
     "sold_units_with_contract_count", "sold_units_below_list_count",
+    "no_contract_count",
     "available_list_value", "available_area", "sold_realized_value",
     "sold_contracted_area", "sold_list_value",
+    "sold_with_contract_list_value", "sold_with_contract_area",
+    "no_contract_list_value",
 )
 
 
 def _reconcile(combined: dict, projects: list[dict]) -> None:
-    """Σ per-project == combined for every additive metric, and gap_abs == e − c on
-    every scope. Explicit raises (survive python -O), mirroring the Slice 1 style."""
+    """Σ per-project == combined for every additive metric, and per scope: gap_abs ==
+    e′ − c, no_contract_count == sold − with-contract, and e == e′ + n′. Explicit raises
+    (survive python -O), mirroring the Slice 1 style."""
     for key in _SUM_KEYS:
         per_sum = round(sum(p[key] for p in projects), 2)
         comb = round(combined[key], 2)
@@ -208,11 +234,25 @@ def _reconcile(combined: dict, projects: list[dict]) -> None:
                 f"!= combined {comb}."
             )
     for scope in (combined, *projects):
-        expect = round(scope["sold_list_value"] - scope["sold_realized_value"], 2)
+        expect = round(scope["sold_with_contract_list_value"] - scope["sold_realized_value"], 2)
         if round(scope["gap_abs"], 2) != expect:
             raise RuntimeError(
                 f"Value reconciliation FAILED: gap_abs {scope['gap_abs']} != "
-                f"(sold_list_value − sold_realized_value) {expect}."
+                f"(sold_with_contract_list_value − sold_realized_value) {expect}."
+            )
+        nc_expect = scope["sold_units_count"] - scope["sold_units_with_contract_count"]
+        if scope["no_contract_count"] != nc_expect:
+            raise RuntimeError(
+                f"Value reconciliation FAILED: no_contract_count {scope['no_contract_count']} "
+                f"!= (sold_units_count − sold_units_with_contract_count) {nc_expect}."
+            )
+        slv_expect = round(
+            scope["sold_with_contract_list_value"] + scope["no_contract_list_value"], 2
+        )
+        if round(scope["sold_list_value"], 2) != slv_expect:
+            raise RuntimeError(
+                f"Value reconciliation FAILED: sold_list_value {scope['sold_list_value']} "
+                f"!= (sold_with_contract_list_value + no_contract_list_value) {slv_expect}."
             )
         if scope["sold_units_with_contract_count"] > scope["sold_units_count"]:
             raise RuntimeError(

@@ -64,7 +64,7 @@ _CHUNK = 200
 # Sanity anchors (ballpark — gates a wildly-off computation; not an equality target).
 _ANCHOR_AVAIL_LIST = (4.0e9, 5.0e9)
 _ANCHOR_SOLD_REAL = (5.5e9, 6.5e9)
-_ANCHOR_GAP_PCT = (5.0, 15.0)
+_ANCHOR_GAP_PCT = (5.0, 12.0)   # NEW gap (over with-contract list) — see _odoo_compute
 
 
 def _ok(flag: bool) -> str:
@@ -120,13 +120,18 @@ async def _odoo_compute(client, project_ids: list[int]) -> dict:
     sold_contracted_area = sum(_num(u[UNIT_AREA_FIELD]) for u in sold)
     sold_with_contract = [u for u in sold if u["id"] in realized]
     sold_realized_value = sum(realized[u["id"]] for u in sold_with_contract)
-    gap_abs = sold_list_value - sold_realized_value
-    gap_pct = (gap_abs / sold_list_value * 100.0) if sold_list_value else 0.0
-    capture_pct = (sold_realized_value / sold_list_value * 100.0) if sold_list_value else 0.0
+    # Apples-to-apples: gap/capture/avg-m² over the SAME with-contract population.
+    sold_with_contract_list_value = sum(_num(u[UNIT_AMOUNT_FIELD]) for u in sold_with_contract)
+    sold_with_contract_area = sum(_num(u[UNIT_AREA_FIELD]) for u in sold_with_contract)
+    no_contract_count = len(sold) - len(sold_with_contract)
+    no_contract_list_value = sold_list_value - sold_with_contract_list_value
+    gap_abs = sold_with_contract_list_value - sold_realized_value
+    gap_pct = (gap_abs / sold_with_contract_list_value * 100.0) if sold_with_contract_list_value else 0.0
+    capture_pct = (sold_realized_value / sold_with_contract_list_value * 100.0) if sold_with_contract_list_value else 0.0
     below = sum(1 for u in sold_with_contract
                 if _c2(realized[u["id"]]) < _c2(_num(u[UNIT_AMOUNT_FIELD])))
     pct_below = (below / len(sold_with_contract) * 100.0) if sold_with_contract else 0.0
-    avg_m2 = (sold_realized_value / sold_contracted_area) if sold_contracted_area else 0.0
+    avg_m2 = (sold_realized_value / sold_with_contract_area) if sold_with_contract_area else 0.0
     sold_pct_units = (len(sold) / len(units) * 100.0) if units else 0.0
 
     return {
@@ -135,11 +140,15 @@ async def _odoo_compute(client, project_ids: list[int]) -> dict:
         "sold_units_count": len(sold),
         "sold_units_with_contract_count": len(sold_with_contract),
         "sold_units_below_list_count": below,
+        "no_contract_count": no_contract_count,
         "available_list_value": round(available_list_value, 2),
         "available_area": round(available_area, 2),
         "sold_realized_value": round(sold_realized_value, 2),
         "sold_contracted_area": round(sold_contracted_area, 2),
         "sold_list_value": round(sold_list_value, 2),
+        "sold_with_contract_list_value": round(sold_with_contract_list_value, 2),
+        "sold_with_contract_area": round(sold_with_contract_area, 2),
+        "no_contract_list_value": round(no_contract_list_value, 2),
         "gap_abs": round(gap_abs, 2),
         "gap_pct": round(gap_pct, 2),
         "capture_pct": round(capture_pct, 2),
@@ -152,10 +161,12 @@ async def _odoo_compute(client, project_ids: list[int]) -> dict:
 _METRICS = [
     ("total_units", "int"), ("available_units_count", "int"),
     ("sold_units_count", "int"), ("sold_units_with_contract_count", "int"),
-    ("sold_units_below_list_count", "int"),
+    ("sold_units_below_list_count", "int"), ("no_contract_count", "int"),
     ("available_list_value", "money"), ("available_area", "area"),
     ("sold_realized_value", "money"), ("sold_contracted_area", "area"),
-    ("sold_list_value", "money"), ("gap_abs", "money"), ("gap_pct", "pct"),
+    ("sold_list_value", "money"), ("sold_with_contract_list_value", "money"),
+    ("sold_with_contract_area", "area"), ("no_contract_list_value", "money"),
+    ("gap_abs", "money"), ("gap_pct", "pct"),
     ("capture_pct", "pct"), ("pct_units_below_list", "pct"),
     ("avg_price_per_m2_realized", "money"), ("sold_pct_units", "pct"),
 ]
@@ -204,6 +215,18 @@ async def main():
         fail += _compare("COMBINED (New Capital + Cassette)", mod_combined, odoo_combined)
         print()
 
+        # NEW gap (over with-contract list) vs the OLD definition (over ALL-sold list).
+        # The old number is inflated by sold units that carry no contract — shown here
+        # only as a reference so the correction is evident.
+        sl = odoo_combined["sold_list_value"]
+        old_gap = ((sl - odoo_combined["sold_realized_value"]) / sl * 100.0) if sl else 0.0
+        print(f"  gap_pct (NEW — over with-contract list value) : {odoo_combined['gap_pct']:>8,.2f}%")
+        print(f"  gap_pct (reference — old definition, all-sold): {round(old_gap, 2):>8,.2f}%")
+        print(f"  no-contract sold units excluded from the gap  : "
+              f"{odoo_combined['no_contract_count']:>8,}  "
+              f"(≈ {odoo_combined['no_contract_list_value']:,.2f} list)")
+        print()
+
         # ── PER PROJECT ──────────────────────────────────────────────────────────
         for pid in VALUE_SCOPE_PROJECT_IDS:
             mp = mod_projects.get(pid)
@@ -244,8 +267,11 @@ async def main():
         sum_keys = [
             "total_units", "available_units_count", "sold_units_count",
             "sold_units_with_contract_count", "sold_units_below_list_count",
+            "no_contract_count",
             "available_list_value", "available_area", "sold_realized_value",
             "sold_contracted_area", "sold_list_value",
+            "sold_with_contract_list_value", "sold_with_contract_area",
+            "no_contract_list_value",
         ]
         for key in sum_keys:
             per_sum = round(sum(mod_projects[pid][key] for pid in mod_projects), 2)
@@ -270,7 +296,7 @@ async def main():
         fail += 0 if gp_ok else 1
         print(f"  available_list_value  {al:>18,.2f}  in [4.0bn, 5.0bn]   {_ok(al_ok)}")
         print(f"  sold_realized_value   {sr:>18,.2f}  in [5.5bn, 6.5bn]   {_ok(sr_ok)}")
-        print(f"  gap_pct               {gp:>17,.2f}%  in [5%, 15%]        {_ok(gp_ok)}")
+        print(f"  gap_pct               {gp:>17,.2f}%  in [5%, 12%]        {_ok(gp_ok)}")
         print()
 
     print(_SEP)

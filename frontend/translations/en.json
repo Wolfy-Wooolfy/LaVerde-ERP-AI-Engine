@@ -581,5 +581,7 @@
   "va_caveat_contracted": "“Actual” is contracted value — the amount customers committed to over their payment plans, not cash collected.",
   "va_caveat_list": "List prices are indicative (May-2026 bulk reload).",
   "va_footnote_readonly": "Read-only intelligence from live Odoo — this view never writes.",
-  "va_bn": "bn"
+  "va_bn": "bn",
+  "va_same_units": "same contracted units",
+  "va_no_contract_note": "sold units without a contract — excluded from the list-vs-actual comparison"
 }

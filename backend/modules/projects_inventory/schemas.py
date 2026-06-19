@@ -114,14 +114,18 @@ class ValueAreaMetrics(BaseModel):
 
     available_list_value: float               # (a) Σ amount over available units
     available_area: float                      # (b) Σ total_area over available units, m²
-    sold_realized_value: float                 # (c) Σ contract.sales_price over sold units
-    sold_contracted_area: float                # (d) Σ total_area over sold units, m²
-    sold_list_value: float                     # (e) Σ amount over sold units ("if at list")
-    gap_abs: float                             # (f) sold_list_value − sold_realized_value
-    gap_pct: float                             # (f) gap_abs / sold_list_value * 100
-    capture_pct: float                         # sold_realized_value / sold_list_value * 100
+    sold_realized_value: float                 # (c) Σ contract.sales_price over sold-with-contract
+    sold_contracted_area: float                # (d) Σ total_area over ALL sold units, m²
+    sold_list_value: float                     # (e) Σ amount over ALL sold units ("if at list")
+    sold_with_contract_list_value: float       # (e′) Σ amount over sold-with-contract units
+    sold_with_contract_area: float             # (e″) Σ total_area over sold-with-contract, m²
+    no_contract_count: int                     # (n) sold_units_count − with-contract count
+    no_contract_list_value: float              # (n′) list value of sold units with no contract
+    gap_abs: float                             # (f) sold_with_contract_list_value − sold_realized
+    gap_pct: float                             # (f) gap_abs / sold_with_contract_list_value * 100
+    capture_pct: float                         # sold_realized_value / sold_with_contract_list_value
     pct_units_below_list: float                # (g) below ÷ sold_with_contract * 100
-    avg_price_per_m2_realized: float           # (h) sold_realized_value / sold_contracted_area
+    avg_price_per_m2_realized: float           # (h) sold_realized_value / sold_with_contract_area
     sold_pct_units: float                      # sold_units_count ÷ total_units * 100
 
 
