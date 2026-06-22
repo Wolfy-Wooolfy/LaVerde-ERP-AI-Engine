@@ -42,7 +42,9 @@ from backend.modules.projects_inventory.domain import (  # noqa: E402
     CONTRACT_STATE_FIELD,
     CONTRACT_UNIT_FIELD,
     OUTLIER_DEEP_DISCOUNT_PCT,
+    OUTLIER_DEEP_SMALLGROUP_PCT,
     OUTLIER_IQR_MULT,
+    OUTLIER_LIST_TRUST_K,
     OUTLIER_MIN_DEV_PCT,
     OUTLIER_MIN_GROUP_SIZE,
     OUTLIER_PREMIUM_PCT,
@@ -184,6 +186,7 @@ async def _odoo_recompute(client) -> dict:
             "realized_total": realized_total,
             "list_total": _c2(amount),
             "realized_pm2": _c2(realized_total / area),
+            "list_pm2": _c2(amount / area),
             "discount_pct": disc,
         })
 
@@ -216,16 +219,57 @@ async def _odoo_recompute(client) -> dict:
                 continue
             a_flags[m["unit_id"]] = "below" if below else "above"
 
-    # Section B
+    # Section B — cohort-relative + list-trust guard (mirrors the service independently).
+    # Same peer groups as A. Per eligible group: list-trust anchor (median realized_pm2) +
+    # discount Tukey fence + median discount (over members with a discount).
+    b_stats: dict[tuple, dict] = {}
+    for key, members in groups.items():
+        if len(members) < OUTLIER_MIN_GROUP_SIZE:
+            b_stats[key] = {"eligible": False}
+            continue
+        pm2_vals = sorted(m["realized_pm2"] for m in members)
+        median_realized = _quantile(pm2_vals, 0.5)
+        disc_vals = sorted(m["discount_pct"] for m in members if m["discount_pct"] is not None)
+        if disc_vals:
+            d_q3 = _quantile(disc_vals, 0.75)
+            d_iqr = d_q3 - _quantile(disc_vals, 0.25)
+            fence = d_q3 + OUTLIER_IQR_MULT * d_iqr
+            median_disc = _c2(_quantile(disc_vals, 0.5))
+        else:
+            fence = None
+            median_disc = None
+        b_stats[key] = {"eligible": True, "median_realized_pm2": median_realized,
+                        "disc_fence": fence, "median_disc": median_disc}
+
     b_flags: dict[int, str] = {}
+    b_median: dict[int, float] = {}
+    guard_suppressed = 0
+    discount_ge_floor = 0
     for u in pop:
         disc = u["discount_pct"]
         if disc is None:
             continue
         if disc >= OUTLIER_DEEP_DISCOUNT_PCT:
-            b_flags[u["unit_id"]] = "deep"
-        elif disc <= OUTLIER_PREMIUM_PCT:
-            b_flags[u["unit_id"]] = "premium"
+            discount_ge_floor += 1          # old flat-rule deep candidate (pre-refinement)
+        gs = b_stats[(u["zone_id"], u["unit_type_id"], u["vintage_bucket"])]
+        is_eligible = gs["eligible"]   # NB: distinct from Section A's `eligible` group count
+        if disc <= OUTLIER_PREMIUM_PCT:
+            kind = "premium"
+        elif is_eligible:
+            if u["list_pm2"] > OUTLIER_LIST_TRUST_K * gs["median_realized_pm2"]:
+                if disc >= OUTLIER_DEEP_DISCOUNT_PCT:
+                    guard_suppressed += 1
+                continue
+            fence = gs["disc_fence"]
+            if not (fence is not None and disc > fence and disc >= OUTLIER_DEEP_DISCOUNT_PCT):
+                continue
+            kind = "deep"
+        else:
+            if disc < OUTLIER_DEEP_SMALLGROUP_PCT:
+                continue
+            kind = "deep"
+        b_flags[u["unit_id"]] = kind
+        b_median[u["unit_id"]] = gs["median_disc"] if is_eligible else None
 
     confirmed = set(a_flags) & set(b_flags)
 
@@ -247,11 +291,14 @@ async def _odoo_recompute(client) -> dict:
         "population_ids": {u["unit_id"] for u in pop},
         "a_flags": a_flags,
         "b_flags": b_flags,
+        "b_median": b_median,
         "confirmed": confirmed,
         "a_below": sum(1 for d in a_flags.values() if d == "below"),
         "a_above": sum(1 for d in a_flags.values() if d == "above"),
         "b_deep": sum(1 for k in b_flags.values() if k == "deep"),
         "b_premium": sum(1 for k in b_flags.values() if k == "premium"),
+        "guard_suppressed": guard_suppressed,
+        "discount_ge_floor": discount_ge_floor,
         "insufficient": insufficient,
         "eligible": eligible,
         "per_project": per_project,
@@ -271,6 +318,8 @@ async def main():
     print(f"  Thresholds : MIN_GROUP_SIZE={OUTLIER_MIN_GROUP_SIZE} IQR_MULT={OUTLIER_IQR_MULT} "
           f"MIN_DEV_PCT={OUTLIER_MIN_DEV_PCT} DEEP={OUTLIER_DEEP_DISCOUNT_PCT} "
           f"PREMIUM={OUTLIER_PREMIUM_PCT} VINTAGE_BUCKET_YEARS={VINTAGE_BUCKET_YEARS}")
+    print(f"  Section B refinement : LIST_TRUST_K={OUTLIER_LIST_TRUST_K} "
+          f"DEEP_SMALLGROUP={OUTLIER_DEEP_SMALLGROUP_PCT}")
     print(_SEP)
 
     fail = 0
@@ -282,6 +331,7 @@ async def main():
 
         mod_a = {r["unit_id"]: r["direction"] for r in mod["section_a"]}
         mod_b = {r["unit_id"]: r["kind"] for r in mod["section_b"]}
+        mod_b_median = {r["unit_id"]: r["peer_median_discount_pct"] for r in mod["section_b"]}
         mod_conf = {r["unit_id"] for r in mod["section_a"] if r["is_confirmed"]}
 
         # ── IDENTITY checks ──────────────────────────────────────────────────────
@@ -290,6 +340,8 @@ async def main():
         print(_SEP2)
         fail += _check("Section A flagged {unit_id: direction} map equal", mod_a == odoo["a_flags"])
         fail += _check("Section B flagged {unit_id: kind} map equal", mod_b == odoo["b_flags"])
+        fail += _check("Section B {unit_id: peer_median_discount} map equal",
+                       mod_b_median == odoo["b_median"])
         fail += _check("Confirmed (A∩B) unit-id set equal", mod_conf == odoo["confirmed"])
         fail += _check("Confirmed == module confirmed_count", len(mod_conf) == mod["confirmed_count"])
         fail += _check("population_count == |independent population|",
@@ -337,6 +389,8 @@ async def main():
         print(f"  population (in-scope sold w/ contract + sale date) : {mod['population_count']:>6,}")
         print(f"  eligible peer groups (>= {OUTLIER_MIN_GROUP_SIZE})                      : {mod['eligible_group_count']:>6,}")
         print(f"  insufficient-peers units (footnote)                : {mod['insufficient_peers_count']:>6,}")
+        print(f"  discount >= {OUTLIER_DEEP_DISCOUNT_PCT:.0f}% (old flat-rule deep count)      : {odoo['discount_ge_floor']:>6,}")
+        print(f"  guard-suppressed (inflated list, >= {OUTLIER_DEEP_DISCOUNT_PCT:.0f}%, eligible) : {odoo['guard_suppressed']:>6,}")
         print(f"  Section A  total : {mod['section_a_count']:>4}   (below {mod['section_a_below_count']}, above {mod['section_a_above_count']})")
         print(f"  Section B  total : {mod['section_b_count']:>4}   (deep {mod['section_b_deep_count']}, premium {mod['section_b_premium_count']})")
         print(f"  CONFIRMED (both) : {mod['confirmed_count']:>4}")
@@ -354,9 +408,11 @@ async def main():
                   f"{'  [confirmed]' if r['is_confirmed'] else ''}")
         print(f"  Section B sample (top 3):")
         for r in mod["section_b"][:3]:
+            pmed = (f"{r['peer_median_discount_pct']:>6,.1f}%"
+                    if r["peer_median_discount_pct"] is not None else "  small")
             print(f"    {r['code']:<14} {r['project_name']:<12} {r['unit_type_name']:<16} "
                   f"{r['sale_date']}  list={r['list_total']:>12,.0f}  real={r['realized_total']:>12,.0f}  "
-                  f"disc={r['discount_pct']:>7,.1f}%  {r['kind']}"
+                  f"disc={r['discount_pct']:>7,.1f}%  peer_med={pmed}  {r['kind']}"
                   f"{'  [confirmed]' if r['is_confirmed'] else ''}")
         print()
 

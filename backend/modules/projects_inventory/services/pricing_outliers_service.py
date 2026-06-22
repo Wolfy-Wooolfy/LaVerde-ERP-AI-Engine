@@ -34,9 +34,18 @@ SECTION A — peer realized price/m² outliers (vintage-controlled):
     (ii) |realized_pm2 − median| / median * 100 ≥ MIN_DEV_PCT.
   direction = "below" under the lower fence, "above" over the upper fence.
 
-SECTION B — discount outliers vs the unit's OWN list (amount > 0):
-  FLAG "deep" if discount_pct ≥ DEEP_DISCOUNT_PCT; FLAG "premium" (sold above own list)
-  if discount_pct ≤ PREMIUM_PCT.
+SECTION B — discount outliers vs the unit's OWN list (amount > 0), cohort-relative:
+  Reuses Section A's peer groups. "premium" (sold above own list) = discount_pct ≤
+  PREMIUM_PCT — UNCHANGED, unguarded. "deep" now means GENUINELY unusual:
+    • list-trust guard — a unit with an implausible list (list_pm2 > OUTLIER_LIST_TRUST_K ×
+      its group's MEDIAN realized_pm2) is a list data error, never a real discount → it is
+      NEVER deep-flagged (suppressed). Small-group units are not guard-evaluated.
+    • eligible group (≥ MIN_GROUP_SIZE) + trustworthy list — deep iff discount_pct is a
+      Tukey outlier (> Q3 + IQR_MULT·IQR of the group's discounts) AND ≥ DEEP_DISCOUNT_PCT.
+    • small group (< MIN_GROUP_SIZE) — deep iff discount_pct ≥ DEEP_SMALLGROUP_PCT (no
+      peers to compare; the absolute fallback cut).
+  Each flagged row carries peer_median_discount_pct = its eligible group's median discount
+  (None for the small-group fallback), so the board sees the cohort norm it deviates from.
 
 CONFIRMED: a unit flagged in BOTH sections is high-confidence — marked in both and counted.
 
@@ -61,7 +70,9 @@ from backend.modules.projects_inventory.domain import (
     CONTRACT_STATE_FIELD,
     CONTRACT_UNIT_FIELD,
     OUTLIER_DEEP_DISCOUNT_PCT,
+    OUTLIER_DEEP_SMALLGROUP_PCT,
     OUTLIER_IQR_MULT,
+    OUTLIER_LIST_TRUST_K,
     OUTLIER_MIN_DEV_PCT,
     OUTLIER_MIN_GROUP_SIZE,
     OUTLIER_PREMIUM_PCT,
@@ -280,6 +291,7 @@ def _build_population(
             "realized_total": realized_total,
             "list_total": _c2(amount),
             "realized_pm2": _c2(realized_total / area),
+            "list_pm2": _c2(amount / area),   # the list-trust guard anchor (Section B)
             "discount_pct": discount_pct,
         })
     return population
@@ -345,21 +357,78 @@ def _section_a(population: list[dict]) -> tuple[list[dict], dict[int, dict], int
     return rows, flag_by_unit, insufficient, eligible
 
 
+def _section_b_group_stats(population: list[dict]) -> dict[tuple, dict]:
+    """Per peer group (zone_id, unit_type_id, vintage_bucket — the SAME key Section A uses)
+    precompute, for eligible groups (≥ MIN_GROUP_SIZE), the list-trust anchor (median
+    realized price/m²) and the discount distribution's upper Tukey fence + median discount
+    (over members with a discount). Small groups get {"eligible": False}. The quantile/IQR
+    helper is identical to Section A's, so fences match to the bit."""
+    groups: dict[tuple, list[dict]] = {}
+    for u in population:
+        key = (u["zone_id"], u["unit_type_id"], u["vintage_bucket"])
+        groups.setdefault(key, []).append(u)
+
+    stats: dict[tuple, dict] = {}
+    for key, members in groups.items():
+        if len(members) < OUTLIER_MIN_GROUP_SIZE:
+            stats[key] = {"eligible": False}
+            continue
+        pm2_vals = sorted(m["realized_pm2"] for m in members)
+        median_realized = _quantile(pm2_vals, 0.5)
+        disc_vals = sorted(
+            m["discount_pct"] for m in members if m["discount_pct"] is not None
+        )
+        if disc_vals:
+            d_q3 = _quantile(disc_vals, 0.75)
+            d_iqr = d_q3 - _quantile(disc_vals, 0.25)
+            disc_fence = d_q3 + OUTLIER_IQR_MULT * d_iqr
+            median_disc = _c2(_quantile(disc_vals, 0.5))
+        else:
+            disc_fence = None       # no discounts in-group — nothing can clear the fence
+            median_disc = None
+        stats[key] = {
+            "eligible": True,
+            "median_realized_pm2": median_realized,
+            "disc_fence": disc_fence,
+            "median_disc": median_disc,
+        }
+    return stats
+
+
 def _section_b(population: list[dict]) -> tuple[list[dict], dict[int, dict]]:
-    """Section B — discount outliers vs own list. Returns (flagged_rows, flag_by_unit).
-    flag_by_unit maps unit_id → {"kind", "discount_pct"} for the confirmed-join."""
+    """Section B — cohort-relative discount outliers vs own list, list-trust guarded.
+    Returns (flagged_rows, flag_by_unit). flag_by_unit maps unit_id → {"kind",
+    "discount_pct"} for the confirmed-join. See the module docstring for the rule."""
+    stats = _section_b_group_stats(population)
+
     rows: list[dict] = []
     flag_by_unit: dict[int, dict] = {}
     for u in population:
         disc = u["discount_pct"]
         if disc is None:
             continue   # amount <= 0 — no own-list reference
-        if disc >= OUTLIER_DEEP_DISCOUNT_PCT:
+        gs = stats[(u["zone_id"], u["unit_type_id"], u["vintage_bucket"])]
+        eligible = gs["eligible"]
+
+        if disc <= OUTLIER_PREMIUM_PCT:
+            kind = KIND_PREMIUM            # sold above own list — unchanged, unguarded
+        elif eligible:
+            # List-trust guard: an implausibly high list vs peers' realized price/m² is a
+            # data error, never a real discount → suppress (never deep-flagged).
+            if u["list_pm2"] > OUTLIER_LIST_TRUST_K * gs["median_realized_pm2"]:
+                continue
+            # Cohort rule: deep iff a Tukey outlier on the group's discounts AND ≥ floor.
+            fence = gs["disc_fence"]
+            if not (fence is not None and disc > fence
+                    and disc >= OUTLIER_DEEP_DISCOUNT_PCT):
+                continue
             kind = KIND_DEEP
-        elif disc <= OUTLIER_PREMIUM_PCT:
-            kind = KIND_PREMIUM
         else:
-            continue
+            # Small peer group — no cohort to compare against; absolute deep cut only.
+            if disc < OUTLIER_DEEP_SMALLGROUP_PCT:
+                continue
+            kind = KIND_DEEP
+
         rows.append({
             "unit_id": u["unit_id"],
             "code": u["code"],
@@ -370,6 +439,8 @@ def _section_b(population: list[dict]) -> tuple[list[dict], dict[int, dict]]:
             "list_total": u["list_total"],
             "realized_total": u["realized_total"],
             "discount_pct": disc,
+            # The cohort norm this row deviates from; None for the small-group fallback.
+            "peer_median_discount_pct": gs["median_disc"] if eligible else None,
             "kind": kind,
             "is_confirmed": False,
         })

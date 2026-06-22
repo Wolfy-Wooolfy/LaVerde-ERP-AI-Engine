@@ -291,18 +291,24 @@ _MOCK_OUTLIERS = {
          "deviation_pct": 72.84, "direction": "above", "is_confirmed": True},
     ],
     "section_b": [
+        {"unit_id": 25, "code": "GD-6", "project_id": 1, "project_name": "New Capital",
+         "unit_type_name": "Type#21", "sale_date": "2022-01-01",
+         "list_total": 1_250_000.0, "realized_total": 750_000.0,
+         "discount_pct": 40.0, "peer_median_discount_pct": 25.0, "kind": "deep",
+         "is_confirmed": False},
         {"unit_id": 7, "code": "S-7", "project_id": 1, "project_name": "New Capital",
          "unit_type_name": "Type#21", "sale_date": "2022-02-01",
          "list_total": 2_000_000.0, "realized_total": 1_000_000.0,
-         "discount_pct": 50.0, "kind": "deep", "is_confirmed": False},
+         "discount_pct": 40.0, "peer_median_discount_pct": None, "kind": "deep",
+         "is_confirmed": False},
     ],
     "section_a_count": 1, "section_a_below_count": 0, "section_a_above_count": 1,
-    "section_b_count": 1, "section_b_deep_count": 1, "section_b_premium_count": 0,
+    "section_b_count": 2, "section_b_deep_count": 2, "section_b_premium_count": 0,
     "confirmed_count": 1,
     "insufficient_peers_count": 3, "eligible_group_count": 1, "population_count": 9,
     "projects": [
         {"project_id": 1, "project_name": "New Capital",
-         "section_a_count": 1, "section_b_count": 1, "confirmed_count": 1},
+         "section_a_count": 1, "section_b_count": 2, "confirmed_count": 1},
         {"project_id": 2, "project_name": "Cassette",
          "section_a_count": 0, "section_b_count": 0, "confirmed_count": 0},
     ],
@@ -336,6 +342,11 @@ def test_pricing_outliers_200_with_scoped_module_grant() -> None:
         assert "2022–2023" in body
         assert "Above peers" in body
         assert "Deep discount" in body
+        # New Section-B peer-median-discount column: header + a % for the eligible-group
+        # deep row, and the small-group hint for the None row.
+        assert "Peer median discount" in body
+        assert "25.0%" in body
+        assert "small group" in body
         # CSV export wiring (reuses window.exportTableCSV by table id) + the contracted caveat.
         assert "exportTableCSV('po-section-a-table')" in body
         assert "exportTableCSV('po-section-b-table')" in body

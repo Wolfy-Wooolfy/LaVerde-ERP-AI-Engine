@@ -151,10 +151,21 @@ OUTLIER_IQR_MULT = 1.5
 OUTLIER_MIN_DEV_PCT = 15.0
 
 # Section B — discount outliers vs the unit's OWN list price (amount). discount_pct =
-# (amount − realized_total) / amount * 100, only when amount > 0. FLAG deep-discount if
-# discount_pct ≥ DEEP_DISCOUNT_PCT; FLAG premium (sold above own list) if
-# discount_pct ≤ PREMIUM_PCT. Both are TUNABLE named constants. The 25% default sits
-# safely above the ~10–16% list-over-realized drift seen on 2024–2025 vintages — which
-# is why every row also shows its sale date (read the discount in vintage context).
+# (amount − realized_total) / amount * 100, only when amount > 0. FLAG premium (sold above
+# own list) if discount_pct ≤ PREMIUM_PCT (unchanged). Both are TUNABLE named constants.
 OUTLIER_DEEP_DISCOUNT_PCT = 25.0
 OUTLIER_PREMIUM_PCT = -10.0
+
+# Section B DEEP-discount refinement (cohort-relative + list-trust guard). A flat
+# "discount ≥ 25%" over-flags two non-anomalies: the deliberate ~25% house-standard
+# discount, and list-price data errors. So a deep flag now means GENUINELY unusual:
+#   (1) LIST-TRUST guard — a unit whose list price/m² exceeds OUTLIER_LIST_TRUST_K × its
+#       peer group's MEDIAN realized price/m² has an implausible list (a data error, not a
+#       real discount) and is NEVER deep-flagged.
+#   (2) COHORT rule — in an eligible peer group (zone × unit-type × 2-yr vintage, the SAME
+#       groups Section A uses) a discount is deep iff it is a Tukey outlier
+#       (> Q3 + IQR_MULT·IQR of the group's discounts) AND ≥ OUTLIER_DEEP_DISCOUNT_PCT.
+#       Units in sub-MIN_GROUP_SIZE groups have no peers to compare against → an absolute
+#       ≥ OUTLIER_DEEP_SMALLGROUP_PCT fallback cut (guard not applied). All TUNABLE.
+OUTLIER_LIST_TRUST_K = 2.0
+OUTLIER_DEEP_SMALLGROUP_PCT = 35.0

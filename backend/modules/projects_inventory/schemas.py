@@ -224,6 +224,7 @@ class PricingOutlierBRow(BaseModel):
     list_total: float                  # unit.amount (list)
     realized_total: float              # Σ non-cancel contract.sales_price
     discount_pct: float                # (list − realized)/list * 100 (signed)
+    peer_median_discount_pct: float | None = None  # eligible-group median discount; None = small-group fallback
     kind: OutlierKind
     is_confirmed: bool                 # also flagged in Section A
 

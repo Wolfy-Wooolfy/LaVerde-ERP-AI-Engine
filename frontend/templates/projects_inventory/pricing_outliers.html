@@ -162,6 +162,7 @@
             <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_list") }}</th>
             <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_realized") }}</th>
             <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_discount") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_peer_discount") }}</th>
             <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_kind") }}</th>
           </tr>
         </thead>
@@ -178,6 +179,9 @@
             <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-900 dark:text-neutral-100 whitespace-nowrap" title="{{ "{:,.0f}".format(r.realized_total) }} {{ _t('po_egp') }}">{{ "{:,.0f}".format(r.realized_total) }}</td>
             <td class="px-4 py-2.5 text-end font-mono tabular-nums font-semibold whitespace-nowrap {% if r.kind == 'premium' %}text-success-700 dark:text-success-400{% else %}text-danger-700 dark:text-danger-400{% endif %}">
               {{ "%+.1f"|format(r.discount_pct) }}%
+            </td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap">
+              {% if r.peer_median_discount_pct is not none %}{{ "%.1f"|format(r.peer_median_discount_pct) }}%{% else %}<span class="text-neutral-400 dark:text-neutral-500">&mdash;</span> <span class="text-[10px] text-neutral-400 dark:text-neutral-500">{{ _t("po_small_group") }}</span>{% endif %}
             </td>
             <td class="px-4 py-2.5 whitespace-nowrap">
               {% if r.kind == 'premium' %}
@@ -202,7 +206,8 @@
     <p>&middot; {{ "{:,}".format(po.insufficient_peers_count) }} {{ _t("po_footnote_insufficient") }} &middot; {{ po.eligible_group_count }} {{ _t("po_footnote_eligible") }}</p>
     {% endif %}
     <p>&middot; {{ _t("po_footnote_method_a") }} — IQR×{{ po.thresholds.iqr_mult }}, &ge;{{ po.thresholds.min_dev_pct | round(0) | int }}%, n&ge;{{ po.thresholds.min_group_size }}.</p>
-    <p>&middot; {{ _t("po_footnote_method_b") }} — &ge;{{ po.thresholds.deep_discount_pct | round(0) | int }}% / &le;{{ po.thresholds.premium_pct | round(0) | int }}%.</p>
+    <p>&middot; {{ _t("po_footnote_method_b") }}</p>
+    <p>&middot; {{ _t("po_footnote_list_error") }}</p>
     <p>&middot; {{ _t("va_caveat_contracted") }}</p>
     <p>&middot; {{ _t("va_caveat_lapuerta") }}</p>
     <p>&middot; {{ _t("po_footnote_readonly") }}</p>
