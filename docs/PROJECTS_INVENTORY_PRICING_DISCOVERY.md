@@ -4,6 +4,7 @@
 **Date:** 2026-06-19 &nbsp;|&nbsp; **Odoo:** laverde.odoo.com (Odoo 17), JSON-RPC, READ-ONLY &nbsp;|&nbsp; **AI cost:** $0.00
 **Method:** `fields_get` / `search_count` / `search_read` / `read_group` only — every field confirmed via `fields_get` before use. No write methods touched. Probe scripts deleted (nothing committed).
 **Companion to:** `docs/PROJECTS_INVENTORY_DISCOVERY.md` (hierarchy/field/readiness discovery).
+**See** `PROJECTS_INVENTORY_SALE_DATE_TIMELINE.md` **for the canonical sale-date / vintage reference.**
 
 ---
 
