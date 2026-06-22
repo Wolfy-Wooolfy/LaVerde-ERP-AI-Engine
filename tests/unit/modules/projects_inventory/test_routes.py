@@ -19,6 +19,7 @@ from backend.main import app
 _URL = "/api/v1/projects-inventory/overview"
 _DRILL_URL = "/api/v1/projects-inventory/drill/project/1"
 _VALUE_URL = "/api/v1/projects-inventory/value-area/overview"
+_OUTLIERS_URL = "/api/v1/projects-inventory/pricing-outliers/overview"
 
 _TESTADMIN_RECORD = UserRecord(
     username="testadmin", password_hash="", modules=["*"],
@@ -400,6 +401,123 @@ def test_value_area_403_without_module_grant() -> None:
         r = c.get(_VALUE_URL)
         assert r.status_code == 403
         assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Slice 2.5 — pricing-outliers endpoint
+# GET /api/v1/projects-inventory/pricing-outliers/overview  (module-gated, NOT admin)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_MOCK_OUTLIERS = {
+    "section_a": [
+        {"unit_id": 6, "code": "P1-6", "project_id": 1, "project_name": "New Capital",
+         "zone_name": "Zone#10", "unit_type_name": "Type#20",
+         "vintage_bucket_label": "2022–2023", "sale_date": "2023-07-01",
+         "realized_pm2": 35_000.0, "group_median_pm2": 20_250.0,
+         "deviation_pct": 72.84, "direction": "above", "is_confirmed": True},
+    ],
+    "section_b": [
+        {"unit_id": 7, "code": "S-7", "project_id": 1, "project_name": "New Capital",
+         "unit_type_name": "Type#21", "sale_date": "2022-02-01",
+         "list_total": 2_000_000.0, "realized_total": 1_000_000.0,
+         "discount_pct": 50.0, "kind": "deep", "is_confirmed": False},
+        {"unit_id": 6, "code": "P1-6", "project_id": 1, "project_name": "New Capital",
+         "unit_type_name": "Type#20", "sale_date": "2023-07-01",
+         "list_total": 3_000_000.0, "realized_total": 3_500_000.0,
+         "discount_pct": -16.67, "kind": "premium", "is_confirmed": True},
+    ],
+    "section_a_count": 1, "section_a_below_count": 0, "section_a_above_count": 1,
+    "section_b_count": 2, "section_b_deep_count": 1, "section_b_premium_count": 1,
+    "confirmed_count": 1,
+    "insufficient_peers_count": 3, "eligible_group_count": 1, "population_count": 9,
+    "projects": [
+        {"project_id": 1, "project_name": "New Capital",
+         "section_a_count": 1, "section_b_count": 2, "confirmed_count": 1},
+        {"project_id": 2, "project_name": "Cassette",
+         "section_a_count": 0, "section_b_count": 0, "confirmed_count": 0},
+    ],
+    "project_count": 2,
+    "thresholds": {"min_group_size": 5, "iqr_mult": 1.5, "min_dev_pct": 15.0,
+                   "deep_discount_pct": 25.0, "premium_pct": -10.0, "vintage_bucket_years": 2},
+    "reference_date": "2026-06-22", "as_of": "2026-06-22T10:00:00+00:00",
+    "cache_status": "fresh", "rpc_duration_ms": 90,
+}
+
+
+def test_pricing_outliers_returns_200_and_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_pricing_outliers_overview",
+        new=AsyncMock(return_value=_MOCK_OUTLIERS),
+    ):
+        r = client.get(_OUTLIERS_URL)
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "section_a", "section_b", "section_a_count", "section_a_below_count",
+        "section_a_above_count", "section_b_count", "section_b_deep_count",
+        "section_b_premium_count", "confirmed_count", "insufficient_peers_count",
+        "eligible_group_count", "population_count", "projects", "project_count",
+        "thresholds",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+    assert body["confirmed_count"] == 1
+    assert body["section_b"][0]["kind"] == "deep"
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_pricing_outliers_503_on_odoo_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_pricing_outliers_overview",
+        new=AsyncMock(side_effect=OdooQueryError("boom")),
+    ):
+        r = client.get(_OUTLIERS_URL)
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+def test_pricing_outliers_500_on_unexpected(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_pricing_outliers_overview",
+        new=AsyncMock(side_effect=RuntimeError("kaboom")),
+    ):
+        r = client.get(_OUTLIERS_URL)
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
+
+
+def test_pricing_outliers_401_when_unauthenticated() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_OUTLIERS_URL)
+    assert r.status_code == 401
+
+
+def test_pricing_outliers_403_without_module_grant() -> None:
+    c = _client_with(_OTHER_MODULE_RECORD)
+    try:
+        r = c.get(_OUTLIERS_URL)
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+def test_pricing_outliers_200_with_scoped_module_grant() -> None:
+    """A non-admin user explicitly granted the module is allowed (NOT admin-only)."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.projects_inventory.get_pricing_outliers_overview",
+            new=AsyncMock(return_value=_MOCK_OUTLIERS),
+        ):
+            r = c.get(_OUTLIERS_URL)
+        assert r.status_code == 200
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         if hasattr(app.state, "user_repo"):

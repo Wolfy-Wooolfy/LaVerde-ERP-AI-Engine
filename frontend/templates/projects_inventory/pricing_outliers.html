@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _t("po_title") }} — LaVerde ERP AI Engine{% endblock %}
+{% block page_title %}{{ _t("po_title") }}{% endblock %}
+
+{% block content %}
+<div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
+
+  {# ── 1. HEADER STRIP ────────────────────────────────────────────────────── #}
+  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-2.5 mb-1">
+        <span class="live-dot bg-primary-500" style="--pulse-color: rgba(99, 102, 241, 0.6);"></span>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
+          La Verde &mdash; {{ _t("po_title") }}
+        </h1>
+      </div>
+      <p class="text-sm text-neutral-500 dark:text-neutral-400">
+        {{ _t("po_subtitle") }}
+        &middot; {{ "{:,}".format(po.population_count) }} {{ _t("po_population_suffix") }}
+        &middot; {{ _t("projinv_as_of") }} {{ po.reference_date }} &middot; {{ po.cache_status }}
+      </p>
+    </div>
+    <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono sm:text-right rtl:sm:text-left sm:pt-1 shrink-0">
+      {{ po.rpc_duration_ms }} ms &middot; {{ _t("projinv_live_rpc") }}
+    </div>
+  </div>
+
+  {# ── 2. SUMMARY STRIP — Section A / Section B / Confirmed + per-project ──── #}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-5 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-3 shrink-0">
+      <div class="flex items-baseline gap-2">
+        <span class="text-3xl font-bold tabular text-warning-700 dark:text-warning-400">{{ po.section_a_count }}</span>
+        <span class="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("po_section_a_short") }}</span>
+      </div>
+      <div class="flex items-baseline gap-2">
+        <span class="text-3xl font-bold tabular text-danger-700 dark:text-danger-400">{{ po.section_b_count }}</span>
+        <span class="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("po_section_b_short") }}</span>
+      </div>
+      <div class="flex items-baseline gap-2">
+        <span class="text-3xl font-bold tabular {% if po.confirmed_count > 0 %}text-primary-700 dark:text-primary-400{% else %}text-neutral-400 dark:text-neutral-500{% endif %}">{{ po.confirmed_count }}</span>
+        <span class="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ _t("po_confirmed_short") }}</span>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      {% for p in po.projects %}
+      <span class="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300">
+        <span class="font-semibold text-neutral-900 dark:text-neutral-100">{{ p.project_name }}</span>
+        <span class="text-warning-700 dark:text-warning-400 font-mono tabular-nums" title="{{ _t('po_section_a_short') }}">A {{ p.section_a_count }}</span>
+        <span class="text-danger-700 dark:text-danger-400 font-mono tabular-nums" title="{{ _t('po_section_b_short') }}">B {{ p.section_b_count }}</span>
+        <span class="text-primary-700 dark:text-primary-400 font-mono tabular-nums" title="{{ _t('po_confirmed_short') }}">✓ {{ p.confirmed_count }}</span>
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── 3. SECTION A — peer realized price/m² outliers ──────────────────────── #}
+  <section class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card overflow-hidden">
+    <div class="px-5 py-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+          {{ _t("po_section_a_title") }}
+          {% if po.section_a_count > 0 %}
+          <span class="text-[11px] bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-300 px-2 py-0.5 rounded-full font-semibold tabular-nums">{{ po.section_a_count }}</span>
+          {% else %}
+          <span class="text-[11px] bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-400 px-2 py-0.5 rounded-full font-semibold">✓</span>
+          {% endif %}
+        </h2>
+        <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">{{ _t("po_section_a_hint") }}</p>
+      </div>
+      {% if po.section_a_count > 0 %}
+      <button type="button" onclick="window.exportTableCSV('po-section-a-table')"
+              class="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        {{ _t("po_download_csv") }}
+      </button>
+      {% endif %}
+    </div>
+
+    {% if po.section_a_count > 0 %}
+    <div class="overflow-x-auto">
+      <table id="po-section-a-table" class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-neutral-100 dark:border-neutral-800">
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_code") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_project") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_zone") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_unit_type") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_vintage") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_sale_date") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_realized_pm2") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_peer_median") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_deviation") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_direction") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in po.section_a %}
+          <tr class="border-b border-neutral-50 dark:border-neutral-800/50 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors">
+            <td class="px-4 py-2.5 font-mono text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
+              {{ r.code }}{% if r.is_confirmed %} <span class="text-[10px] bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-1.5 py-0.5 rounded font-semibold align-middle">{{ _t("po_confirmed_badge") }}</span>{% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ r.project_name }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ r.zone_name }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ r.unit_type_name }}</td>
+            <td class="px-4 py-2.5 text-neutral-500 dark:text-neutral-400 whitespace-nowrap tabular-nums">{{ r.vintage_bucket_label }}</td>
+            <td class="px-4 py-2.5 text-neutral-500 dark:text-neutral-400 whitespace-nowrap font-mono tabular-nums">{{ r.sale_date }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-900 dark:text-neutral-100 whitespace-nowrap">{{ "{:,.0f}".format(r.realized_pm2) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{{ "{:,.0f}".format(r.group_median_pm2) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums font-semibold whitespace-nowrap {% if r.direction == 'above' %}text-primary-700 dark:text-primary-400{% else %}text-warning-700 dark:text-warning-400{% endif %}">
+              {{ "%+.1f"|format(r.deviation_pct) }}%
+            </td>
+            <td class="px-4 py-2.5 whitespace-nowrap">
+              {% if r.direction == 'above' %}
+              <span class="text-[11px] bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full font-medium">{{ _t("po_dir_above") }}</span>
+              {% else %}
+              <span class="text-[11px] bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-300 px-2 py-0.5 rounded-full font-medium">{{ _t("po_dir_below") }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="px-5 py-8 text-center text-sm text-success-600 dark:text-success-400 font-medium">{{ _t("po_no_outliers") }}</div>
+    {% endif %}
+  </section>
+
+  {# ── 4. SECTION B — discount outliers vs own list ────────────────────────── #}
+  <section class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card overflow-hidden">
+    <div class="px-5 py-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+          {{ _t("po_section_b_title") }}
+          {% if po.section_b_count > 0 %}
+          <span class="text-[11px] bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300 px-2 py-0.5 rounded-full font-semibold tabular-nums">{{ po.section_b_count }}</span>
+          {% else %}
+          <span class="text-[11px] bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-400 px-2 py-0.5 rounded-full font-semibold">✓</span>
+          {% endif %}
+        </h2>
+        <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">{{ _t("po_section_b_hint") }}</p>
+      </div>
+      {% if po.section_b_count > 0 %}
+      <button type="button" onclick="window.exportTableCSV('po-section-b-table')"
+              class="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        {{ _t("po_download_csv") }}
+      </button>
+      {% endif %}
+    </div>
+
+    {% if po.section_b_count > 0 %}
+    <div class="overflow-x-auto">
+      <table id="po-section-b-table" class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-neutral-100 dark:border-neutral-800">
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_code") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_project") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_unit_type") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_sale_date") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_list") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_realized") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_discount") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("po_col_kind") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in po.section_b %}
+          <tr class="border-b border-neutral-50 dark:border-neutral-800/50 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors">
+            <td class="px-4 py-2.5 font-mono text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
+              {{ r.code }}{% if r.is_confirmed %} <span class="text-[10px] bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-1.5 py-0.5 rounded font-semibold align-middle">{{ _t("po_confirmed_badge") }}</span>{% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ r.project_name }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ r.unit_type_name }}</td>
+            <td class="px-4 py-2.5 text-neutral-500 dark:text-neutral-400 whitespace-nowrap font-mono tabular-nums">{{ r.sale_date }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap" title="{{ "{:,.0f}".format(r.list_total) }} {{ _t('po_egp') }}">{{ "{:,.0f}".format(r.list_total) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-900 dark:text-neutral-100 whitespace-nowrap" title="{{ "{:,.0f}".format(r.realized_total) }} {{ _t('po_egp') }}">{{ "{:,.0f}".format(r.realized_total) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums font-semibold whitespace-nowrap {% if r.kind == 'premium' %}text-success-700 dark:text-success-400{% else %}text-danger-700 dark:text-danger-400{% endif %}">
+              {{ "%+.1f"|format(r.discount_pct) }}%
+            </td>
+            <td class="px-4 py-2.5 whitespace-nowrap">
+              {% if r.kind == 'premium' %}
+              <span class="text-[11px] bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-300 px-2 py-0.5 rounded-full font-medium">{{ _t("po_kind_premium") }}</span>
+              {% else %}
+              <span class="text-[11px] bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300 px-2 py-0.5 rounded-full font-medium">{{ _t("po_kind_deep") }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="px-5 py-8 text-center text-sm text-success-600 dark:text-success-400 font-medium">{{ _t("po_no_outliers") }}</div>
+    {% endif %}
+  </section>
+
+  {# ── 5. FOOTER CAVEATS ───────────────────────────────────────────────────── #}
+  <div class="text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed space-y-1 pt-1">
+    {% if po.insufficient_peers_count > 0 %}
+    <p>&middot; {{ "{:,}".format(po.insufficient_peers_count) }} {{ _t("po_footnote_insufficient") }} &middot; {{ po.eligible_group_count }} {{ _t("po_footnote_eligible") }}</p>
+    {% endif %}
+    <p>&middot; {{ _t("po_footnote_method_a") }} — IQR×{{ po.thresholds.iqr_mult }}, &ge;{{ po.thresholds.min_dev_pct | round(0) | int }}%, n&ge;{{ po.thresholds.min_group_size }}.</p>
+    <p>&middot; {{ _t("po_footnote_method_b") }} — &ge;{{ po.thresholds.deep_discount_pct | round(0) | int }}% / &le;{{ po.thresholds.premium_pct | round(0) | int }}%.</p>
+    <p>&middot; {{ _t("va_caveat_contracted") }}</p>
+    <p>&middot; {{ _t("va_caveat_lapuerta") }}</p>
+    <p>&middot; {{ _t("po_footnote_readonly") }}</p>
+  </div>
+
+</div>
+{% endblock %}

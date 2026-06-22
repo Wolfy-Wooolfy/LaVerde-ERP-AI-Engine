@@ -18,6 +18,7 @@ from backend.main import app
 
 _URL = "/projects-inventory/dashboard"
 _VALUE_URL = "/projects-inventory/value-area"
+_OUTLIERS_URL = "/projects-inventory/pricing-outliers"
 
 # A user explicitly granted the projects_inventory module (non-admin, scoped).
 _SCOPED_RECORD = UserRecord(
@@ -275,6 +276,88 @@ def test_value_area_403_without_module_grant() -> None:
 def test_value_area_unauthenticated_redirects_to_login() -> None:
     c = TestClient(app, raise_server_exceptions=True, follow_redirects=False)
     r = c.get(_VALUE_URL)
+    assert r.status_code == 302
+    assert "/login" in r.headers.get("location", "")
+
+
+# ── Slice 2.5 — Pricing Outliers HTML page (module-gated, NOT admin) ───────────
+
+_MOCK_OUTLIERS = {
+    "section_a": [
+        {"unit_id": 6, "code": "P1-6", "project_id": 1, "project_name": "New Capital",
+         "zone_name": "Zone#10", "unit_type_name": "Type#20",
+         "vintage_bucket_label": "2022–2023", "sale_date": "2023-07-01",
+         "realized_pm2": 35_000.0, "group_median_pm2": 20_250.0,
+         "deviation_pct": 72.84, "direction": "above", "is_confirmed": True},
+    ],
+    "section_b": [
+        {"unit_id": 7, "code": "S-7", "project_id": 1, "project_name": "New Capital",
+         "unit_type_name": "Type#21", "sale_date": "2022-02-01",
+         "list_total": 2_000_000.0, "realized_total": 1_000_000.0,
+         "discount_pct": 50.0, "kind": "deep", "is_confirmed": False},
+    ],
+    "section_a_count": 1, "section_a_below_count": 0, "section_a_above_count": 1,
+    "section_b_count": 1, "section_b_deep_count": 1, "section_b_premium_count": 0,
+    "confirmed_count": 1,
+    "insufficient_peers_count": 3, "eligible_group_count": 1, "population_count": 9,
+    "projects": [
+        {"project_id": 1, "project_name": "New Capital",
+         "section_a_count": 1, "section_b_count": 1, "confirmed_count": 1},
+        {"project_id": 2, "project_name": "Cassette",
+         "section_a_count": 0, "section_b_count": 0, "confirmed_count": 0},
+    ],
+    "project_count": 2,
+    "thresholds": {"min_group_size": 5, "iqr_mult": 1.5, "min_dev_pct": 15.0,
+                   "deep_discount_pct": 25.0, "premium_pct": -10.0, "vintage_bucket_years": 2},
+    "reference_date": "2026-06-22", "as_of": "2026-06-22T10:00:00+00:00",
+    "cache_status": "fresh", "rpc_duration_ms": 90,
+}
+
+
+def test_pricing_outliers_200_with_scoped_module_grant() -> None:
+    """A non-admin user granted the module gets the rendered Pricing Outliers page."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_pricing_outliers_overview",
+            new=AsyncMock(return_value=_MOCK_OUTLIERS),
+        ):
+            r = c.get(_OUTLIERS_URL)
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("content-type", "")
+        body = r.text
+        # Page title + section labels (EN default).
+        assert "Pricing Outliers" in body
+        assert "peer price/m² outliers" in body
+        assert "discount outliers vs own list" in body
+        # Flagged rows + the confirmed badge rendered from the mock.
+        assert "P1-6" in body
+        assert "S-7" in body
+        assert "2022–2023" in body
+        assert "Above peers" in body
+        assert "Deep discount" in body
+        # CSV export wiring (reuses window.exportTableCSV by table id) + the contracted caveat.
+        assert "exportTableCSV('po-section-a-table')" in body
+        assert "exportTableCSV('po-section-b-table')" in body
+        assert "contracted value" in body
+        # Sidebar entry for the new page present for a user with the module.
+        assert 'href="/projects-inventory/pricing-outliers"' in body
+    finally:
+        _cleanup()
+
+
+def test_pricing_outliers_403_without_module_grant() -> None:
+    c = _client_with(_OTHER_MODULE_RECORD)
+    try:
+        r = c.get(_OUTLIERS_URL, headers={"Accept": "text/html"})
+        assert r.status_code == 403
+    finally:
+        _cleanup()
+
+
+def test_pricing_outliers_unauthenticated_redirects_to_login() -> None:
+    c = TestClient(app, raise_server_exceptions=True, follow_redirects=False)
+    r = c.get(_OUTLIERS_URL)
     assert r.status_code == 302
     assert "/login" in r.headers.get("location", "")
 

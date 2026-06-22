@@ -114,3 +114,47 @@ SOLD_STATES: frozenset[str] = frozenset(
 AVAILABLE_STATES: frozenset[str] = frozenset(
     s for s, b in STATE_TO_BUCKET.items() if b == BUCKET_AVAILABLE
 )
+
+
+# ── Slice 2.5 — Pricing Outliers (LOCKED) ─────────────────────────────────────
+# A board-facing READ-ONLY view that surfaces sold units priced/sold anomalously,
+# scoped to the same NC + Cassette population as Slice 2 (La Puerta excluded). Two
+# vintage-CONTROLLED signals — see docs/PROJECTS_INVENTORY_PRICING_DISCOVERY.md §5.
+#
+# The unit's product-type peer attribute (→ rs.structure.unit.type). High cardinality
+# (163 distinct, 99% coverage); used coarsely as one leg of the Section-A peer key. A
+# unit with no unit_type_id simply groups under a None type (still language-neutral).
+UNIT_TYPE_FIELD = "unit_type_id"
+
+# VINTAGE / sale date. The TRUE sale date is NOT on the contract (its reservation_date /
+# create_date are Nov-2025 migration stamps). It lives one more hop out:
+#   unit → rs.contract (non-cancel).payment_term_id → rs.payment.term.contract_date
+# Confirmed live (probe 2026-06-22): a `date` field, 100% coverage over the in-scope
+# non-cancel contracts, spanning 2018–2025, and every unit's contracts agree on it.
+CONTRACT_PAYMENT_TERM_FIELD = "payment_term_id"
+PAYMENT_TERM_MODEL = "rs.payment.term"
+PAYMENT_TERM_DATE_FIELD = "contract_date"
+
+# Vintage bucket width in years — a 2-year bucket (e.g. 2022 & 2023 → "2022–2023"),
+# bucket = (year // VINTAGE_BUCKET_YEARS) * VINTAGE_BUCKET_YEARS. Coarse enough to keep
+# peer groups populated, fine enough to control the dominant time confound on price/m².
+VINTAGE_BUCKET_YEARS = 2
+
+# Section A — peer realized price/m² outliers (vintage-controlled). Peer key =
+# (zone_id, unit_type_id, vintage_bucket). A unit is FLAGGED iff BOTH hold:
+#   (i)  Tukey fence: realized_pm2 < Q1 − IQR_MULT·IQR  OR  > Q3 + IQR_MULT·IQR, AND
+#   (ii) |realized_pm2 − group_median| / group_median * 100 ≥ MIN_DEV_PCT.
+# Groups with < MIN_GROUP_SIZE in-scope units are NOT evaluated (counted as
+# "insufficient peers" for the footnote). All three are TUNABLE named constants.
+OUTLIER_MIN_GROUP_SIZE = 5
+OUTLIER_IQR_MULT = 1.5
+OUTLIER_MIN_DEV_PCT = 15.0
+
+# Section B — discount outliers vs the unit's OWN list price (amount). discount_pct =
+# (amount − realized_total) / amount * 100, only when amount > 0. FLAG deep-discount if
+# discount_pct ≥ DEEP_DISCOUNT_PCT; FLAG premium (sold above own list) if
+# discount_pct ≤ PREMIUM_PCT. Both are TUNABLE named constants. The 25% default sits
+# safely above the ~10–16% list-over-realized drift seen on 2024–2025 vintages — which
+# is why every row also shows its sale date (read the discount in vintage context).
+OUTLIER_DEEP_DISCOUNT_PCT = 25.0
+OUTLIER_PREMIUM_PCT = -10.0

@@ -9,6 +9,9 @@ GET /api/v1/projects-inventory/drill/{level}/{parent_id} — one hierarchy scope
 GET /api/v1/projects-inventory/value-area/overview — LIST value of available inventory,
     CONTRACTED (realized) value of sold units, the list-vs-realized gap, and area
     metrics, for New Capital + Cassette (La Puerta excluded). Read-only. [Slice 2]
+GET /api/v1/projects-inventory/pricing-outliers/overview — sold units priced/sold
+    anomalously: peer realized price/m² outliers (vintage-controlled, Section A) and
+    discount outliers vs own list (Section B), NC + Cassette. Read-only. [Slice 2.5]
 
 RBAC: module-gated at include_router level in router.py via
 require_module_api("projects_inventory"); additionally requires an authenticated
@@ -26,6 +29,7 @@ from backend.core.limiter import limiter
 from backend.modules.projects_inventory.schemas import (
     DataQualityOverview,
     DrillLevel,
+    PricingOutliersOverview,
     ProjectsInventoryDrill,
     ProjectsInventoryOverview,
     ValueAreaOverview,
@@ -36,6 +40,9 @@ from backend.modules.projects_inventory.services.data_quality_service import (
 from backend.modules.projects_inventory.services.inventory_service import (
     get_inventory_drill,
     get_inventory_overview,
+)
+from backend.modules.projects_inventory.services.pricing_outliers_service import (
+    get_pricing_outliers_overview,
 )
 from backend.modules.projects_inventory.services.value_service import (
     get_value_area_overview,
@@ -94,6 +101,35 @@ async def value_area_overview(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("Projects inventory value-area — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/pricing-outliers/overview",
+    summary="Projects Inventory — Pricing Outliers (peer price/m² + discount), NC + Cassette",
+    response_model=PricingOutliersOverview,
+)
+@limiter.limit("60/minute")
+async def pricing_outliers_overview(
+    request: Request,
+    response: Response,
+    _user: str = Depends(get_current_user),
+) -> dict | JSONResponse:
+    """Sold units priced/sold anomalously, two vintage-controlled signals: peer realized
+    price/m² outliers (Section A) and discount-vs-own-list outliers (Section B), with the
+    units flagged in BOTH marked "confirmed" — combined + per project for New Capital +
+    Cassette. La Puerta is excluded. Realized is contracted value, not cash collected."""
+    try:
+        data = await get_pricing_outliers_overview()
+    except OdooQueryError:
+        logger.warning("Projects inventory pricing-outliers — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        logger.error("Projects inventory pricing-outliers — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"

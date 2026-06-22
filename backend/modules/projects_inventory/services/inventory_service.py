@@ -62,8 +62,11 @@ _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
 # `amount` (LIST price) + `total_area` (m²) are fetched here too so the SINGLE cached
 # unit set also feeds Slice 2 (value_service) — both slices share one units query. The
 # Slice-1 board/drill ignore these two fields; they only matter to value_service.
+# `unit_type_id` rides along for Slice 2.5 (pricing_outliers_service) as one leg of its
+# peer key — the board/drill/value slices ignore it; it only matters to that service.
 _UNIT_FIELDS = ["id", "state", "project_id", "phase_id", "zone_id", "building_id",
-                "code", "name", domain.UNIT_AMOUNT_FIELD, domain.UNIT_AREA_FIELD]
+                "code", "name", domain.UNIT_AMOUNT_FIELD, domain.UNIT_AREA_FIELD,
+                domain.UNIT_TYPE_FIELD]
 
 _CACHE_KEY_PREFIX = "projects_inventory:overview"
 # The RAW unit rows are cached under their OWN key, shared by the board overview AND

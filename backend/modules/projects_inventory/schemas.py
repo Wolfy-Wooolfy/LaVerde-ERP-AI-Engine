@@ -181,3 +181,93 @@ class DataQualityOverview(BaseModel):
     as_of: str                         # UTC ISO 8601 of the query
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int               # 0 when served from cache
+
+
+# ── Slice 2.5 — Pricing Outliers (NC + Cassette; La Puerta excluded) ───────────
+# Two vintage-controlled signals over the SOLD-with-contract population. Section A =
+# peer realized price/m² outliers (Tukey + min-deviation, vintage-bucketed peer groups);
+# Section B = discount outliers vs the unit's own list price. A unit flagged in BOTH is
+# "confirmed". Realized = contracted value (rs.contract.sales_price), NOT cash collected.
+
+# A unit cheaper than its peers (below the lower fence) vs dearer (above the upper).
+OutlierDirection = Literal["below", "above"]
+# Sold far below own list (deep discount) vs above own list (premium).
+OutlierKind = Literal["deep", "premium"]
+
+
+class PricingOutlierARow(BaseModel):
+    """One Section-A row — a unit whose realized price/m² is an outlier within its
+    (zone, unit-type, vintage-bucket) peer group."""
+    unit_id: int
+    code: str
+    project_id: int
+    project_name: str
+    zone_name: str
+    unit_type_name: str
+    vintage_bucket_label: str          # e.g. "2022–2023"
+    sale_date: str                     # YYYY-MM-DD (rs.payment.term.contract_date)
+    realized_pm2: float                # realized_total / total_area
+    group_median_pm2: float            # peer-group median realized price/m²
+    deviation_pct: float               # signed (realized_pm2 − median)/median * 100
+    direction: OutlierDirection
+    is_confirmed: bool                 # also flagged in Section B
+
+
+class PricingOutlierBRow(BaseModel):
+    """One Section-B row — a unit sold far from its own list price."""
+    unit_id: int
+    code: str
+    project_id: int
+    project_name: str
+    unit_type_name: str
+    sale_date: str                     # YYYY-MM-DD
+    list_total: float                  # unit.amount (list)
+    realized_total: float              # Σ non-cancel contract.sales_price
+    discount_pct: float                # (list − realized)/list * 100 (signed)
+    kind: OutlierKind
+    is_confirmed: bool                 # also flagged in Section A
+
+
+class PricingOutliersProjectCount(BaseModel):
+    project_id: int
+    project_name: str
+    section_a_count: int
+    section_b_count: int
+    confirmed_count: int
+
+
+class PricingOutliersThresholds(BaseModel):
+    """The tunable named constants the run used — echoed so the UI footnote + any tuning
+    read the live values, never a hardcoded copy."""
+    min_group_size: int
+    iqr_mult: float
+    min_dev_pct: float
+    deep_discount_pct: float
+    premium_pct: float
+    vintage_bucket_years: int
+
+
+class PricingOutliersOverview(BaseModel):
+    section_a: list[PricingOutlierARow]   # sorted by |deviation_pct| desc
+    section_b: list[PricingOutlierBRow]   # deep (discount desc) first, then premium
+
+    section_a_count: int
+    section_a_below_count: int
+    section_a_above_count: int
+    section_b_count: int
+    section_b_deep_count: int
+    section_b_premium_count: int
+    confirmed_count: int                  # flagged in BOTH sections
+
+    insufficient_peers_count: int         # units in sub-MIN_GROUP_SIZE peer groups (footnote)
+    eligible_group_count: int             # peer groups large enough to evaluate
+    population_count: int                 # in-scope sold-with-contract-and-sale-date units
+
+    projects: list[PricingOutliersProjectCount]
+    project_count: int
+    thresholds: PricingOutliersThresholds
+
+    reference_date: str                   # Cairo-local YYYY-MM-DD
+    as_of: str                            # UTC ISO 8601 of the query
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int                  # 0 when served from cache

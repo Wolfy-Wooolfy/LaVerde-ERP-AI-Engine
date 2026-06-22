@@ -38,6 +38,9 @@ from backend.modules.projects_inventory.services.inventory_service import (
 from backend.modules.projects_inventory.services.value_service import (
     get_value_area_overview,
 )
+from backend.modules.projects_inventory.services.pricing_outliers_service import (
+    get_pricing_outliers_overview,
+)
 from backend.modules.projects_inventory.services.data_quality_service import (
     get_data_quality_overview,
 )
@@ -386,6 +389,29 @@ async def projects_inventory_value_area(
         "va": data,
     })
     return templates.TemplateResponse(request, "projects_inventory/value_area.html", ctx)
+
+
+@router.get(
+    "/projects-inventory/pricing-outliers",
+    response_class=HTMLResponse,
+    summary="Projects Inventory — Pricing Outliers (HTML)",
+    dependencies=[Depends(require_module_html("projects_inventory"))],
+)
+async def projects_inventory_pricing_outliers(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Server-side render of the Pricing Outliers board (Slice 2.5: peer realized price/m²
+    # outliers — vintage-controlled — and discount-vs-own-list outliers, NC + Cassette,
+    # La Puerta excluded). Read-only; the service owns the population, both flag sets,
+    # the confirmed join and every reconciliation.
+    data = await get_pricing_outliers_overview()
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "projects_inventory_pricing_outliers",
+        "po": data,
+    })
+    return templates.TemplateResponse(request, "projects_inventory/pricing_outliers.html", ctx)
 
 
 @router.get(
