@@ -546,6 +546,20 @@ _MOCK_DQ = {
         {"key": "no_list_price", "count": 0, "items": []},
     ],
     "total_issues": 2,
+    "check_d": {
+        "key": "implausible_list_price",
+        "count": 1,
+        "items": [
+            {"unit_id": 5501, "code": "HS-STUDIO-12", "project_name": "New Capital",
+             "unit_type_name": "HS-Studio", "state": "sold", "list_pm2": 65000.0,
+             "meter_price": 65000.0, "anchor_realized_pm2": 20000.0, "ratio": 3.25,
+             "list_total": 3_250_000.0, "signal": "peer"},
+        ],
+        "tier1_count": 1, "tier2a_count": 0, "tier2b_count": 0,
+        "evaluated_count": 1734, "unevaluable_count": 84,
+        "thresholds": {"list_trust_k": 2.0, "type_k": 3.0, "type_spread_max": 2.5,
+                       "impossible_k": 5.0, "min_group_size": 5},
+    },
     "reference_date": "2026-06-19",
     "as_of": "2026-06-19T10:00:00+00:00",
     "cache_status": "fresh",
@@ -562,12 +576,16 @@ def test_data_quality_200_with_admin(client: TestClient) -> None:
         r = client.get(_DQ_URL)
     assert r.status_code == 200
     body = r.json()
-    for key in ("checks", "total_issues", "reference_date", "as_of",
+    for key in ("checks", "total_issues", "check_d", "reference_date", "as_of",
                 "cache_status", "rpc_duration_ms"):
         assert key in body, f"Response missing key: {key!r}"
     assert body["total_issues"] == 2
     assert {c["key"] for c in body["checks"]} == {
         "no_contract", "broken_hierarchy", "no_list_price"}
+    # Check D rides alongside as a separate object with its tiered counts.
+    assert body["check_d"]["key"] == "implausible_list_price"
+    assert body["check_d"]["count"] == 1
+    assert body["check_d"]["items"][0]["signal"] == "peer"
     assert "private, max-age=60" in r.headers.get("cache-control", "")
     assert r.headers.get("x-cache-status") == "fresh"
 

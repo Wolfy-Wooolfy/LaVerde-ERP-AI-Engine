@@ -126,8 +126,99 @@
   </div>
   {% endif %}
 
-  {# ── 6. FOOTER CAVEAT ────────────────────────────────────────────────────── #}
-  <div class="text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed pt-1">
+  {# ── 6. SECTION D — implausible list price/m² (NC + Cassette only) ─────────
+     A separate object (dq.check_d): PRICED units whose list/m² is implausibly high vs
+     comparable realized prices. Sorted by ratio desc; per-section CSV via the shared
+     window.exportTableCSV(tableId). La Puerta is out of scope. #}
+  {% set d = dq.check_d %}
+  <section class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card overflow-hidden">
+    <div class="px-5 py-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+          {{ _t("dq_d_title") }}
+          {% if d.count > 0 %}
+          <span class="text-[11px] bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300 px-2 py-0.5 rounded-full font-semibold tabular-nums">{{ d.count }}</span>
+          {% else %}
+          <span class="text-[11px] bg-success-100 dark:bg-success-900/40 text-success-700 dark:text-success-400 px-2 py-0.5 rounded-full font-semibold">✓</span>
+          {% endif %}
+        </h2>
+        <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_hint") }}</p>
+        {% if d.count > 0 %}
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-neutral-500 dark:text-neutral-400">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-neutral-200 dark:border-neutral-700">{{ _t("dq_d_signal_peer") }} <span class="font-mono tabular-nums text-neutral-700 dark:text-neutral-200">{{ d.tier1_count }}</span></span>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-neutral-200 dark:border-neutral-700">{{ _t("dq_d_signal_type") }} <span class="font-mono tabular-nums text-neutral-700 dark:text-neutral-200">{{ d.tier2a_count }}</span></span>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-neutral-200 dark:border-neutral-700">{{ _t("dq_d_signal_impossible") }} <span class="font-mono tabular-nums text-neutral-700 dark:text-neutral-200">{{ d.tier2b_count }}</span></span>
+        </div>
+        {% endif %}
+      </div>
+      {% if d.count > 0 %}
+      <button type="button" onclick="window.exportTableCSV('dq-d-table')"
+              class="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        {{ _t("dq_download_csv") }}
+      </button>
+      {% endif %}
+    </div>
+
+    {% if d.count > 0 %}
+    <div class="overflow-x-auto">
+      <table id="dq-d-table" class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-neutral-100 dark:border-neutral-800">
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_col_code") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_col_project") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_unit_type") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_state") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_list_pm2") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_meter_price") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_anchor") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_ratio") }}</th>
+            <th class="px-4 py-2.5 text-end text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_list_total") }}</th>
+            <th class="px-4 py-2.5 text-start text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ _t("dq_d_col_signal") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in d['items'] %}
+          <tr class="border-b border-neutral-50 dark:border-neutral-800/50 hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors">
+            <td class="px-4 py-2.5 font-mono text-neutral-900 dark:text-neutral-100 whitespace-nowrap">{{ r.code }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ r.project_name }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">{{ r.unit_type_name }}</td>
+            <td class="px-4 py-2.5 whitespace-nowrap">
+              {% if r.state == 'sold' %}
+              <span class="text-[11px] bg-neutral-100 dark:bg-neutral-700/60 text-neutral-600 dark:text-neutral-300 px-2 py-0.5 rounded-full font-medium">{{ _t("dq_d_state_sold") }}</span>
+              {% else %}
+              <span class="text-[11px] bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-300 px-2 py-0.5 rounded-full font-medium">{{ _t("dq_d_state_unsold") }}</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums font-semibold text-danger-700 dark:text-danger-400 whitespace-nowrap">{{ "{:,.0f}".format(r.list_pm2) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{{ "{:,.0f}".format(r.meter_price) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{{ "{:,.0f}".format(r.anchor_realized_pm2) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums font-semibold text-danger-700 dark:text-danger-400 whitespace-nowrap">&times;{{ "{:,.1f}".format(r.ratio) }}</td>
+            <td class="px-4 py-2.5 text-end font-mono tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{{ "{:,.0f}".format(r.list_total) }}</td>
+            <td class="px-4 py-2.5 whitespace-nowrap">
+              {% if r.signal == 'peer' %}
+              <span class="text-[11px] bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full font-medium">{{ _t("dq_d_signal_peer") }}</span>
+              {% elif r.signal == 'type' %}
+              <span class="text-[11px] bg-warning-100 dark:bg-warning-900/40 text-warning-700 dark:text-warning-300 px-2 py-0.5 rounded-full font-medium">{{ _t("dq_d_signal_type") }}</span>
+              {% else %}
+              <span class="text-[11px] bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300 px-2 py-0.5 rounded-full font-medium">{{ _t("dq_d_signal_impossible") }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="px-5 py-8 text-center text-sm text-success-600 dark:text-success-400 font-medium">{{ _t("dq_no_issues") }}</div>
+    {% endif %}
+  </section>
+
+  {# ── 7. FOOTER CAVEAT ────────────────────────────────────────────────────── #}
+  <div class="text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed space-y-1 pt-1">
+    <p>&middot; {{ _t("dq_d_note_meter") }}</p>
+    <p>&middot; {{ _t("dq_d_note_impossible") }}</p>
+    <p>&middot; {{ "{:,}".format(d.unevaluable_count) }} {{ _t("dq_d_unevaluable") }}</p>
     <p>&middot; {{ _t("dq_footnote_readonly") }}</p>
   </div>
 

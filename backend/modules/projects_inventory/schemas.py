@@ -173,9 +173,62 @@ class DataQualityCheck(BaseModel):
     items: list[DataQualityItem]       # sorted by project_name then code
 
 
+# ── Check D — implausible list price/m² (NC + Cassette; admin-only, read-only) ─
+# Flags PRICED units (sold AND unsold) whose list price/m² is implausibly high vs what
+# comparable units realize — a list-price data error to fix in Odoo. Three tiers fire,
+# deduped to one shown signal by precedence: peer (Tier 1) → type (Tier 2a) →
+# impossible (Tier 2b). Scoped to New Capital + Cassette; La Puerta excluded. This is a
+# SEPARATE object on the response — it is NOT folded into `checks`/`total_issues` (those
+# stay the A/B/C completeness defects).
+
+# The shown anchor's origin: a peer-group median, a unit-type median, or a unit-type max.
+ListPriceSignal = Literal["peer", "type", "impossible"]
+# Whether the flagged unit is sold (contracted/delivered) or still unsold.
+UnitSaleState = Literal["sold", "unsold"]
+
+
+class DataQualityListPriceRow(BaseModel):
+    """One Check-D flagged unit — its list price/m² is implausibly high vs comparable
+    realized prices. `meter_price` is the editable per-m² field; for these rows it equals
+    `list_pm2`. `ratio` = list_pm2 / anchor_realized_pm2."""
+    unit_id: int
+    code: str
+    project_name: str
+    unit_type_name: str
+    state: UnitSaleState
+    list_pm2: float                    # amount / total_area (the implausible list price/m²)
+    meter_price: float                 # unit.meter_price (== list_pm2 for these rows)
+    anchor_realized_pm2: float         # the comparable realized price/m² the list dwarfs
+    ratio: float                       # list_pm2 / anchor_realized_pm2
+    list_total: float                  # unit.amount (the list total)
+    signal: ListPriceSignal
+
+
+class DataQualityListPriceThresholds(BaseModel):
+    """The tunable named constants the Check-D run used (echoed for the UI footnote)."""
+    list_trust_k: float                # Tier 1 multiplier (OUTLIER_LIST_TRUST_K)
+    type_k: float                      # Tier 2a multiplier (DQ_LIST_TYPE_K)
+    type_spread_max: float             # Tier 2a low-spread gate (DQ_LIST_TYPE_SPREAD_MAX)
+    impossible_k: float                # Tier 2b multiplier (DQ_LIST_IMPOSSIBLE_K)
+    min_group_size: int                # peer eligibility + min sold per type baseline
+
+
+class DataQualityListPriceCheck(BaseModel):
+    key: Literal["implausible_list_price"]
+    count: int                         # == len(items) == tier1 + tier2a + tier2b
+    items: list[DataQualityListPriceRow]   # flagged units, sorted by ratio desc
+    tier1_count: int                   # shown signal "peer"
+    tier2a_count: int                  # shown signal "type"
+    tier2b_count: int                  # shown signal "impossible"
+    evaluated_count: int               # priced units (amount>0 & area>0) examined in scope
+    unevaluable_count: int             # priced units with no eligible peer group / type baseline
+    thresholds: DataQualityListPriceThresholds
+
+
 class DataQualityOverview(BaseModel):
     checks: list[DataQualityCheck]     # A (no_contract), B (broken_hierarchy), C (no_list_price)
-    total_issues: int                  # Σ per-check counts
+    total_issues: int                  # Σ per-check counts (A/B/C only)
+    check_d: DataQualityListPriceCheck  # D — implausible list price (NC + Cassette), separate
 
     reference_date: str                # Cairo-local YYYY-MM-DD
     as_of: str                         # UTC ISO 8601 of the query

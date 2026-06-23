@@ -27,8 +27,17 @@ and asserted identity-equal; nothing is hardcoded here):
   C — Sold unit with NO list price  (defect_type "no_list_price")
       sold unit whose `amount` is 0 / falsy. A standing guard — 0 today.
 
-Scope: all 3 projects. La Puerta's 129 unpriced AVAILABLE units are EXPECTED (early-stage),
-NEVER a defect — Check C only looks at SOLD units, so they are never flagged.
+  D — Implausible list price/m²  (separate `check_d` object, NOT in checks/total_issues)
+      PRICED units (sold AND unsold) whose list price/m² (amount ÷ total_area) is
+      implausibly high vs what comparable units actually realize — a list-price DATA
+      ERROR to correct in Odoo. Scoped to New Capital + Cassette (La Puerta excluded);
+      baselines come from SOLD units' realized price/m². Three deduped tiers (peer →
+      type → impossible) — see domain.py and _check_d. The dominant target is the
+      HS-Studio "65,000/m²" regime (studios realize ~20,000/m²).
+
+Scope: Checks A/B/C cover all 3 projects; Check D is New Capital + Cassette only. La
+Puerta's 129 unpriced AVAILABLE units are EXPECTED (early-stage), NEVER a defect — Check
+C only looks at SOLD units, and Check D excludes La Puerta entirely.
 
 READ-ONLY: _assert_read_only() runs at entry; only search_read is ever issued. Every
 unmapped unit state is raised on (never silently dropped), mirroring Slice 1/2.
@@ -45,10 +54,24 @@ from backend.core.exceptions import OdooQueryError, ReadOnlyViolationError
 from backend.modules.projects_inventory.domain import (
     CONTRACT_CANCEL_STATE,
     CONTRACT_MODEL,
+    CONTRACT_PAYMENT_TERM_FIELD,
+    CONTRACT_PRICE_FIELD,
     CONTRACT_STATE_FIELD,
     CONTRACT_UNIT_FIELD,
+    DQ_LIST_IMPOSSIBLE_K,
+    DQ_LIST_TYPE_K,
+    DQ_LIST_TYPE_SPREAD_MAX,
+    OUTLIER_LIST_TRUST_K,
+    OUTLIER_MIN_GROUP_SIZE,
+    PAYMENT_TERM_DATE_FIELD,
+    PAYMENT_TERM_MODEL,
     SOLD_STATES,
     UNIT_AMOUNT_FIELD,
+    UNIT_AREA_FIELD,
+    UNIT_METER_PRICE_FIELD,
+    UNIT_TYPE_FIELD,
+    VALUE_SCOPE_PROJECT_IDS,
+    VINTAGE_BUCKET_YEARS,
 )
 from backend.modules.projects_inventory.services import cache as _cache
 from backend.modules.projects_inventory.services.inventory_service import (
@@ -62,6 +85,10 @@ from backend.shared.odoo.client import OdooClient
 _CACHE_KEY_PREFIX = "projects_inventory:dq:overview"
 _CONTRACTS_CACHE_KEY_PREFIX = "projects_inventory:dq:contracts"
 _PARENTS_CACHE_KEY_PREFIX = "projects_inventory:dq:parents"   # per parent model
+# Check D owns its OWN contracts/terms reads (it needs sales_price + payment_term, which
+# Check A's contracts read does not carry), scoped to the NC + Cassette sold population.
+_D_CONTRACTS_CACHE_KEY_PREFIX = "projects_inventory:dq:d:contracts"
+_D_TERMS_CACHE_KEY_PREFIX = "projects_inventory:dq:d:terms"
 _CAIRO_TZ = ZoneInfo("Africa/Cairo")
 _CONTRACT_CHUNK = 200   # search_read sold-unit contracts in id chunks (matches Slice 2)
 
@@ -69,6 +96,18 @@ _CONTRACT_CHUNK = 200   # search_read sold-unit contracts in id chunks (matches 
 CHECK_NO_CONTRACT = "no_contract"
 CHECK_BROKEN_HIERARCHY = "broken_hierarchy"
 CHECK_NO_LIST_PRICE = "no_list_price"
+CHECK_IMPLAUSIBLE_LIST = "implausible_list_price"   # Check D
+
+# Check D shown-signal vocabulary (precedence Tier 1 → Tier 2a → Tier 2b).
+SIGNAL_PEER = "peer"          # Tier 1 — peer-group median realized price/m²
+SIGNAL_TYPE = "type"          # Tier 2a — unit-type median realized price/m²
+SIGNAL_IMPOSSIBLE = "impossible"  # Tier 2b — unit-type max realized price/m²
+
+# Check D reads sales_price + payment_term off the contract (its own read).
+_D_CONTRACT_FIELDS = [
+    CONTRACT_UNIT_FIELD, CONTRACT_PRICE_FIELD, CONTRACT_STATE_FIELD,
+    CONTRACT_PAYMENT_TERM_FIELD,
+]
 
 # Authoritative chain links, in CANONICAL order (the first break a unit has names its
 # defect). Each tuple: (defect_type, unit child m2o, child kind word, parent MODEL,
@@ -172,6 +211,72 @@ async def _get_parent_map_cached(client: OdooClient, model: str, parent_field: s
     return pmap
 
 
+async def _fetch_d_contracts(client: OdooClient, unit_ids: list[int]) -> list[dict]:
+    """search_read rs.contract (unit_id, sales_price, state, payment_term_id) for the given
+    sold unit ids (NC + Cassette), in id chunks. Read-only — mirrors the Slice 2.5 fetch.
+    Check A's contracts read carries only (unit_id, state); Check D needs the realized
+    price + the payment term that resolves the sale date, so it owns this separate read."""
+    rows: list[dict] = []
+    for i in range(0, len(unit_ids), _CONTRACT_CHUNK):
+        chunk = unit_ids[i:i + _CONTRACT_CHUNK]
+        part = await client.execute_kw(
+            CONTRACT_MODEL,
+            "search_read",
+            args=[[(CONTRACT_UNIT_FIELD, "in", chunk)]],
+            kwargs={"fields": _D_CONTRACT_FIELDS},
+        )
+        rows.extend(part)
+    return rows
+
+
+async def _get_d_contracts_cached(client: OdooClient, unit_ids: list[int]) -> list[dict]:
+    """Cached (60s TTL) read of the NC + Cassette sold-unit contracts for Check D. The
+    scoped sold-unit id set is deterministic from the shared units cache, so a fixed key
+    is safe."""
+    cache_key = _cache.make_key(_D_CONTRACTS_CACHE_KEY_PREFIX)
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"DQ-D contracts cache hit: {cache_key}")
+        return cached
+    logger.info(f"DQ-D contracts cache miss: {cache_key} — querying Odoo")
+    rows = await _fetch_d_contracts(client, unit_ids)
+    _cache.set(cache_key, rows)
+    return rows
+
+
+async def _fetch_terms(client: OdooClient, term_ids: list[int]) -> dict[int, str]:
+    """search_read rs.payment.term (id, contract_date) → {term_id: 'YYYY-MM-DD'}, in id
+    chunks. contract_date is the TRUE sale date (Slice 2.5). Read-only."""
+    out: dict[int, str] = {}
+    for i in range(0, len(term_ids), _CONTRACT_CHUNK):
+        chunk = term_ids[i:i + _CONTRACT_CHUNK]
+        part = await client.execute_kw(
+            PAYMENT_TERM_MODEL,
+            "search_read",
+            args=[[("id", "in", chunk)]],
+            kwargs={"fields": ["id", PAYMENT_TERM_DATE_FIELD]},
+        )
+        for r in part:
+            d = r.get(PAYMENT_TERM_DATE_FIELD)
+            if d:
+                out[int(r["id"])] = str(d)[:10]
+    return out
+
+
+async def _get_terms_cached(client: OdooClient, term_ids: list[int]) -> dict[int, str]:
+    """Cached (60s TTL) payment-term → contract_date map for Check D. The referenced term
+    id set is deterministic from the contracts read, so a fixed key is safe."""
+    cache_key = _cache.make_key(_D_TERMS_CACHE_KEY_PREFIX)
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"DQ-D terms cache hit: {cache_key}")
+        return cached
+    logger.info(f"DQ-D terms cache miss: {cache_key} — querying Odoo")
+    tmap = await _fetch_terms(client, term_ids)
+    _cache.set(cache_key, tmap)
+    return tmap
+
+
 def _check_no_contract(sold: list[dict], covered: set[int]) -> list[dict]:
     """Check A — sold units with no non-cancel contract. detail carries the list amount."""
     items: list[dict] = []
@@ -227,8 +332,227 @@ def _check(key: str, items: list[dict]) -> dict:
     return {"key": key, "count": len(items), "items": items}
 
 
+# ── Check D — implausible list price/m² (NC + Cassette; read-only) ─────────────
+
+
+def _c2(value: float) -> float:
+    """Round to cents — the deterministic basis the service and the live verify share, so
+    a tier threshold never flips on float noise (mirrors pricing_outliers_service)."""
+    return round(value, 2)
+
+
+def _vintage_bucket(year: int) -> int:
+    """2-year bucket floor (2022 & 2023 → 2022) — the SAME bucketing Slice 2.5 uses."""
+    return (year // VINTAGE_BUCKET_YEARS) * VINTAGE_BUCKET_YEARS
+
+
+def _quantile(sorted_vals: list[float], q: float) -> float:
+    """Inclusive linear quantile (numpy 'linear') — identical to pricing_outliers_service
+    and the live verify, so baselines match to the bit."""
+    n = len(sorted_vals)
+    if n == 1:
+        return sorted_vals[0]
+    pos = (n - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, n - 1)
+    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (pos - lo)
+
+
+def _median(vals: list[float]) -> float:
+    """Median via the inclusive quantile (raw, un-rounded — the comparison basis)."""
+    return _quantile(sorted(vals), 0.5)
+
+
+def _realized_and_terms(
+    contract_rows: list[dict],
+) -> tuple[dict[int, float], dict[int, set[int]]]:
+    """From the non-cancel contracts, build realized[unit_id] = Σ sales_price and
+    term_ids[unit_id] = set of payment_term_ids (for the sale date). A unit appears iff it
+    has ≥1 non-cancel contract (mirrors pricing_outliers_service._realized_and_terms)."""
+    realized: dict[int, float] = {}
+    term_ids: dict[int, set[int]] = {}
+    for ct in contract_rows:
+        if ct.get(CONTRACT_STATE_FIELD) == CONTRACT_CANCEL_STATE:
+            continue
+        uid = _m2o(ct.get(CONTRACT_UNIT_FIELD))[0]
+        if uid is None:
+            continue
+        realized[uid] = realized.get(uid, 0.0) + _num(ct.get(CONTRACT_PRICE_FIELD))
+        ptid = _m2o(ct.get(CONTRACT_PAYMENT_TERM_FIELD))[0]
+        if ptid is not None:
+            term_ids.setdefault(uid, set()).add(ptid)
+    return realized, term_ids
+
+
+def _sale_date_for_unit(
+    unit_term_ids: set[int], term_dates: dict[int, str]
+) -> Optional[str]:
+    """The unit's sale date = the EARLIEST contract_date across its non-cancel contracts'
+    payment terms (they agree live; min is the deterministic tie-break). None if no term
+    resolves to a date."""
+    dates = [term_dates[t] for t in unit_term_ids if t in term_dates]
+    return min(dates) if dates else None
+
+
+def _check_d(
+    scope_units: list[dict],
+    realized: dict[int, float],
+    term_ids: dict[int, set[int]],
+    term_dates: dict[int, str],
+) -> dict:
+    """Check D — flag PRICED units whose list price/m² is implausibly high vs comparable
+    realized prices (NC + Cassette only). Returns a DataQualityListPriceCheck dict.
+
+    `scope_units` are the units already filtered to VALUE_SCOPE_PROJECT_IDS and
+    state-classified. Baselines are built from SOLD units (those with realized value);
+    the three tiers (see domain.py) are deduped with precedence peer → type → impossible.
+    """
+    # 1) Sold realized population (sold + area>0 + realized) → realized_pm2 + vintage.
+    sold_pop: list[dict] = []
+    for u in scope_units:
+        if u["state"] not in SOLD_STATES:
+            continue
+        area = _num(u.get(UNIT_AREA_FIELD))
+        if area <= 0:
+            continue
+        uid = u["id"]
+        if uid not in realized:
+            continue   # sold but no non-cancel contract → no realized price/m²
+        sale_date = _sale_date_for_unit(term_ids.get(uid, set()), term_dates)
+        bucket = _vintage_bucket(int(sale_date[:4])) if sale_date else None
+        sold_pop.append({
+            "zone_id": _m2o(u.get("zone_id"))[0],
+            "unit_type_id": _m2o(u.get(UNIT_TYPE_FIELD))[0],
+            "vintage_bucket": bucket,
+            "realized_pm2": _c2(_c2(realized[uid]) / area),
+        })
+
+    # 2) Peer baseline — (zone, unit-type, 2-yr vintage) groups with ≥ MIN_GROUP_SIZE sold
+    #    members; store the MEDIAN realized price/m² (raw — the Tier-1 comparison basis).
+    peer_vals: dict[tuple, list[float]] = {}
+    for m in sold_pop:
+        if m["vintage_bucket"] is None:
+            continue
+        key = (m["zone_id"], m["unit_type_id"], m["vintage_bucket"])
+        peer_vals.setdefault(key, []).append(m["realized_pm2"])
+    peer_median: dict[tuple, float] = {}
+    for key, vals in peer_vals.items():
+        if len(vals) >= OUTLIER_MIN_GROUP_SIZE:
+            med = _median(vals)
+            if med > 0:
+                peer_median[key] = med
+
+    # 3) Type baseline — per unit-type with ≥ MIN_GROUP_SIZE sold members; store median,
+    #    max and spread = max / median (vintage not required for the type baseline).
+    type_vals: dict[Optional[int], list[float]] = {}
+    for m in sold_pop:
+        type_vals.setdefault(m["unit_type_id"], []).append(m["realized_pm2"])
+    type_baseline: dict[Optional[int], dict] = {}
+    for tid, vals in type_vals.items():
+        if len(vals) >= OUTLIER_MIN_GROUP_SIZE:
+            med = _median(vals)
+            mx = max(vals)
+            if med > 0:
+                type_baseline[tid] = {"median": med, "max": mx, "spread": mx / med}
+
+    # 4) Evaluate PRICED units (amount>0 & area>0), sold + unsold. A unit is flagged if any
+    #    tier fires; the shown signal follows precedence peer → type → impossible.
+    rows: list[dict] = []
+    tier1 = tier2a = tier2b = 0
+    evaluated = 0
+    unevaluable = 0
+    for u in scope_units:
+        area = _num(u.get(UNIT_AREA_FIELD))
+        amount = _num(u.get(UNIT_AMOUNT_FIELD))
+        if amount <= 0 or area <= 0:
+            continue
+        evaluated += 1
+        uid = u["id"]
+        is_sold = u["state"] in SOLD_STATES
+        zone_id = _m2o(u.get("zone_id"))[0]
+        type_id, type_name = _m2o(u.get(UNIT_TYPE_FIELD))
+        list_pm2 = _c2(amount / area)
+
+        # Tier-1 anchor: the unit's eligible peer-group median (sold + resolvable vintage).
+        peer_anchor: Optional[float] = None
+        if is_sold and uid in realized:
+            sale_date = _sale_date_for_unit(term_ids.get(uid, set()), term_dates)
+            if sale_date is not None:
+                key = (zone_id, type_id, _vintage_bucket(int(sale_date[:4])))
+                peer_anchor = peer_median.get(key)   # None if group not eligible
+
+        tb = type_baseline.get(type_id)
+
+        # Unevaluable: no eligible peer group AND no unit-type baseline (counted, not flagged).
+        if peer_anchor is None and tb is None:
+            unevaluable += 1
+            continue
+
+        fires_t1 = peer_anchor is not None and list_pm2 > OUTLIER_LIST_TRUST_K * peer_anchor
+        fires_t2a = (
+            tb is not None
+            and tb["spread"] < DQ_LIST_TYPE_SPREAD_MAX
+            and list_pm2 > DQ_LIST_TYPE_K * tb["median"]
+        )
+        fires_t2b = tb is not None and list_pm2 > DQ_LIST_IMPOSSIBLE_K * tb["max"]
+        if not (fires_t1 or fires_t2a or fires_t2b):
+            continue
+
+        if fires_t1:
+            signal, anchor = SIGNAL_PEER, peer_anchor
+            tier1 += 1
+        elif fires_t2a:
+            signal, anchor = SIGNAL_TYPE, tb["median"]
+            tier2a += 1
+        else:
+            signal, anchor = SIGNAL_IMPOSSIBLE, tb["max"]
+            tier2b += 1
+
+        rows.append({
+            "unit_id": uid,
+            "code": u.get("code") or "",
+            "project_name": _project_name(u),
+            "unit_type_name": (type_name or "—"),
+            "state": "sold" if is_sold else "unsold",
+            "list_pm2": list_pm2,
+            "meter_price": _c2(_num(u.get(UNIT_METER_PRICE_FIELD))),
+            "anchor_realized_pm2": _c2(anchor),
+            "ratio": _c2(list_pm2 / anchor),
+            "list_total": _c2(amount),
+            "signal": signal,
+        })
+
+    # Sort by ratio desc (largest over-list first), stable tie-break on code.
+    rows.sort(key=lambda r: (-r["ratio"], r["code"]))
+
+    if tier1 + tier2a + tier2b != len(rows):
+        raise RuntimeError(
+            f"Check D reconciliation FAILED: per-tier {tier1}+{tier2a}+{tier2b} "
+            f"!= flagged rows {len(rows)}."
+        )
+
+    return {
+        "key": CHECK_IMPLAUSIBLE_LIST,
+        "count": len(rows),
+        "items": rows,
+        "tier1_count": tier1,
+        "tier2a_count": tier2a,
+        "tier2b_count": tier2b,
+        "evaluated_count": evaluated,
+        "unevaluable_count": unevaluable,
+        "thresholds": {
+            "list_trust_k": OUTLIER_LIST_TRUST_K,
+            "type_k": DQ_LIST_TYPE_K,
+            "type_spread_max": DQ_LIST_TYPE_SPREAD_MAX,
+            "impossible_k": DQ_LIST_IMPOSSIBLE_K,
+            "min_group_size": OUTLIER_MIN_GROUP_SIZE,
+        },
+    }
+
+
 async def get_data_quality_overview(client: Optional[OdooClient] = None) -> dict:
-    """Return the Inventory Data Quality overview — Checks A, B and C across all projects.
+    """Return the Inventory Data Quality overview — Checks A, B and C across all projects,
+    plus Check D (implausible list price/m², New Capital + Cassette only).
 
     Args:
         client: optional injected OdooClient (tests pass a mock; production opens and
@@ -271,6 +595,17 @@ async def get_data_quality_overview(client: Optional[OdooClient] = None) -> dict
         parent_maps: dict[str, dict] = {}
         for defect_type, _cf, _ck, model, parent_field, _pk, _uf in _CHAIN_LINKS:
             parent_maps[defect_type] = await _get_parent_map_cached(_client, model, parent_field)
+
+        # Check D inputs — realized value + sale-date (vintage) for the SOLD units in the
+        # NC + Cassette scope (La Puerta excluded), via Check D's own contracts/terms reads.
+        d_scope_units = [
+            u for u in units if _m2o(u.get("project_id"))[0] in VALUE_SCOPE_PROJECT_IDS
+        ]
+        d_sold_ids = sorted(u["id"] for u in d_scope_units if u["state"] in SOLD_STATES)
+        d_contract_rows = await _get_d_contracts_cached(_client, d_sold_ids)
+        d_realized, d_term_ids = _realized_and_terms(d_contract_rows)
+        d_referenced_terms = sorted({t for ts in d_term_ids.values() for t in ts})
+        d_term_dates = await _get_terms_cached(_client, d_referenced_terms)
     except (ReadOnlyViolationError, RuntimeError):
         raise
     except Exception as exc:
@@ -305,15 +640,24 @@ async def get_data_quality_overview(client: Optional[OdooClient] = None) -> dict
             f"Σ items emitted {items_emitted}."
         )
 
+    # Check D — implausible list price/m² (NC + Cassette only). A SEPARATE object on the
+    # response; it is NOT folded into checks/total_issues (those stay A/B/C completeness
+    # defects). _check_d does its own per-tier reconciliation.
+    check_d = _check_d(d_scope_units, d_realized, d_term_ids, d_term_dates)
+
     logger.info(
         f"Inventory data quality: {total_issues} issue(s) across {len(units):,} units | "
         f"A(no_contract)={checks[0]['count']} B(broken_hierarchy)={checks[1]['count']} "
-        f"C(no_list_price)={checks[2]['count']} | RPC {rpc_ms}ms | cache_key={cache_key}"
+        f"C(no_list_price)={checks[2]['count']} | D(implausible_list)={check_d['count']} "
+        f"(peer {check_d['tier1_count']}/type {check_d['tier2a_count']}/impossible "
+        f"{check_d['tier2b_count']}, {check_d['unevaluable_count']} unevaluable of "
+        f"{check_d['evaluated_count']} priced) | RPC {rpc_ms}ms | cache_key={cache_key}"
     )
 
     result: dict = {
         "checks": checks,
         "total_issues": total_issues,
+        "check_d": check_d,
         "reference_date": cairo_today.isoformat(),
         "as_of": datetime.now(timezone.utc).isoformat(),
         "cache_status": "fresh",

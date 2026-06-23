@@ -91,9 +91,12 @@ VALUE_EXCLUDED_PROJECT_IDS: tuple[int, ...] = (3,)   # La Puerta — pricing inc
 # Pricing/area fields on rs.structure.unit (all stored — confirmed via fields_get).
 #   amount     — LIST price ("Total Unit Price", May-2026 reload, indicative).
 #   total_area — unit area in m² ("Total Unit Area"); 100% on NC+Cassette.
+#   meter_price — the per-m² LIST price the data team edits ("Meter Price"). For the units
+#                 Check D flags it equals amount/total_area, so it names the field to fix.
 # net_area is deliberately NOT used (≈7% coverage — a trap).
 UNIT_AMOUNT_FIELD = "amount"
 UNIT_AREA_FIELD = "total_area"
+UNIT_METER_PRICE_FIELD = "meter_price"
 
 # The realized side — rs.contract. sales_price is the authoritative CONTRACTED deal
 # value per sold unit (== installments_total). It is the value the customer committed
@@ -169,3 +172,26 @@ OUTLIER_PREMIUM_PCT = -10.0
 #       ≥ OUTLIER_DEEP_SMALLGROUP_PCT fallback cut (guard not applied). All TUNABLE.
 OUTLIER_LIST_TRUST_K = 2.0
 OUTLIER_DEEP_SMALLGROUP_PCT = 35.0
+
+
+# ── Inventory Data Quality — Check D (implausible list price) ──────────────────
+# A READ-ONLY admin check that flags PRICED units (sold AND unsold) whose list price/m²
+# (amount ÷ total_area) is implausibly high vs what comparable units actually realize —
+# a list-price DATA ERROR for the team to correct in Odoo (dominantly the HS-Studio
+# "65,000/m²" regime, where studios realize ~20,000/m²). Scoped to NC + Cassette
+# (VALUE_SCOPE_PROJECT_IDS; La Puerta excluded). Baselines come from SOLD units (= units
+# with realized value) in that scope. A unit is flagged if ANY tier fires (deduped, the
+# shown signal by precedence Tier 1 → Tier 2a → Tier 2b):
+#   Tier 1 (peer)       — sold unit in an eligible (≥ OUTLIER_MIN_GROUP_SIZE sold) peer
+#       group (zone × unit-type × 2-yr vintage), list_pm2 > OUTLIER_LIST_TRUST_K × the
+#       group's MEDIAN realized price/m². EXACT mirror of the Slice 2.5 list-trust guard.
+#   Tier 2a (type)      — unit whose unit-type has a baseline (≥ OUTLIER_MIN_GROUP_SIZE
+#       sold) AND is LOW-SPREAD (type realized max/median < DQ_LIST_TYPE_SPREAD_MAX),
+#       list_pm2 > DQ_LIST_TYPE_K × the type's MEDIAN realized price/m². Catches the studio
+#       regime (sold + unsold) without over-flagging genuinely wide-priced unit types.
+#   Tier 2b (impossible) — unit whose type has a baseline, list_pm2 > DQ_LIST_IMPOSSIBLE_K
+#       × the type's MAX realized price/m². A spread-independent area-error catch-all
+#       (e.g. total_area entered as 1). All three are TUNABLE named constants.
+DQ_LIST_TYPE_K = 3.0
+DQ_LIST_TYPE_SPREAD_MAX = 2.5
+DQ_LIST_IMPOSSIBLE_K = 5.0

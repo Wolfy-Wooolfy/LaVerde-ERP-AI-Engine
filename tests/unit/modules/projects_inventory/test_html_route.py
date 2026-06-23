@@ -390,6 +390,24 @@ _MOCK_DQ = {
         {"key": "no_list_price", "count": 0, "items": []},
     ],
     "total_issues": 2,
+    "check_d": {
+        "key": "implausible_list_price",
+        "count": 2,
+        "items": [
+            {"unit_id": 5501, "code": "HS-STUDIO-12", "project_name": "New Capital",
+             "unit_type_name": "HS-Studio", "state": "sold", "list_pm2": 65000.0,
+             "meter_price": 65000.0, "anchor_realized_pm2": 20000.0, "ratio": 3.25,
+             "list_total": 3_250_000.0, "signal": "peer"},
+            {"unit_id": 5502, "code": "BF255-9-203", "project_name": "New Capital",
+             "unit_type_name": "BF-Apartment", "state": "unsold", "list_pm2": 3_508_000.0,
+             "meter_price": 3_508_000.0, "anchor_realized_pm2": 46800.0, "ratio": 74.96,
+             "list_total": 3_508_000.0, "signal": "impossible"},
+        ],
+        "tier1_count": 1, "tier2a_count": 0, "tier2b_count": 1,
+        "evaluated_count": 1734, "unevaluable_count": 84,
+        "thresholds": {"list_trust_k": 2.0, "type_k": 3.0, "type_spread_max": 2.5,
+                       "impossible_k": 5.0, "min_group_size": 5},
+    },
     "reference_date": "2026-06-19",
     "as_of": "2026-06-19T10:00:00+00:00",
     "cache_status": "fresh",
@@ -422,6 +440,16 @@ def test_data_quality_200_with_admin() -> None:
         # CSV export wiring (embedded JSON + button label).
         assert "window.DQ_ROWS" in body
         assert "Download CSV" in body
+        # Check D section: title, rows, signal labels + the CSV-by-table-id wiring.
+        assert "Implausible list price" in body
+        assert "HS-STUDIO-12" in body
+        assert "BF255-9-203" in body
+        assert "Impossible" in body
+        assert "exportTableCSV('dq-d-table')" in body
+        # Check D footnote notes (meter-price fix + area-error guidance) + unevaluable count.
+        assert "correct the meter price" in body
+        assert "Check the area first" in body
+        assert "could not be evaluated" in body
         # Admin-only sidebar entry present.
         assert 'href="/projects-inventory/data-quality"' in body
     finally:
