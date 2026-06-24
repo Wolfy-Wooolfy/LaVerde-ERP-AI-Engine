@@ -467,6 +467,9 @@
   "mktattr_grand_incl_label": "All-time — including imported historical data",
   "mktattr_grand_excl_label": "All-time — excluding imported historical data",
   "mktattr_grand_incl_migration": "Legacy data from the previous system, imported in one batch (Nov 2025)",
+  "mktattr_timeline_back": "All media buyers",
+  "mktattr_timeline_subtitle": "The actual ongoing lead flow for this media buyer after excluding the imported historical data (Nov 2025) — not the all-time total.",
+  "mktattr_timeline_campaigns_label": "attributing campaigns",
 
   "campperf_title": "Marketing Campaign Performance",
   "nav_campperf": "Marketing Campaigns",

@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tl.header.buyer_name }} — {{ _t("campperf_timeline_label") }} — LaVerde ERP AI Engine{% endblock %}
+{% block page_title %}{{ _t("mktattr_title") }}{% endblock %}
+
+{% block content %}
+<div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
+
+  {# ── Back to the media-buyer list ──────────────────────────────────────────── #}
+  <a href="/marketing-attribution/dashboard"
+     class="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-500 dark:text-neutral-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
+    <svg class="w-3.5 h-3.5 rtl:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+    </svg>
+    {{ _t("mktattr_timeline_back") }}
+  </a>
+
+  {# ── 1. HEADER — media buyer · attributing campaigns · windowed total ───────── #}
+  <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div class="min-w-0">
+      <p class="text-[10px] font-semibold uppercase tracking-widest text-neutral-400 dark:text-neutral-500 mb-1">
+        {{ _t("campperf_timeline_label") }}
+      </p>
+      <div class="flex items-center gap-2.5 mb-1">
+        <span class="live-dot bg-primary-500" style="--pulse-color: rgba(99, 102, 241, 0.6);"></span>
+        <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight truncate" title="{{ tl.header.buyer_name }}">
+          {{ tl.header.buyer_name }}
+        </h1>
+      </div>
+
+      {# Role + attributing-campaign count — the buyer's identity, matching the board page. #}
+      <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+        <span class="text-xs font-medium text-neutral-700 dark:text-neutral-300">{{ _t("mktattr_buyer_role") }}</span>
+        <span class="text-neutral-300 dark:text-neutral-600">&middot;</span>
+        <span class="text-xs text-neutral-500 dark:text-neutral-400">
+          <span class="font-mono tabular-nums text-neutral-700 dark:text-neutral-300">{{ tl.header.attributing_campaign_count }}</span>
+          {{ _t("mktattr_timeline_campaigns_label") }}
+        </span>
+      </div>
+
+      {# Windowed total — the WINDOW is explicit so this is never mistaken for the
+         all-time board figure. #}
+      <p class="mt-2 text-sm text-neutral-700 dark:text-neutral-300">
+        <span class="font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(tl.header.total_leads_in_window) }}</span>
+        {{ _t("mktattr_leads") }}
+        <span class="text-neutral-400 dark:text-neutral-500">&middot; {{ _t("campperf_timeline_window_prefix") }} {{ tl.window_months }} {{ _t("campperf_timeline_window_unit") }}</span>
+      </p>
+      {# Honest framing: ongoing flow after excluding the migration — NOT the board total. #}
+      <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400 max-w-2xl leading-relaxed">
+        {{ _t("mktattr_timeline_subtitle") }}
+      </p>
+      <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+        {{ _t("mktattr_as_of") }} {{ tl.reference_date }} &middot; {{ tl.cache_status }}
+      </p>
+    </div>
+    <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono sm:text-right rtl:sm:text-left sm:pt-1 shrink-0">
+      {{ tl.rpc_duration_ms }} ms &middot; {{ _t("mktattr_live_rpc") }}
+    </div>
+  </div>
+
+  {# ── Integrity alerts — LOUD when present (confirmed-buyer drift) ───────────── #}
+  {% if tl.integrity_alerts | length > 0 %}
+  <div class="bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 rounded-xl px-5 py-4">
+    <div class="flex items-center gap-2 mb-2">
+      <svg class="w-4 h-4 text-danger-600 dark:text-danger-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+      </svg>
+      <h3 class="text-sm font-semibold text-danger-700 dark:text-danger-300">{{ _t("mktattr_integrity_alerts") }}</h3>
+    </div>
+    <ul class="space-y-1 ms-6 list-disc">
+      {% for alert in tl.integrity_alerts %}
+      <li class="text-xs text-danger-700 dark:text-danger-300">{{ alert }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {# ── 2. WINDOW SWITCHER — presets + custom range (full page reload, query param) ─
+     A custom range NEVER lights a preset pill: preset-active = (not is_custom_range
+     and window_months == m). The Custom pill is active when is_custom_range is true.
+     Apply is guarded client-side (both set · start ≤ end · span ≤ 24mo) so the UI can
+     never submit a range the backend would reject; the dropdowns list only the last
+     24 Cairo months (current + 23 preceding), so neither a future month nor an
+     out-of-cap span can be picked. Identical mechanics to the campaign timeline. #}
+  <div class="space-y-3"
+       x-data="{
+         showCustom: {{ 'true' if tl.is_custom_range else 'false' }},
+         start: '{{ tl.window_start_month if tl.is_custom_range else '' }}',
+         end: '{{ tl.window_end_month if tl.is_custom_range else '' }}',
+         maxMonth: '{{ tl.reference_date[:7] }}',
+         buyerId: {{ tl.header.buyer_id }},
+         maxSpan: 24,
+         get monthList() {
+           const [y, m] = this.maxMonth.split('-').map(Number);
+           const out = [];
+           for (let i = 0; i < this.maxSpan; i++) {
+             const total = (y * 12 + (m - 1)) - i;       // current month minus i
+             out.push(Math.floor(total / 12) + '-' + String((total % 12) + 1).padStart(2, '0'));
+           }
+           return out;                                    // newest → oldest, 24 entries
+         },
+         span() {
+           if (!this.start || !this.end) return 0;
+           const [sy, sm] = this.start.split('-').map(Number);
+           const [ey, em] = this.end.split('-').map(Number);
+           return (ey * 12 + em) - (sy * 12 + sm) + 1;
+         },
+         get valid() { const s = this.span(); return s >= 1 && s <= this.maxSpan; },
+         apply() {
+           if (!this.valid) return;
+           window.location.href = '/marketing-attribution/buyer/' + this.buyerId +
+             '/timeline?start_month=' + this.start + '&end_month=' + this.end;
+         }
+       }">
+    <div class="flex flex-wrap items-center gap-2">
+      {% for m, key in [(1, "campperf_timeline_preset_1"), (3, "campperf_timeline_preset_3"), (6, "campperf_timeline_preset_6"), (12, "campperf_timeline_preset_12")] %}
+      <a href="/marketing-attribution/buyer/{{ tl.header.buyer_id }}/timeline?months={{ m }}"
+         class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                {% if not tl.is_custom_range and tl.window_months == m %}bg-primary-600 border-primary-600 text-white
+                {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+         {% if not tl.is_custom_range and tl.window_months == m %}aria-current="page"{% endif %}>
+        {{ _t(key) }}
+      </a>
+      {% endfor %}
+      {# Custom pill — toggles the pickers; primary-filled when a custom range drives the view. #}
+      <button type="button" @click="showCustom = !showCustom"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                     {% if tl.is_custom_range %}bg-primary-600 border-primary-600 text-white
+                     {% else %}bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/50 dark:hover:bg-primary-900/10{% endif %}"
+              {% if tl.is_custom_range %}aria-current="page"{% endif %}>
+        {{ _t("campperf_timeline_preset_custom") }}
+      </button>
+    </div>
+
+    {# Month dropdowns — revealed by the Custom pill. Each lists the last 24 Cairo
+       months (current + 23 preceding) so neither a future month nor an out-of-cap
+       span is selectable; the Apply guard enforces start ≤ end. Options are rendered
+       client-side by Alpine, so x-model seeds the selection from the active window.
+       Inline display:none (when not already custom) avoids a flash before Alpine
+       initialises; x-show then manages it. #}
+    <div x-show="showCustom"{% if not tl.is_custom_range %} style="display: none;"{% endif %}
+         class="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-4 py-3">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_start") }}</label>
+        <select x-model="start" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{{ _t("campperf_timeline_custom_end") }}</label>
+        <select x-model="end" class="form-input w-40 text-sm">
+          <option value="" disabled>{{ _t("campperf_timeline_custom_month_placeholder") }}</option>
+          <template x-for="mo in monthList" :key="mo">
+            <option :value="mo" x-text="mo"></option>
+          </template>
+        </select>
+      </div>
+      <button type="button" @click="apply()" :disabled="!valid"
+              class="px-4 py-1.5 rounded-lg text-xs font-medium border border-primary-600 bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed">
+        {{ _t("campperf_timeline_custom_apply") }}
+      </button>
+      {# Inline hint — shown only when both months are set but the range is invalid. #}
+      <p x-show="start && end && !valid" class="basis-full text-[11px] text-warning-600 dark:text-warning-400">
+        {{ _t("campperf_timeline_custom_invalid") }}
+      </p>
+    </div>
+  </div>
+
+  {# ── 3. TREND STRIP — compact monthly lead-VOLUME bars (volume only) ─────────── #}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
+    {% set trend_peak = tl.trend | map(attribute='lead_count') | max %}
+    {% set trend_max = [trend_peak, 1] | max %}
+    {# flex-row reverses automatically under dir=rtl, so oldest→newest reads correctly. #}
+    <div class="flex items-end justify-between gap-1.5 sm:gap-2">
+      {% for t in tl.trend %}
+      <div class="flex-1 min-w-0 flex flex-col items-center">
+        <span class="text-[10px] font-mono tabular-nums text-neutral-400 dark:text-neutral-500 mb-1">{{ "{:,}".format(t.lead_count) }}</span>
+        <div class="w-full h-24 flex items-end" title="{{ t.month }}: {{ '{:,}'.format(t.lead_count) }}">
+          <div class="w-full rounded-t bg-primary-500 dark:bg-primary-600"
+               style="height: {{ (100.0 * t.lead_count / trend_max) | round(1) }}%; {% if t.lead_count > 0 %}min-height: 3px;{% endif %}"></div>
+        </div>
+        <span class="text-[10px] text-neutral-400 dark:text-neutral-500 mt-1.5 truncate w-full text-center font-mono">{{ t.month }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="mt-3 text-xs text-neutral-400 dark:text-neutral-500 text-center">
+      {% if tl.is_custom_range %}{{ _t("campperf_timeline_trend_caption_custom") }} {{ tl.window_end_month }}{% else %}{{ _t("campperf_timeline_trend_caption") }}{% endif %}
+    </p>
+  </div>
+
+  {# ── 4. PERIOD CARDS — one per window month (oldest→newest): funnel + maturation #}
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    {% for p in tl.periods %}
+    <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4 bg-white dark:bg-neutral-800 {% if p.lead_count == 0 %}opacity-70{% endif %}">
+
+      {# Month + maturation badge · lead count #}
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold font-mono text-neutral-900 dark:text-neutral-100">{{ p.month }}</p>
+          <div class="mt-1 h-4">
+            {% if p.maturation_state == "neglected" %}
+            <span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-warning-50 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
+              <svg class="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
+              {{ _t("campperf_timeline_maturation_neglected") }}
+            </span>
+            {% elif p.maturation_state == "too_early" %}
+            <span class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400">
+              {{ _t("campperf_timeline_maturation_too_early") }}
+            </span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="shrink-0 text-right rtl:text-left">
+          <p class="text-2xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 leading-none">{{ "{:,}".format(p.lead_count) }}</p>
+          <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("mktattr_leads") }}</p>
+        </div>
+      </div>
+
+      {% if p.lead_count == 0 %}
+      {# Zero-lead month — keep the timeline continuous with an empty card. #}
+      <div class="h-5 rounded bg-neutral-100 dark:bg-neutral-700 mb-3"></div>
+      <p class="text-xs text-neutral-400 dark:text-neutral-500 italic">{{ _t("campperf_timeline_no_leads") }}</p>
+      {% else %}
+      {# 4-segment outcome bar — same colors/format as the buyer rows. Widths = group %. #}
+      <div class="h-5 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-3">
+        {% for o in p.outcomes %}
+          {% if o.group == "جديد" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("mktattr_group_new") %}
+          {% elif o.group == "مهتم" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("mktattr_group_interested") %}
+          {% elif o.group == "اشترى" %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("mktattr_group_bought") %}
+          {% elif o.group == "بلا نتيجة" %}{% set seg_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set lbl = _t("mktattr_group_noresult") %}
+          {% else %}{% set seg_cls = "bg-neutral-400" %}{% set lbl = o.group %}{% endif %}
+          {% if o.pct > 0 %}
+          <div class="h-full {{ seg_cls }}" style="width: {{ o.pct }}%;"
+               title="{{ lbl }}: {{ o.pct | round(1) }}% · {{ o.count }}"></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      {# Legend — % FIRST, count after (Khaled's rule), so اشترى stays legible. #}
+      <div class="grid grid-cols-2 gap-2.5">
+        {% for o in p.outcomes %}
+          {% if o.group == "جديد" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("mktattr_group_new") %}
+          {% elif o.group == "مهتم" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("mktattr_group_interested") %}
+          {% elif o.group == "اشترى" %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("mktattr_group_bought") %}
+          {% elif o.group == "بلا نتيجة" %}{% set dot_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set lbl = _t("mktattr_group_noresult") %}
+          {% else %}{% set dot_cls = "bg-neutral-400" %}{% set lbl = o.group %}{% endif %}
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-sm shrink-0 {{ dot_cls }}"></span>
+              <span class="text-xs text-neutral-500 dark:text-neutral-400 truncate" title="{{ lbl }}">{{ lbl }}</span>
+            </div>
+            <p class="mt-0.5 ms-4">
+              <span class="text-sm font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ o.pct | round(1) }}%</span>
+              <span class="text-xs text-neutral-400 dark:text-neutral-500 ms-1">{{ "{:,}".format(o.count) }}</span>
+            </p>
+          </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ── 5. FOOTER — REAL data; the migration + maturation caveat stated plainly ── #}
+  <footer class="pt-4 pb-2 border-t border-neutral-200 dark:border-neutral-700 space-y-1">
+    {% if tl.legacy_days_excluded | length > 0 %}
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      {{ _t("campperf_timeline_legacy_days") }}
+    </p>
+    {% endif %}
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      {{ _t("campperf_timeline_footer") }}
+    </p>
+    <p class="text-xs text-center text-neutral-400 dark:text-neutral-500">
+      {{ _t("mktattr_footer_note") }}
+      &middot; {{ _t("mktattr_as_of") }} {{ tl.as_of }}
+      &middot; {{ tl.cache_status }}
+    </p>
+  </footer>
+
+</div>
+{% endblock %}

@@ -32,6 +32,10 @@ from backend.modules.marketing_attribution.services.attribution_service import (
     get_attribution_overview,
     get_attribution_overview_windowed,
 )
+from backend.modules.marketing_attribution.services.buyer_timeline_service import (
+    BuyerNotFoundError,
+    get_buyer_timeline,
+)
 from backend.modules.projects_inventory.services.inventory_service import (
     get_inventory_overview,
 )
@@ -237,6 +241,53 @@ async def marketing_attribution_dashboard(
         "grand_coverage": grand_coverage,
     })
     return templates.TemplateResponse(request, "marketing_attribution/dashboard.html", ctx)
+
+
+@router.get(
+    "/marketing-attribution/buyer/{buyer_id}/timeline",
+    response_class=HTMLResponse,
+    summary="Marketing Attribution — per-media-buyer timeline (HTML)",
+    dependencies=[Depends(require_module_html("marketing_attribution"))],
+)
+async def marketing_attribution_buyer_timeline(
+    request: Request,
+    buyer_id: int,
+    months: int = Query(3, ge=1, le=12),
+    start_month: str | None = Query(None),
+    end_month: str | None = Query(None),
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Display-only drill-in mirroring the campaign timeline: call the read-only buyer
+    # timeline service and hand the result straight to the template — no new backend
+    # logic. A non-positive buyer_id, or one that attributes from no confirmed campaign,
+    # redirects back to the buyer list (graceful — no 404 stack trace for a hand-edited
+    # URL). An invalid/partial custom range silently falls back to the `months` preset
+    # (this HTML page never 422s a hand-edited URL — the real UI only submits valid
+    # ranges). This HTML path is distinct from the JSON API at
+    # /api/v1/marketing-attribution/buyer/{id}/timeline (different router + prefix).
+    _LIST_URL = "/marketing-attribution/dashboard"
+    if buyer_id <= 0:
+        return RedirectResponse(_LIST_URL, status_code=302)
+    try:
+        data = await get_buyer_timeline(
+            buyer_id=buyer_id,
+            window_months=months,
+            start_month=start_month,
+            end_month=end_month,
+        )
+    except InvalidTimelineRangeError:
+        try:
+            data = await get_buyer_timeline(buyer_id=buyer_id, window_months=months)
+        except BuyerNotFoundError:
+            return RedirectResponse(_LIST_URL, status_code=302)
+    except BuyerNotFoundError:
+        return RedirectResponse(_LIST_URL, status_code=302)
+    ctx = _base_ctx(request, user)
+    ctx.update({
+        "page": "marketing_attribution_dashboard",
+        "tl": data,
+    })
+    return templates.TemplateResponse(request, "marketing_attribution/timeline.html", ctx)
 
 
 @router.get(
