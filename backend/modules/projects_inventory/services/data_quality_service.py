@@ -404,8 +404,12 @@ def _check_d(
     realized prices (NC + Cassette only). Returns a DataQualityListPriceCheck dict.
 
     `scope_units` are the units already filtered to VALUE_SCOPE_PROJECT_IDS and
-    state-classified. Baselines are built from SOLD units (those with realized value);
-    the three tiers (see domain.py) are deduped with precedence peer → type → impossible.
+    state-classified. Baselines are built from SOLD units (those with realized value).
+    Tier 2a/2b are CURRENT-ERA aware [2026-06-24]: the type baseline is keyed by
+    (unit-type, 2-yr vintage bucket), and a unit is scored against its OWN sale-period
+    bucket if sold, else the type's LATEST qualifying bucket (no all-history fallback;
+    Option A → unevaluable when the chosen bucket has no baseline). Tier 1 (peer) is
+    UNCHANGED. The three tiers are deduped with precedence peer → type → impossible.
     """
     # 1) Sold realized population (sold + area>0 + realized) → realized_pm2 + vintage.
     sold_pop: list[dict] = []
@@ -442,18 +446,32 @@ def _check_d(
             if med > 0:
                 peer_median[key] = med
 
-    # 3) Type baseline — per unit-type with ≥ MIN_GROUP_SIZE sold members; store median,
-    #    max and spread = max / median (vintage not required for the type baseline).
-    type_vals: dict[Optional[int], list[float]] = {}
+    # 3) Type baseline — CURRENT-ERA aware [2026-06-24]. Per (unit-type, 2-yr vintage bucket)
+    #    with ≥ MIN_GROUP_SIZE sold members: median, max and spread (= max / median). This
+    #    REPLACES the prior all-history per-type baseline, which benchmarked today's price
+    #    lists against a median polluted by cheap 2018-2021 sales (Egyptian price/m² escalated
+    #    ~6× across 2018-2025 — discovery commit 611261f). A unit is scored against ONE bucket
+    #    (step 4): its OWN sale-period bucket if sold; the type's LATEST qualifying bucket if
+    #    unsold (a present-day list deserves a current-era benchmark).
+    type_bucket_vals: dict[tuple, list[float]] = {}
     for m in sold_pop:
-        type_vals.setdefault(m["unit_type_id"], []).append(m["realized_pm2"])
-    type_baseline: dict[Optional[int], dict] = {}
-    for tid, vals in type_vals.items():
+        if m["vintage_bucket"] is None:
+            continue   # sold but unresolvable sale date → cannot place in a vintage bucket
+        type_bucket_vals.setdefault(
+            (m["unit_type_id"], m["vintage_bucket"]), []).append(m["realized_pm2"])
+    type_baseline: dict[tuple, dict] = {}
+    for key, vals in type_bucket_vals.items():
         if len(vals) >= OUTLIER_MIN_GROUP_SIZE:
             med = _median(vals)
             mx = max(vals)
             if med > 0:
-                type_baseline[tid] = {"median": med, "max": mx, "spread": mx / med}
+                type_baseline[key] = {"median": med, "max": mx, "spread": mx / med}
+    # The type's LATEST vintage bucket that has a baseline — the current-era benchmark for an
+    # UNSOLD unit, whose list price is a present-day asking price with no sale period.
+    type_latest_bucket: dict[Optional[int], int] = {}
+    for (tid, bucket) in type_baseline:
+        if tid not in type_latest_bucket or bucket > type_latest_bucket[tid]:
+            type_latest_bucket[tid] = bucket
 
     # 4) Evaluate PRICED units (amount>0 & area>0), sold + unsold. A unit is flagged if any
     #    tier fires; the shown signal follows precedence peer → type → impossible.
@@ -474,14 +492,21 @@ def _check_d(
         list_pm2 = _c2(amount / area)
 
         # Tier-1 anchor: the unit's eligible peer-group median (sold + resolvable vintage).
+        # UNCHANGED — Tier 1 is already vintage-aware; own_bucket also drives the Tier-2 pick.
         peer_anchor: Optional[float] = None
+        own_bucket: Optional[int] = None
         if is_sold and uid in realized:
             sale_date = _sale_date_for_unit(term_ids.get(uid, set()), term_dates)
             if sale_date is not None:
-                key = (zone_id, type_id, _vintage_bucket(int(sale_date[:4])))
-                peer_anchor = peer_median.get(key)   # None if group not eligible
+                own_bucket = _vintage_bucket(int(sale_date[:4]))
+                peer_anchor = peer_median.get((zone_id, type_id, own_bucket))  # None if not eligible
 
-        tb = type_baseline.get(type_id)
+        # Tier-2 baseline bucket (current-era): a SOLD unit scores against its OWN sale-period
+        # bucket; an UNSOLD (or sold-without-date) unit against the type's LATEST qualifying
+        # bucket. No all-history fallback (Option A) — if the chosen bucket has no qualifying
+        # baseline, the unit is UNEVALUABLE under Tier 2.
+        chosen_bucket = own_bucket if own_bucket is not None else type_latest_bucket.get(type_id)
+        tb = type_baseline.get((type_id, chosen_bucket)) if chosen_bucket is not None else None
 
         # Unevaluable: no eligible peer group AND no unit-type baseline (counted, not flagged).
         if peer_anchor is None and tb is None:

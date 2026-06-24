@@ -185,13 +185,18 @@ OUTLIER_DEEP_SMALLGROUP_PCT = 35.0
 #   Tier 1 (peer)       — sold unit in an eligible (≥ OUTLIER_MIN_GROUP_SIZE sold) peer
 #       group (zone × unit-type × 2-yr vintage), list_pm2 > OUTLIER_LIST_TRUST_K × the
 #       group's MEDIAN realized price/m². EXACT mirror of the Slice 2.5 list-trust guard.
-#   Tier 2a (type)      — unit whose unit-type has a baseline (≥ OUTLIER_MIN_GROUP_SIZE
-#       sold) AND is LOW-SPREAD (type realized max/median < DQ_LIST_TYPE_SPREAD_MAX),
-#       list_pm2 > DQ_LIST_TYPE_K × the type's MEDIAN realized price/m². Catches the studio
-#       regime (sold + unsold) without over-flagging genuinely wide-priced unit types.
-#   Tier 2b (impossible) — unit whose type has a baseline, list_pm2 > DQ_LIST_IMPOSSIBLE_K
-#       × the type's MAX realized price/m². A spread-independent area-error catch-all
-#       (e.g. total_area entered as 1). All three are TUNABLE named constants.
+#   Tier 2a (type)      — CURRENT-ERA aware [2026-06-24]. The type baseline is keyed by
+#       (unit-type, 2-yr vintage bucket); a unit is scored against its OWN sale-period
+#       bucket if sold, else the type's LATEST qualifying bucket (no all-history fallback —
+#       Option A → unevaluable when none). The chosen bucket must have ≥ OUTLIER_MIN_GROUP_SIZE
+#       sold AND be LOW-SPREAD (max/median < DQ_LIST_TYPE_SPREAD_MAX); flag if list_pm2 >
+#       DQ_LIST_TYPE_K × that bucket's MEDIAN realized price/m². Benchmarking today's lists
+#       against an all-history median was wrong (prices escalated ~6× 2018-2025; the studio
+#       65,000/m² lists are CONFIRMED-correct current values — discovery commit 611261f).
+#   Tier 2b (area error) — same current-era bucket selection; flag if list_pm2 >
+#       DQ_LIST_IMPOSSIBLE_K × that bucket's MAX realized price/m². A spread-independent
+#       catch-all: every live catch is an area-entry error (e.g. total_area entered as 1),
+#       hence the human-facing label "Possible area error". All three are TUNABLE constants.
 DQ_LIST_TYPE_K = 3.0
 DQ_LIST_TYPE_SPREAD_MAX = 2.5
 DQ_LIST_IMPOSSIBLE_K = 5.0

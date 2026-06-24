@@ -444,7 +444,7 @@ def test_data_quality_200_with_admin() -> None:
         assert "Implausible list price" in body
         assert "HS-STUDIO-12" in body
         assert "BF255-9-203" in body
-        assert "Impossible" in body
+        assert "Possible area error" in body   # Tier 2b label softened from "Impossible"
         assert "exportTableCSV('dq-d-table')" in body
         # Check D footnote notes (meter-price fix + area-error guidance) + unevaluable count.
         assert "correct the meter price" in body

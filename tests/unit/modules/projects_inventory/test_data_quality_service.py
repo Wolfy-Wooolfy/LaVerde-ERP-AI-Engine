@@ -276,22 +276,32 @@ async def test_rpc_failure_wrapped_as_odoo_query_error():
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Check D — implausible list price/m² (New Capital + Cassette only)
+# CURRENT-ERA Tier 2 model [2026-06-24]: the type baseline is keyed by (type, 2-yr
+# vintage bucket); a SOLD unit scores against its OWN sale-period bucket, an UNSOLD unit
+# against the type's LATEST qualifying (≥5-sold) bucket. No all-history fallback — a unit
+# whose chosen bucket has no baseline is UNEVALUABLE (Option A). Tier 1 (peer) unchanged.
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# Deterministic fixture (all clean NC chains so Check B never flags them; area = 100 m²
-# unless noted, so list/m² = amount/100 and realized/m² = sales_price/100):
-#   Studios (type 50, low-spread, realized/m² 20,000). Peer group zone 100 / 2022 has 5
-#     sold members (101–105) → eligible (median 20,000). 105 lists at 65,000/m² → fires
-#     BOTH Tier 1 (peer) and Tier 2a (type) → shown as "peer" (precedence + dedupe). 106
-#     is a 2024-vintage studio alone in its peer group (not eligible) → Tier 2a (sold).
-#     107 is an unsold studio listed at 65,000/m² → Tier 2a (unsold).
-#   Apartments (type 60, low-spread, median 30,000 / max 45,000). 206 has area = 1 →
-#     list/m² 3,000,000 → fires Tier 2a AND Tier 2b → shown "type" (2a beats 2b).
-#   Villas (type 70, HIGH-spread: median 10,000 / max 30,000 → spread 3.0 ≥ 2.5, so Tier
-#     2a is GATED). 306 lists at 50,000/m² (5× the median) → NOT flagged (the gate). 307
-#     has area = 1 → list/m² 200,000 > 5×max → Tier 2b ("impossible").
-#   Penthouses (type 80): only 2 sold → no type baseline; all three priced units are
-#     UNEVALUABLE (no eligible peer group, no type baseline).
+# Deterministic fixture (clean chains so Check B never flags; area 100 m² unless noted, so
+# list/m² = amount/100 and realized/m² = sales_price/100). Studios model price escalation:
+#   Studios (type 50): an OLD 2020 bucket (zone 100, 5 sold @ 10,000/m²) and a CURRENT 2024
+#     bucket (zone 100, 6 sold @ 23,000/m²). latest qualifying bucket = 2024.
+#     - STU-24-PEER (116): sold 2024, lists 80,000/m² → fires Tier 1 (>2×23,000) AND Tier 2a
+#       (>3×23,000) → shown "peer" (precedence + dedupe).
+#     - STU-SOLD-OWN (150): sold 2020 (zone 199, alone → no peer), lists 65,000/m² → judged
+#       against its OWN 2020 bucket (median 10,000) → Tier 2a "type" (would NOT flag against
+#       the 2024 bucket — this proves sold uses its own bucket).
+#     - STU-UNSOLD-FLAG (152): unsold, lists 75,000/m² → judged against the LATEST 2024 bucket
+#       (median 23,000) → Tier 2a "type".
+#     - STU-UNSOLD-65K (151): unsold, lists 65,000/m² → 65,000 < 3×23,000 → NOT flagged. This
+#       is the false positive the all-history baseline produced; current-era clears it.
+#   Apartments (type 60, current 2024 bucket median 30,000, low-spread). APT-AREAERR (250):
+#     unsold area=1 → list/m² 3,000,000 fires Tier 2a AND Tier 2b → shown "type" (2a beats 2b).
+#   Villas (type 70, current 2024 bucket HIGH-spread: median 10,000 / max 30,000 → spread
+#     3.0 ≥ 2.5 → Tier 2a GATED). VIL-GATE (351): 50,000/m² (5× median) → NOT flagged (gate).
+#     VIL-AREAERR (350): area=1 → list/m² 200,000 > 5×max → Tier 2b ("possible area error").
+#   Penthouses (type 80): only 2 sold (no qualifying bucket) → all three priced units are
+#     UNEVALUABLE (no peer group, no current-era type baseline).
 #   La Puerta studio (project 3): would flag, but project 3 is out of Check D scope.
 
 _TYPE_STUDIO = [50, "Studio"]
@@ -299,79 +309,109 @@ _TYPE_APT = [60, "Apartment"]
 _TYPE_VILLA = [70, "Villa"]
 _TYPE_PENT = [80, "Penthouse"]
 
-# Payment terms → contract_date (vintage). 9001 → 2022 bucket; 9002 → 2024 bucket.
-_D_TERMS = {9001: "2022-06-01", 9002: "2024-01-01"}
+# Payment terms → contract_date (vintage). 9020 → 2020 bucket; 9024 → 2024 bucket.
+_D_TERMS = {9020: "2020-06-01", 9024: "2024-06-01"}
+
+# Clean parent chains for the Check-D zones (so Check B never flags these units).
+#   zone → phase: every NC zone → phase 10 (→ project 1); the La Puerta zone → phase 30.
+#   building (1000 + zone) → its zone; phase → project.
+_D_ZONE_PHASE = {100: 10, 199: 10, 200: 10, 300: 10, 400: 10, 390: 30}
+_D_PHASES = {10: 1, 30: 3}
+_D_BUILDINGS = {1000 + z: z for z in _D_ZONE_PHASE}
 
 
-def _du(uid, code, state, unit_type, amount, area, project=_P1) -> dict:
-    """A Check-D unit on a clean New Capital chain. meter_price = list/m² (amount/area) —
-    the realistic 'meter price == list/m²' case Check D surfaces."""
+def _du(uid, code, state, unit_type, amount, area, zone, project=_P1, phase=10) -> dict:
+    """A Check-D unit on a clean chain (zone → phase → project; building = 1000 + zone).
+    meter_price = list/m² (amount/area) — the realistic 'meter price == list/m²' case."""
     meter = (amount / area) if area else 0
-    return _u(uid, code, state, project, _ph(10), _zo(100), _bu(1000), amount,
+    return _u(uid, code, state, project, _ph(phase), [zone, f"Zone#{zone}"],
+              [1000 + zone, f"Bld#{1000 + zone}"], amount,
               total_area=area, unit_type=unit_type, meter_price=meter)
 
 
 def _d_units() -> list[dict]:
     return [
-        # Studios (type 50) — peer group zone 100 / 2022 (101–105), eligible.
-        _du(101, "STU-OK1", "contracted", _TYPE_STUDIO, 2_000_000, 100),
-        _du(102, "STU-OK2", "contracted", _TYPE_STUDIO, 2_000_000, 100),
-        _du(103, "STU-OK3", "contracted", _TYPE_STUDIO, 2_000_000, 100),
-        _du(104, "STU-OK4", "contracted", _TYPE_STUDIO, 2_000_000, 100),
-        _du(105, "STU-T1", "contracted", _TYPE_STUDIO, 6_500_000, 100),  # 65k/m² → Tier1+Tier2a → peer
-        _du(106, "STU-T2A-SOLD", "delivered", _TYPE_STUDIO, 6_500_000, 100),  # 2024 vintage, alone → Tier2a
-        _du(107, "STU-T2A-UNSOLD", "available", _TYPE_STUDIO, 6_500_000, 100),  # unsold → Tier2a
-        # Apartments (type 60, low-spread).
-        _du(201, "APT-OK1", "contracted", _TYPE_APT, 3_000_000, 100),
-        _du(202, "APT-OK2", "contracted", _TYPE_APT, 3_000_000, 100),
-        _du(203, "APT-OK3", "contracted", _TYPE_APT, 3_000_000, 100),
-        _du(204, "APT-OK4", "contracted", _TYPE_APT, 3_000_000, 100),
-        _du(205, "APT-OK5", "contracted", _TYPE_APT, 4_500_000, 100),
-        _du(206, "APT-AREAERR", "available", _TYPE_APT, 3_000_000, 1),  # area=1 → Tier2a beats Tier2b → type
-        # Villas (type 70, HIGH-spread → Tier 2a gated).
-        _du(301, "VIL-OK1", "contracted", _TYPE_VILLA, 1_000_000, 100),
-        _du(302, "VIL-OK2", "contracted", _TYPE_VILLA, 1_000_000, 100),
-        _du(303, "VIL-OK3", "contracted", _TYPE_VILLA, 1_000_000, 100),
-        _du(304, "VIL-OK4", "contracted", _TYPE_VILLA, 1_000_000, 100),
-        _du(305, "VIL-OK5", "contracted", _TYPE_VILLA, 3_000_000, 100),
-        _du(306, "VIL-GATE", "available", _TYPE_VILLA, 5_000_000, 100),  # 50k/m² but high-spread → NOT flagged
-        _du(307, "VIL-T2B", "available", _TYPE_VILLA, 200_000, 1),  # area=1 → Tier2b impossible
-        # Penthouses (type 80): 2 sold → no baseline → all priced units unevaluable.
-        _du(401, "PEN-1", "contracted", _TYPE_PENT, 5_000_000, 100),
-        _du(402, "PEN-2", "contracted", _TYPE_PENT, 5_000_000, 100),
-        _du(403, "PEN-UNEVAL", "available", _TYPE_PENT, 9_000_000, 100),
+        # Studios — OLD 2020 bucket (zone 100): 5 sold @ 10,000/m², priced at list (clean).
+        _du(101, "STU-20-1", "contracted", _TYPE_STUDIO, 1_000_000, 100, 100),
+        _du(102, "STU-20-2", "contracted", _TYPE_STUDIO, 1_000_000, 100, 100),
+        _du(103, "STU-20-3", "contracted", _TYPE_STUDIO, 1_000_000, 100, 100),
+        _du(104, "STU-20-4", "contracted", _TYPE_STUDIO, 1_000_000, 100, 100),
+        _du(105, "STU-20-5", "contracted", _TYPE_STUDIO, 1_000_000, 100, 100),
+        # Studios — CURRENT 2024 bucket (zone 100): 6 sold @ 23,000/m²; 116 lists 80,000/m².
+        _du(111, "STU-24-1", "contracted", _TYPE_STUDIO, 2_300_000, 100, 100),
+        _du(112, "STU-24-2", "contracted", _TYPE_STUDIO, 2_300_000, 100, 100),
+        _du(113, "STU-24-3", "contracted", _TYPE_STUDIO, 2_300_000, 100, 100),
+        _du(114, "STU-24-4", "contracted", _TYPE_STUDIO, 2_300_000, 100, 100),
+        _du(115, "STU-24-5", "contracted", _TYPE_STUDIO, 2_300_000, 100, 100),
+        _du(116, "STU-24-PEER", "contracted", _TYPE_STUDIO, 8_000_000, 100, 100),  # 80k/m² → Tier1+Tier2a → peer
+        # Studio sold in its OWN (old, cheap) 2020 bucket, zone 199 (alone → no peer).
+        _du(150, "STU-SOLD-OWN", "delivered", _TYPE_STUDIO, 6_500_000, 100, 199),  # 65k/m² vs 2020 median 10k → type
+        # Unsold studios judged against the LATEST 2024 bucket (median 23,000).
+        _du(151, "STU-UNSOLD-65K", "available", _TYPE_STUDIO, 6_500_000, 100, 100),  # 65k < 3×23k → NOT flagged
+        _du(152, "STU-UNSOLD-FLAG", "available", _TYPE_STUDIO, 7_500_000, 100, 100),  # 75k > 3×23k → type
+        # Apartments (type 60, current 2024 bucket, low-spread median 30,000), zone 200.
+        _du(201, "APT-1", "contracted", _TYPE_APT, 3_000_000, 100, 200),
+        _du(202, "APT-2", "contracted", _TYPE_APT, 3_000_000, 100, 200),
+        _du(203, "APT-3", "contracted", _TYPE_APT, 3_000_000, 100, 200),
+        _du(204, "APT-4", "contracted", _TYPE_APT, 3_000_000, 100, 200),
+        _du(205, "APT-5", "contracted", _TYPE_APT, 3_000_000, 100, 200),
+        _du(250, "APT-AREAERR", "available", _TYPE_APT, 3_000_000, 1, 200),  # area=1 → Tier2a beats Tier2b → type
+        # Villas (type 70, current 2024 bucket HIGH-spread → Tier 2a gated), zone 300.
+        _du(301, "VIL-1", "contracted", _TYPE_VILLA, 1_000_000, 100, 300),
+        _du(302, "VIL-2", "contracted", _TYPE_VILLA, 1_000_000, 100, 300),
+        _du(303, "VIL-3", "contracted", _TYPE_VILLA, 1_000_000, 100, 300),
+        _du(304, "VIL-4", "contracted", _TYPE_VILLA, 1_000_000, 100, 300),
+        _du(305, "VIL-5", "contracted", _TYPE_VILLA, 1_000_000, 100, 300),  # realized/m² 30,000 (high) via contract
+        _du(351, "VIL-GATE", "available", _TYPE_VILLA, 5_000_000, 100, 300),  # 50k/m² but high-spread → NOT flagged
+        _du(350, "VIL-AREAERR", "available", _TYPE_VILLA, 200_000, 1, 300),  # area=1 → Tier2b possible-area-error
+        # Penthouses (type 80): 2 sold → no qualifying bucket → all priced units unevaluable.
+        _du(401, "PEN-1", "contracted", _TYPE_PENT, 5_000_000, 100, 400),
+        _du(402, "PEN-2", "contracted", _TYPE_PENT, 5_000_000, 100, 400),
+        _du(403, "PEN-UNEVAL", "available", _TYPE_PENT, 9_000_000, 100, 400),
         # La Puerta (project 3) studio that WOULD flag — but project 3 is out of scope.
-        _u(901, "LP-STUDIO", "contracted", _P3, _ph(30), _zo(300), _bu(3000), 6_500_000,
-           total_area=100, unit_type=_TYPE_STUDIO, meter_price=65_000),
+        _du(901, "LP-STUDIO", "contracted", _TYPE_STUDIO, 6_500_000, 100, 390,
+            project=_P3, phase=30),
     ]
 
 
 def _d_contracts() -> list[dict]:
     return [
-        _ct(101, sales_price=2_000_000, payment_term=9001),
-        _ct(102, sales_price=2_000_000, payment_term=9001),
-        _ct(103, sales_price=2_000_000, payment_term=9001),
-        _ct(104, sales_price=2_000_000, payment_term=9001),
-        _ct(105, sales_price=2_000_000, payment_term=9001),
-        _ct(106, sales_price=2_000_000, payment_term=9002),   # 2024 → alone in its peer group
-        _ct(201, sales_price=3_000_000),
-        _ct(202, sales_price=3_000_000),
-        _ct(203, sales_price=3_000_000),
-        _ct(204, sales_price=3_000_000),
-        _ct(205, sales_price=4_500_000),
-        _ct(301, sales_price=1_000_000),
-        _ct(302, sales_price=1_000_000),
-        _ct(303, sales_price=1_000_000),
-        _ct(304, sales_price=1_000_000),
-        _ct(305, sales_price=3_000_000),
-        _ct(401, sales_price=5_000_000),
-        _ct(402, sales_price=5_000_000),
-        _ct(901, sales_price=2_000_000, payment_term=9001),   # La Puerta — never fetched (out of scope)
+        # Studios — 2020 bucket (term 9020) @ realized 1,000,000 → 10,000/m².
+        _ct(101, sales_price=1_000_000, payment_term=9020),
+        _ct(102, sales_price=1_000_000, payment_term=9020),
+        _ct(103, sales_price=1_000_000, payment_term=9020),
+        _ct(104, sales_price=1_000_000, payment_term=9020),
+        _ct(105, sales_price=1_000_000, payment_term=9020),
+        _ct(150, sales_price=1_000_000, payment_term=9020),   # own 2020 bucket (zone 199)
+        # Studios — 2024 bucket (term 9024) @ realized 2,300,000 → 23,000/m².
+        _ct(111, sales_price=2_300_000, payment_term=9024),
+        _ct(112, sales_price=2_300_000, payment_term=9024),
+        _ct(113, sales_price=2_300_000, payment_term=9024),
+        _ct(114, sales_price=2_300_000, payment_term=9024),
+        _ct(115, sales_price=2_300_000, payment_term=9024),
+        _ct(116, sales_price=2_300_000, payment_term=9024),
+        # Apartments — 2024 bucket @ 30,000/m².
+        _ct(201, sales_price=3_000_000, payment_term=9024),
+        _ct(202, sales_price=3_000_000, payment_term=9024),
+        _ct(203, sales_price=3_000_000, payment_term=9024),
+        _ct(204, sales_price=3_000_000, payment_term=9024),
+        _ct(205, sales_price=3_000_000, payment_term=9024),
+        # Villas — 2024 bucket, 4 @ 10,000/m² + 1 @ 30,000/m² → high spread.
+        _ct(301, sales_price=1_000_000, payment_term=9024),
+        _ct(302, sales_price=1_000_000, payment_term=9024),
+        _ct(303, sales_price=1_000_000, payment_term=9024),
+        _ct(304, sales_price=1_000_000, payment_term=9024),
+        _ct(305, sales_price=3_000_000, payment_term=9024),
+        # Penthouses — 2024 bucket, only 2 sold (no qualifying baseline).
+        _ct(401, sales_price=5_000_000, payment_term=9024),
+        _ct(402, sales_price=5_000_000, payment_term=9024),
+        _ct(901, sales_price=1_000_000, payment_term=9020),   # La Puerta — never fetched (out of scope)
     ]
 
 
 def _d_client():
-    return _make_client(_d_units(), _d_contracts(), payment_terms=_D_TERMS)
+    return _make_client(_d_units(), _d_contracts(), phases=_D_PHASES,
+                        zones=_D_ZONE_PHASE, buildings=_D_BUILDINGS, payment_terms=_D_TERMS)
 
 
 def _d_items(result):
@@ -385,7 +425,7 @@ async def test_check_d_counts_tiers_and_separate_from_abc():
     assert d["count"] == 5
     assert (d["tier1_count"], d["tier2a_count"], d["tier2b_count"]) == (1, 3, 1)
     assert d["tier1_count"] + d["tier2a_count"] + d["tier2b_count"] == d["count"]
-    assert d["evaluated_count"] == 23
+    assert d["evaluated_count"] == 30
     assert d["unevaluable_count"] == 3
     # Check D is a separate object — A/B/C counts/total are untouched by it.
     assert r["total_issues"] == 0
@@ -394,30 +434,48 @@ async def test_check_d_counts_tiers_and_separate_from_abc():
 
 
 async def test_check_d_tier1_peer_precedence_and_dedupe():
-    # 105 fires BOTH Tier 1 (peer) and Tier 2a (type); it appears ONCE, shown as "peer".
+    # STU-24-PEER fires BOTH Tier 1 (peer) and Tier 2a (type); it appears ONCE, shown "peer".
     r = await get_data_quality_overview(client=_d_client())
     items = r["check_d"]["items"]
-    assert sum(1 for it in items if it["code"] == "STU-T1") == 1
-    row = _d_items(r)["STU-T1"]
+    assert sum(1 for it in items if it["code"] == "STU-24-PEER") == 1
+    row = _d_items(r)["STU-24-PEER"]
     assert row["signal"] == "peer"
     assert row["state"] == "sold"
-    assert row["list_pm2"] == 65_000.0
-    assert row["meter_price"] == 65_000.0          # meter == list/m² (the fix target)
-    assert row["anchor_realized_pm2"] == 20_000.0  # peer-group median realized/m²
-    assert row["ratio"] == 3.25                    # 65,000 / 20,000
-    assert row["list_total"] == 6_500_000.0
+    assert row["list_pm2"] == 80_000.0
+    assert row["meter_price"] == 80_000.0          # meter == list/m² (the fix target)
+    assert row["anchor_realized_pm2"] == 23_000.0  # 2024 peer-group median realized/m²
+    assert row["ratio"] == 3.48                    # 80,000 / 23,000
+    assert row["list_total"] == 8_000_000.0
 
 
-async def test_check_d_tier2a_low_spread_type_sold_and_unsold():
+async def test_check_d_sold_scored_against_own_vintage_bucket():
+    # STU-SOLD-OWN is a 2020-vintage sale; it is judged against its OWN 2020 bucket
+    # (median 10,000), NOT the type's latest 2024 bucket (median 23,000) — against 2024 its
+    # 65,000/m² list would clear 3×23,000=69,000 and NOT flag. Own-bucket scoring flags it.
     r = await get_data_quality_overview(client=_d_client())
-    by_code = _d_items(r)
-    assert by_code["STU-T2A-SOLD"]["signal"] == "type"
-    assert by_code["STU-T2A-SOLD"]["state"] == "sold"
-    assert by_code["STU-T2A-UNSOLD"]["signal"] == "type"
-    assert by_code["STU-T2A-UNSOLD"]["state"] == "unsold"
-    # Both anchor on the unit-type MEDIAN realized/m².
-    assert by_code["STU-T2A-SOLD"]["anchor_realized_pm2"] == 20_000.0
-    assert by_code["STU-T2A-UNSOLD"]["anchor_realized_pm2"] == 20_000.0
+    row = _d_items(r)["STU-SOLD-OWN"]
+    assert row["signal"] == "type"
+    assert row["state"] == "sold"
+    assert row["list_pm2"] == 65_000.0
+    assert row["anchor_realized_pm2"] == 10_000.0  # OWN 2020-bucket median (not 23,000)
+
+
+async def test_check_d_unsold_scored_against_latest_vintage_bucket():
+    # STU-UNSOLD-FLAG (no sale period) is judged against the type's LATEST qualifying bucket
+    # (2024, median 23,000) — a present-day list against a current-era benchmark.
+    r = await get_data_quality_overview(client=_d_client())
+    row = _d_items(r)["STU-UNSOLD-FLAG"]
+    assert row["signal"] == "type"
+    assert row["state"] == "unsold"
+    assert row["anchor_realized_pm2"] == 23_000.0  # LATEST 2024-bucket median
+
+
+async def test_check_d_studio_65k_not_flagged_under_current_era():
+    # The 53-unit-style false positive: an unsold studio listed at 65,000/m². Under the OLD
+    # all-history baseline (polluted by cheap early sales) it flagged; under the current-era
+    # 2024 baseline (median 23,000) 65,000 < 3×23,000 = 69,000 → correctly NOT flagged.
+    r = await get_data_quality_overview(client=_d_client())
+    assert "STU-UNSOLD-65K" not in _d_items(r)
 
 
 async def test_check_d_low_spread_gate_high_spread_type_not_flagged():
@@ -427,13 +485,13 @@ async def test_check_d_low_spread_gate_high_spread_type_not_flagged():
     assert "VIL-GATE" not in _d_items(r)
 
 
-async def test_check_d_tier2b_impossible_area_error():
+async def test_check_d_tier2b_possible_area_error():
     r = await get_data_quality_overview(client=_d_client())
-    row = _d_items(r)["VIL-T2B"]
-    assert row["signal"] == "impossible"
+    row = _d_items(r)["VIL-AREAERR"]
+    assert row["signal"] == "impossible"           # machine key unchanged; label softened in i18n
     assert row["state"] == "unsold"
     assert row["list_pm2"] == 200_000.0
-    assert row["anchor_realized_pm2"] == 30_000.0  # unit-type MAX realized/m²
+    assert row["anchor_realized_pm2"] == 30_000.0  # unit-type 2024-bucket MAX realized/m²
 
 
 async def test_check_d_area_error_low_spread_shows_type_not_impossible():
@@ -442,10 +500,13 @@ async def test_check_d_area_error_low_spread_shows_type_not_impossible():
     assert _d_items(r)["APT-AREAERR"]["signal"] == "type"
 
 
-async def test_check_d_unevaluable_units_skipped_and_counted():
+async def test_check_d_no_qualifying_bucket_is_unevaluable():
+    # Penthouses have only 2 sold → no (type, bucket) cell reaches MIN_GROUP_SIZE, so the
+    # type has NO current-era baseline at all → its priced units are UNEVALUABLE (Option A:
+    # no all-history fallback), neither flagged nor errored.
     r = await get_data_quality_overview(client=_d_client())
     codes = set(_d_items(r))
-    assert "PEN-UNEVAL" not in codes           # no peer group, no type baseline
+    assert "PEN-UNEVAL" not in codes
     assert "PEN-1" not in codes
     assert "PEN-2" not in codes
     assert r["check_d"]["unevaluable_count"] == 3   # PEN-1, PEN-2, PEN-UNEVAL

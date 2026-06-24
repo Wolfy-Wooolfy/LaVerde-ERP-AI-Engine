@@ -209,6 +209,22 @@ def _median(vals):
     return _quantile(sorted(vals), 0.5)
 
 
+def _decide_signal(list_pm2, peer_anchor, tb):
+    """Production tier decision (data_quality_service._check_d step 4), as a pure function so
+    the current-era and all-history counterfactuals share identical logic. Returns one of
+    peer | type | impossible | unflagged | unevaluable."""
+    if peer_anchor is None and tb is None:
+        return "unevaluable"
+    if peer_anchor is not None and list_pm2 > OUTLIER_LIST_TRUST_K * peer_anchor:
+        return "peer"
+    if (tb is not None and tb["spread"] < DQ_LIST_TYPE_SPREAD_MAX
+            and list_pm2 > DQ_LIST_TYPE_K * tb["median"]):
+        return "type"
+    if tb is not None and list_pm2 > DQ_LIST_IMPOSSIBLE_K * tb["max"]:
+        return "impossible"
+    return "unflagged"
+
+
 async def _odoo_check_d(client) -> dict:
     """INDEPENDENT end-to-end recompute of Check D (implausible list price/m²), straight
     from rs.structure.unit + rs.contract + rs.payment.term — does NOT import the service's
@@ -299,23 +315,45 @@ async def _odoo_check_d(client) -> dict:
             if med > 0:
                 peer_median[key] = med
 
-    # Type baseline — median, max, spread per type with >= MIN_GROUP_SIZE sold members.
-    type_vals = {}
+    # Type baseline — CURRENT-ERA aware [2026-06-24]: per (type_id, vintage bucket) with
+    # >= MIN_GROUP_SIZE sold members. Independent recompute of _check_d step 3 (replaces the
+    # prior all-history per-type baseline). latest_bucket = the type's newest qualifying cell.
+    type_bucket_vals = {}
     for m in sold_pop:
-        type_vals.setdefault(m["type_id"], []).append(m["realized_pm2"])
+        if m["bucket"] is None:
+            continue
+        type_bucket_vals.setdefault((m["type_id"], m["bucket"]), []).append(m["realized_pm2"])
     type_baseline = {}
-    for tid, vals in type_vals.items():
+    for key, vals in type_bucket_vals.items():
         if len(vals) >= OUTLIER_MIN_GROUP_SIZE:
             med = _median(vals)
             mx = max(vals)
             if med > 0:
-                type_baseline[tid] = {"median": med, "max": mx, "spread": mx / med}
+                type_baseline[key] = {"median": med, "max": mx, "spread": mx / med}
+    type_latest_bucket = {}
+    for (tid, b) in type_baseline:
+        if tid not in type_latest_bucket or b > type_latest_bucket[tid]:
+            type_latest_bucket[tid] = b
+
+    # All-history per-type baseline (the OLD, pre-2026-06-24 model) — recomputed ONLY to
+    # provide the counterfactual ("would this studio-65k list have flagged before?").
+    type_vals_ah: dict = {}
+    for m in sold_pop:
+        type_vals_ah.setdefault(m["type_id"], []).append(m["realized_pm2"])
+    type_baseline_ah: dict = {}
+    for tid, vals in type_vals_ah.items():
+        if len(vals) >= OUTLIER_MIN_GROUP_SIZE:
+            med = _median(vals)
+            mx = max(vals)
+            if med > 0:
+                type_baseline_ah[tid] = {"median": med, "max": mx, "spread": mx / med}
 
     flags: dict[int, str] = {}
     studio_units: set[int] = set()
     tier1 = tier2a = tier2b = 0
     evaluated = 0
     unevaluable = 0
+    details: list[dict] = []
     for u in units:
         area = _num(u.get(UNIT_AREA_FIELD))
         amount = _num(u.get(UNIT_AMOUNT_FIELD))
@@ -330,29 +368,36 @@ async def _odoo_check_d(client) -> dict:
         list_pm2 = _c2(amount / area)
 
         peer_anchor = None
+        own_bucket = None
         if is_sold and uid in realized:
             sd = _sale_date(uid)
             if sd is not None:
-                peer_anchor = peer_median.get((zone_id, type_id, _bucket(int(sd[:4]))))
+                own_bucket = _bucket(int(sd[:4]))
+                peer_anchor = peer_median.get((zone_id, type_id, own_bucket))
 
-        tb = type_baseline.get(type_id)
-        if peer_anchor is None and tb is None:
+        # Current-era bucket: own if sold(+date); else the type's latest qualifying bucket.
+        chosen_bucket = own_bucket if own_bucket is not None else type_latest_bucket.get(type_id)
+        tb = type_baseline.get((type_id, chosen_bucket)) if chosen_bucket is not None else None
+        decision = _decide_signal(list_pm2, peer_anchor, tb)
+        decision_ah = _decide_signal(list_pm2, peer_anchor, type_baseline_ah.get(type_id))
+        details.append({
+            "uid": uid, "code": u.get("code") or "", "type_name": type_name,
+            "state": "sold" if is_sold else "unsold", "area": area,
+            "list_pm2": list_pm2, "decision": decision, "decision_ah": decision_ah,
+        })
+
+        if decision == "unevaluable":
             unevaluable += 1
             continue
-
-        fires_t1 = peer_anchor is not None and list_pm2 > OUTLIER_LIST_TRUST_K * peer_anchor
-        fires_t2a = (tb is not None and tb["spread"] < DQ_LIST_TYPE_SPREAD_MAX
-                     and list_pm2 > DQ_LIST_TYPE_K * tb["median"])
-        fires_t2b = tb is not None and list_pm2 > DQ_LIST_IMPOSSIBLE_K * tb["max"]
-        if not (fires_t1 or fires_t2a or fires_t2b):
+        if decision == "unflagged":
             continue
-
-        if fires_t1:
-            flags[uid] = "peer"; tier1 += 1
-        elif fires_t2a:
-            flags[uid] = "type"; tier2a += 1
+        flags[uid] = decision
+        if decision == "peer":
+            tier1 += 1
+        elif decision == "type":
+            tier2a += 1
         else:
-            flags[uid] = "impossible"; tier2b += 1
+            tier2b += 1
         if "studio" in (type_name or "").lower():
             studio_units.add(uid)
 
@@ -362,6 +407,7 @@ async def _odoo_check_d(client) -> dict:
         "evaluated": evaluated, "unevaluable": unevaluable,
         "studio": len(studio_units),
         "scope_unit_count": len(units),
+        "details": details,
     }
 
 
@@ -565,6 +611,41 @@ async def main():
             print(f"      {r['code']:<16} {r['project_name']:<12} {r['unit_type_name']:<18} "
                   f"{r['state']:<6} list/m²={r['list_pm2']:>10,.0f}  meter={r['meter_price']:>10,.0f}  "
                   f"anchor={r['anchor_realized_pm2']:>10,.0f}  ×{r['ratio']:>6,.1f}  {r['signal']}")
+        print()
+
+        # ── CHECK D — TARGETED CONFIRMATIONS (the all-history → current-era effect) ──
+        # The current-era model must (1) still catch genuine area-entry errors and (2) stop
+        # flagging the confirmed-correct studio-65k current price lists. Both recomputed
+        # independently above (_odoo_check_d.details), so these are live, not asserted prose.
+        print(_SEP2)
+        print("  CHECK D — TARGETED CONFIRMATIONS (current-era model, 2026-06-24)")
+        print(_SEP2)
+        det = odoo_d["details"]
+        _flagged = ("peer", "type", "impossible")
+
+        # (1) area ≤ 1 (data-entry) errors must STILL be flagged under current-era.
+        area_err = sorted((x for x in det if x["area"] <= 1.0), key=lambda x: -x["list_pm2"])
+        still = sum(1 for x in area_err if x["decision"] in _flagged)
+        area_ok = len(area_err) > 0 and still == len(area_err)
+        fail += 0 if area_ok else 1
+        print(f"  (1) area≤1 data-entry errors STILL flagged: {still}/{len(area_err)}  {_ok(area_ok)}")
+        for x in area_err:
+            print(f"        uid={x['uid']:<6} {x['code']:<16} {x['type_name']:<16} "
+                  f"area={x['area']:>5,.0f}  list/m²={x['list_pm2']:>12,.0f}  "
+                  f"now={x['decision']:<11} (all-hist was {x['decision_ah']})")
+
+        # (2) HS-Studio UNSOLD listed in the ~65,000/m² regime must now be UNFLAGGED, having
+        #     been flagged under the all-history baseline (the false positives we removed).
+        studio65 = [x for x in det if "studio" in (x["type_name"] or "").lower()
+                    and x["state"] == "unsold" and 60_000 <= x["list_pm2"] <= 70_000]
+        now_unflagged = sum(1 for x in studio65 if x["decision"] not in _flagged)
+        was_flagged_ah = sum(1 for x in studio65 if x["decision_ah"] in _flagged)
+        studio_ok = (len(studio65) > 0 and now_unflagged == len(studio65)
+                     and was_flagged_ah == len(studio65))
+        fail += 0 if studio_ok else 1
+        print(f"  (2) HS-Studio UNSOLD @ 60-70k/m²: {len(studio65)} found | "
+              f"now UNFLAGGED={now_unflagged} | all-history WOULD-flag={was_flagged_ah}  {_ok(studio_ok)}")
+        print(f"        => current-era removed {was_flagged_ah} confirmed-correct studio-65k false positives")
         print()
 
     print(_SEP)

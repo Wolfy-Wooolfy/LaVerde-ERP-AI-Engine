@@ -3467,3 +3467,83 @@ numbers) unchanged.
 `cb96e2e` (C2 segment-aware endpoint + service + schema + unit tests) ·
 `8473421` (C3 clickable segments + drill-down wiring + i18n + CSS) ·
 C4 = verify script + live PASS + this entry.
+
+---
+
+## Session 22 — 2026-06-24 — Projects Inventory · Check D Current-Era Tier 2 Baseline + Label Softening
+
+### Decision 22.1 — Tier 2a/2b benchmark the CURRENT ERA, not all-history
+
+- **Problem:** Check D Tier 1 (peer) was already vintage-aware, but Tier 2a
+  (type baseline) and Tier 2b compared a unit's list price/m² against the
+  unit-TYPE's realized price/m² across ALL years 2018-2025. Egyptian
+  real-estate price/m² escalated ~6× over that span (discovery
+  `scripts/discover_vintage_sensitivity_check_d.py`, commit 611261f, Part 1:
+  median ~7,769 → ~47,100). An all-history baseline therefore benchmarked
+  today's price lists against a median polluted by cheap 2018-2021 sales,
+  manufacturing false positives — most visibly the ~52-53 unsold HS-Studio
+  units listed at 65,000/m², which La Verde's pricing department CONFIRMED
+  are correct current price-list values.
+- **Choice:** Tier 2a/2b now build the type baseline per
+  `(unit_type_id, 2-yr vintage bucket)` — the SAME `_vintage_bucket`
+  windowing Slice 2.5 Section A uses, at TYPE granularity. A candidate is
+  scored against ONE bucket:
+    - **SOLD** → its OWN sale-period bucket (from the sale date).
+    - **UNSOLD** → the type's LATEST vintage bucket that has ≥
+      `OUTLIER_MIN_GROUP_SIZE` (5) sold units (a present-day asking price has
+      no sale period and deserves a current-era benchmark).
+  The chosen bucket must have ≥5 sold AND clear the existing spread guard
+  (Tier 2a) / max test (Tier 2b). Thresholds (`DQ_LIST_TYPE_K`=3.0,
+  `DQ_LIST_IMPOSSIBLE_K`=5.0, `DQ_LIST_TYPE_SPREAD_MAX`=2.5,
+  `OUTLIER_MIN_GROUP_SIZE`=5, `VINTAGE_BUCKET_YEARS`=2) UNCHANGED. Tier 1,
+  scope, population, dedupe precedence (peer → type → impossible), and the
+  sale-date derivation (`rs.payment.term.contract_date`) are UNCHANGED.
+  Ported verbatim from the discovery's verified "CURRENT-ERA" model.
+
+### Decision 22.2 — Option A: no all-history fallback (unevaluable when no qualifying bucket)
+
+- **Choice:** If a unit's type has NO qualifying `(type, bucket)` cell in any
+  year (e.g. a type with < 5 sold), the unit is UNEVALUABLE under Tier 2 — it
+  is neither flagged nor errored, and is counted for the footnote. We do NOT
+  fall back to an all-history baseline.
+- **Rationale:** A fallback would reintroduce exactly the era-pollution this
+  change removes. Better to under-flag (and disclose it via the unevaluable
+  count) than to emit a benchmark known to be methodologically wrong. Live
+  effect: unevaluable rose 84 → 123.
+
+### Decision 22.3 — Tier 2b label softened to "Possible area error" / "خطأ مساحة محتمل"
+
+- **Choice:** The Tier 2b human-facing signal label changes from
+  "Impossible" / "مستحيل" to "Possible area error" / "خطأ مساحة محتمل"
+  (i18n `dq_d_signal_impossible` + the `dq_d_note_impossible` footnote, ar/en
+  parity 632 = 632). The machine key / tier identifier (`signal="impossible"`,
+  the schema `Literal`, the service constant `SIGNAL_IMPOSSIBLE`) is UNCHANGED.
+- **Rationale:** The discovery confirmed every Tier 2b catch is an area-entry
+  error (`total_area` entered as 1), not a price impossibility. The live
+  verify shows all 7 area=1 errors stay flagged (now as "type" — current-era
+  precedence absorbs them into Tier 2a, so live Tier 2b = 0 in today's
+  snapshot; the verify asserts they remain flagged regardless of tier).
+
+**Live verification (`scripts/verify_inventory_data_quality_live.py`, extended
+with a current-era independent recompute + an all-history counterfactual; run
+2026-06-24 standalone after the Decision 6.4 ritual — `__pycache__` purged,
+verify run as its own fresh process, strictly READ-ONLY): ALL CHECKS PASSED.**
+Check D flagged `{unit_id: signal}` map identity-equal tier-by-tier vs the
+independent recompute. Current-era live snapshot: **TOTAL 30 (was 84) —
+Tier 1 (peer) = 22 [unchanged], Tier 2a (type) = 8, Tier 2b = 0**; sold 22 /
+unsold 8; HS-Studio flagged 16 (was 69); unevaluable 123 (was 84). Targeted
+confirmations: **7/7 area=1 errors STILL flagged** (uids
+4323/4354/4141/4101/4483/3833/4294, list/m² 1.28M-3.51M, now "type",
+all-history was "impossible"); **52/52 HS-Studio unsold @ 60-70k/m² now
+UNFLAGGED** (each flagged under all-history — the confirmed-correct false
+positives removed). Full suite: **1363 passed, 4 skipped**.
+
+**Constraints honored:** Odoo strictly READ-ONLY (`ALLOWED_METHODS` untouched;
+service + verify use only `search_read` / `search_count` / `read_group`), zero
+OpenAI ($0.00), no git push / no tags (Khaled only), thresholds + Tier 1 +
+scope + population + dedupe + sale-date derivation unchanged. Only the Tier 2
+baseline SELECTION (all-history → current-era bucket) and the Tier 2b display
+label changed.
+
+**Commit:** (this session) Check D current-era Tier 2 + label softening +
+tests + verify-script + this entry — single atomic commit on `main`.
