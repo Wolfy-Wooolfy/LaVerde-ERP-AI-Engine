@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=".env")
 
 # Force UTF-8 stdout (Windows consoles default to cp1252)
@@ -109,170 +111,177 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET /api/v1/collections/kpi/pending-check-exposure ───────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=60) as client:
-            r = client.get(url, auth=(USERNAME, PASSWORD))
+        client = api_login(base_url)
+    except ApiLoginError as exc:
+        _log(_FAIL, f"Session login failed: {exc}")
+        _append_log_row(run_at, "", "", "", "", "", "", "FAIL", error=f"login failed: {exc}")
+        return 1
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
         _append_log_row(run_at, "", "", "", "", "", "", "FAIL", error=msg)
         return 1
 
-    # ── Step 2: Status code ───────────────────────────────────────────────────
-    ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
-    if not ok:
-        _log(_INFO, f"Response body: {r.text[:500]}")
-        _append_log_row(run_at, "", "", "", "", "", "", "FAIL",
-                        error=f"HTTP {r.status_code}")
-        return 1
+    try:
+        r = client.get(ENDPOINT, timeout=60)
 
-    body: dict = r.json()
-    _log(_INFO, f"Response body: {body}")
+        # ── Step 2: Status code ───────────────────────────────────────────────────
+        ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
+        if not ok:
+            _log(_INFO, f"Response body: {r.text[:500]}")
+            _append_log_row(run_at, "", "", "", "", "", "", "FAIL",
+                            error=f"HTTP {r.status_code}")
+            return 1
 
-    # ── Step 3: Required keys (standard + KPI 3 specific) ────────────────────
-    standard_keys = ("value", "currency", "record_count", "as_of",
-                     "cache_status", "rpc_duration_ms", "domain")
-    kpi3_keys = ("paid_amount_sum", "actual_paid_sum",
-                 "derivation_note", "data_quality_warning")
-    for k in standard_keys + kpi3_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
+        body: dict = r.json()
+        _log(_INFO, f"Response body: {body}")
 
-    if failures:
-        _append_log_row(run_at, "", "", "", "", "", "", "FAIL",
-                        error=f"missing keys: {failures}")
-        return 1
+        # ── Step 3: Required keys (standard + KPI 3 specific) ────────────────────
+        standard_keys = ("value", "currency", "record_count", "as_of",
+                         "cache_status", "rpc_duration_ms", "domain")
+        kpi3_keys = ("paid_amount_sum", "actual_paid_sum",
+                     "derivation_note", "data_quality_warning")
+        for k in standard_keys + kpi3_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
 
-    # ── Step 4: Extract values ────────────────────────────────────────────────
-    value: float = float(body["value"])
-    paid_sum: float = float(body["paid_amount_sum"])
-    actual_sum: float = float(body["actual_paid_sum"])
-    record_count: int = int(body["record_count"])
-    cache_status: str = body["cache_status"]
-    rpc_ms: int = int(body["rpc_duration_ms"])
-    delta = value - BASELINE_EGP
-    delta_sign = "+" if delta >= 0 else ""
+        if failures:
+            _append_log_row(run_at, "", "", "", "", "", "", "FAIL",
+                            error=f"missing keys: {failures}")
+            return 1
 
-    # ── Step 5: Structured summary ────────────────────────────────────────────
-    print()
-    print(_SEP)
-    print("KPI 3 — Pending Check Exposure Verification")
-    print(f"Run timestamp     : {run_at}")
-    print(_SEP)
-    print(f"Backend value     : {value:>20,.2f} EGP")
-    print(f"D0 baseline       : {BASELINE_EGP:>20,.2f} EGP ({BASELINE_DATE})")
-    print(f"Delta vs baseline : {delta_sign}{delta:>19,.2f} EGP")
-    print(f"  paid_amount_sum : {paid_sum:>20,.2f} EGP")
-    print(f"  actual_paid_sum : {actual_sum:>20,.2f} EGP")
-    print(f"Record count      : {record_count:>20,} installments")
-    print(f"Cache status      : {cache_status:>20}")
-    print(f"RPC duration      : {rpc_ms:>17} ms")
-    print(f"Domain used       : {body.get('domain')}")
-    print(f"Derivation note   : {body.get('derivation_note')!r}")
-    print(f"DQ warning        : {body.get('data_quality_warning')!r}")
-    print(_SEP)
-    print()
+        # ── Step 4: Extract values ────────────────────────────────────────────────
+        value: float = float(body["value"])
+        paid_sum: float = float(body["paid_amount_sum"])
+        actual_sum: float = float(body["actual_paid_sum"])
+        record_count: int = int(body["record_count"])
+        cache_status: str = body["cache_status"]
+        rpc_ms: int = int(body["rpc_duration_ms"])
+        delta = value - BASELINE_EGP
+        delta_sign = "+" if delta >= 0 else ""
 
-    # ── Step 6: Value sanity assertions ───────────────────────────────────────
-    if not _check("value >= MIN_VALUE_EGP",
-                  value >= MIN_VALUE_EGP,
-                  f"{value:,.2f} >= {MIN_VALUE_EGP:,.2f}"):
-        failures.append("value_below_min")
+        # ── Step 5: Structured summary ────────────────────────────────────────────
+        print()
+        print(_SEP)
+        print("KPI 3 — Pending Check Exposure Verification")
+        print(f"Run timestamp     : {run_at}")
+        print(_SEP)
+        print(f"Backend value     : {value:>20,.2f} EGP")
+        print(f"D0 baseline       : {BASELINE_EGP:>20,.2f} EGP ({BASELINE_DATE})")
+        print(f"Delta vs baseline : {delta_sign}{delta:>19,.2f} EGP")
+        print(f"  paid_amount_sum : {paid_sum:>20,.2f} EGP")
+        print(f"  actual_paid_sum : {actual_sum:>20,.2f} EGP")
+        print(f"Record count      : {record_count:>20,} installments")
+        print(f"Cache status      : {cache_status:>20}")
+        print(f"RPC duration      : {rpc_ms:>17} ms")
+        print(f"Domain used       : {body.get('domain')}")
+        print(f"Derivation note   : {body.get('derivation_note')!r}")
+        print(f"DQ warning        : {body.get('data_quality_warning')!r}")
+        print(_SEP)
+        print()
 
-    if not _check("value <= MAX_VALUE_EGP",
-                  value <= MAX_VALUE_EGP,
-                  f"{value:,.2f} <= {MAX_VALUE_EGP:,.2f}"):
-        failures.append("value_above_max")
+        # ── Step 6: Value sanity assertions ───────────────────────────────────────
+        if not _check("value >= MIN_VALUE_EGP",
+                      value >= MIN_VALUE_EGP,
+                      f"{value:,.2f} >= {MIN_VALUE_EGP:,.2f}"):
+            failures.append("value_below_min")
 
-    if not _check("record_count > 0",
-                  record_count > 0,
-                  f"got {record_count:,}"):
-        failures.append("record_count_zero")
+        if not _check("value <= MAX_VALUE_EGP",
+                      value <= MAX_VALUE_EGP,
+                      f"{value:,.2f} <= {MAX_VALUE_EGP:,.2f}"):
+            failures.append("value_above_max")
 
-    if not _check("currency == 'EGP'",
-                  body.get("currency") == "EGP",
-                  f"got {body.get('currency')!r}"):
-        failures.append("wrong_currency")
+        if not _check("record_count > 0",
+                      record_count > 0,
+                      f"got {record_count:,}"):
+            failures.append("record_count_zero")
 
-    if not _check("cache_status in {fresh, cached}",
-                  cache_status in {"fresh", "cached"},
-                  f"got {cache_status!r}"):
-        failures.append("bad_cache_status")
+        if not _check("currency == 'EGP'",
+                      body.get("currency") == "EGP",
+                      f"got {body.get('currency')!r}"):
+            failures.append("wrong_currency")
 
-    # ── Step 7: KPI 3 specific — domain shape ─────────────────────────────────
-    # Decision 4.1: single-clause state='post' (same as KPI 1).
-    expected_domain = [["state", "=", "post"]]
-    domain: list = body.get("domain", None)
-    if not _check(
-        "domain == [['state','=','post']]",
-        domain == expected_domain,
-        f"got {domain!r}",
-    ):
-        failures.append("domain_wrong")
+        if not _check("cache_status in {fresh, cached}",
+                      cache_status in {"fresh", "cached"},
+                      f"got {cache_status!r}"):
+            failures.append("bad_cache_status")
 
-    # ── Step 8: KPI 3 specific — derivation correctness ──────────────────────
-    if not _check(
-        "paid_amount_sum > actual_paid_sum (positive exposure)",
-        paid_sum > actual_sum,
-        f"paid={paid_sum:,.2f}, actual={actual_sum:,.2f}",
-    ):
-        failures.append("negative_exposure")
-
-    derived_check = abs(paid_sum - actual_sum - value)
-    if not _check(
-        "paid_amount_sum - actual_paid_sum == value (within 0.01 EGP)",
-        derived_check < 0.01,
-        f"delta={derived_check:.4f}",
-    ):
-        failures.append("derivation_mismatch")
-
-    # ── Step 9: KPI 3 specific — derivation_note field ───────────────────────
-    if not _check(
-        f"derivation_note == {EXPECTED_DERIVATION_NOTE!r}",
-        body.get("derivation_note") == EXPECTED_DERIVATION_NOTE,
-        f"got {body.get('derivation_note')!r}",
-    ):
-        failures.append("derivation_note_wrong")
-
-    # ── Step 10: KPI 3 specific — data_quality_warning field ─────────────────
-    # Normal case: None (no anomaly). "value_is_negative" only if derived < 0.
-    dqw = body.get("data_quality_warning")
-    if value >= 0:
+        # ── Step 7: KPI 3 specific — domain shape ─────────────────────────────────
+        # Decision 4.1: single-clause state='post' (same as KPI 1).
+        expected_domain = [["state", "=", "post"]]
+        domain: list = body.get("domain", None)
         if not _check(
-            "data_quality_warning is None (value >= 0, no anomaly)",
-            dqw is None,
-            f"got {dqw!r}",
+            "domain == [['state','=','post']]",
+            domain == expected_domain,
+            f"got {domain!r}",
         ):
-            failures.append("unexpected_dq_warning")
-    else:
+            failures.append("domain_wrong")
+
+        # ── Step 8: KPI 3 specific — derivation correctness ──────────────────────
         if not _check(
-            "data_quality_warning == 'value_is_negative' (value < 0)",
-            dqw == "value_is_negative",
-            f"got {dqw!r}",
+            "paid_amount_sum > actual_paid_sum (positive exposure)",
+            paid_sum > actual_sum,
+            f"paid={paid_sum:,.2f}, actual={actual_sum:,.2f}",
         ):
-            failures.append("missing_dq_warning")
+            failures.append("negative_exposure")
 
-    # ── Step 11: Response headers ─────────────────────────────────────────────
-    cc = r.headers.get("cache-control", "")
-    _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
-    _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
+        derived_check = abs(paid_sum - actual_sum - value)
+        if not _check(
+            "paid_amount_sum - actual_paid_sum == value (within 0.01 EGP)",
+            derived_check < 0.01,
+            f"delta={derived_check:.4f}",
+        ):
+            failures.append("derivation_mismatch")
 
-    # ── Step 12: Second request — cache hit ───────────────────────────────────
-    _log(_INFO, "Issuing second request to verify cache hit ...")
-    with httpx.Client(timeout=30) as client:
-        r2 = client.get(url, auth=(USERNAME, PASSWORD))
-    body2: dict = r2.json()
-    if not _check("second call cache_status == 'cached'",
-                  body2.get("cache_status") == "cached",
-                  f"got {body2.get('cache_status')!r}"):
-        failures.append("cache_not_hit_on_second_call")
-    if not _check("second call rpc_duration_ms == 0",
-                  int(body2.get("rpc_duration_ms", -1)) == 0,
-                  f"got {body2.get('rpc_duration_ms')}"):
-        failures.append("cache_rpc_ms_nonzero")
+        # ── Step 9: KPI 3 specific — derivation_note field ───────────────────────
+        if not _check(
+            f"derivation_note == {EXPECTED_DERIVATION_NOTE!r}",
+            body.get("derivation_note") == EXPECTED_DERIVATION_NOTE,
+            f"got {body.get('derivation_note')!r}",
+        ):
+            failures.append("derivation_note_wrong")
+
+        # ── Step 10: KPI 3 specific — data_quality_warning field ─────────────────
+        # Normal case: None (no anomaly). "value_is_negative" only if derived < 0.
+        dqw = body.get("data_quality_warning")
+        if value >= 0:
+            if not _check(
+                "data_quality_warning is None (value >= 0, no anomaly)",
+                dqw is None,
+                f"got {dqw!r}",
+            ):
+                failures.append("unexpected_dq_warning")
+        else:
+            if not _check(
+                "data_quality_warning == 'value_is_negative' (value < 0)",
+                dqw == "value_is_negative",
+                f"got {dqw!r}",
+            ):
+                failures.append("missing_dq_warning")
+
+        # ── Step 11: Response headers ─────────────────────────────────────────────
+        cc = r.headers.get("cache-control", "")
+        _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
+        _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
+
+        # ── Step 12: Second request — cache hit ───────────────────────────────────
+        _log(_INFO, "Issuing second request to verify cache hit ...")
+        r2 = client.get(ENDPOINT, timeout=30)
+        body2: dict = r2.json()
+        if not _check("second call cache_status == 'cached'",
+                      body2.get("cache_status") == "cached",
+                      f"got {body2.get('cache_status')!r}"):
+            failures.append("cache_not_hit_on_second_call")
+        if not _check("second call rpc_duration_ms == 0",
+                      int(body2.get("rpc_duration_ms", -1)) == 0,
+                      f"got {body2.get('rpc_duration_ms')}"):
+            failures.append("cache_rpc_ms_nonzero")
+    finally:
+        client.close()
 
     # ── Result ────────────────────────────────────────────────────────────────
     _append_log_row(
