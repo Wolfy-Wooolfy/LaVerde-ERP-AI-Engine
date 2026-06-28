@@ -31,6 +31,8 @@ from datetime import date, datetime, timezone
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=".env")
 
 if hasattr(sys.stdout, "buffer"):
@@ -114,196 +116,203 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET endpoint ──────────────────────────────────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=60) as client:
-            r = client.get(url, auth=(USERNAME, PASSWORD))
+        client = api_login(base_url)
+    except ApiLoginError as exc:
+        _log(_FAIL, f"Session login failed: {exc}")
+        _append_log(run_at, 0, 0, "", "", "", "", "", ["login_failed"])
+        return 1
     except httpx.ConnectError as exc:
         _log(_FAIL, f"Cannot reach {base_url} — is the server running? ({exc})")
         _append_log(run_at, 0, 0, "", "", "", "", "", ["connect_error"])
         return 1
 
-    # ── Step 2: HTTP 200 ──────────────────────────────────────────────────────
-    if not _check("HTTP 200", r.status_code == 200, f"got {r.status_code}"):
-        _log(_INFO, f"Body: {r.text[:500]}")
-        _append_log(run_at, 0, 0, "", "", "", "", "", [f"http_{r.status_code}"])
-        return 1
+    try:
+        r = client.get(ENDPOINT, timeout=60)
 
-    body: dict = r.json()
-    _log(_INFO, f"Top-level keys: {list(body.keys())}")
+        # ── Step 2: HTTP 200 ──────────────────────────────────────────────────────
+        if not _check("HTTP 200", r.status_code == 200, f"got {r.status_code}"):
+            _log(_INFO, f"Body: {r.text[:500]}")
+            _append_log(run_at, 0, 0, "", "", "", "", "", [f"http_{r.status_code}"])
+            return 1
 
-    # ── Step 3: Required top-level keys ───────────────────────────────────────
-    required_keys = (
-        "months", "total_6m", "total_record_count", "average_monthly",
-        "period_start", "period_end", "currency", "as_of",
-        "cache_status", "cache_ttl_seconds", "rpc_duration_ms", "domain",
-    )
-    for k in required_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
+        body: dict = r.json()
+        _log(_INFO, f"Top-level keys: {list(body.keys())}")
 
-    if failures:
-        _append_log(run_at, 0, 0, "", "", "", "", "", failures)
-        return 1
+        # ── Step 3: Required top-level keys ───────────────────────────────────────
+        required_keys = (
+            "months", "total_6m", "total_record_count", "average_monthly",
+            "period_start", "period_end", "currency", "as_of",
+            "cache_status", "cache_ttl_seconds", "rpc_duration_ms", "domain",
+        )
+        for k in required_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
 
-    # ── Step 4: Extract values ────────────────────────────────────────────────
-    months: list   = body["months"]
-    total_6m       = float(body["total_6m"])
-    total_count    = int(body["total_record_count"])
-    avg_monthly    = float(body["average_monthly"])
-    period_start   = body["period_start"]
-    period_end     = body["period_end"]
-    cache_status   = body["cache_status"]
-    cache_ttl      = int(body["cache_ttl_seconds"])
-    rpc_ms         = int(body["rpc_duration_ms"])
+        if failures:
+            _append_log(run_at, 0, 0, "", "", "", "", "", failures)
+            return 1
 
-    # ── Step 5: months array — shape and length ───────────────────────────────
-    if not _check("months is a list", isinstance(months, list)):
-        failures.append("months_not_list")
-    elif not _check(f"months has exactly {_EXPECTED_MONTHS} entries", len(months) == _EXPECTED_MONTHS,
-                    f"got {len(months)}"):
-        failures.append("months_count_wrong")
+        # ── Step 4: Extract values ────────────────────────────────────────────────
+        months: list   = body["months"]
+        total_6m       = float(body["total_6m"])
+        total_count    = int(body["total_record_count"])
+        avg_monthly    = float(body["average_monthly"])
+        period_start   = body["period_start"]
+        period_end     = body["period_end"]
+        cache_status   = body["cache_status"]
+        cache_ttl      = int(body["cache_ttl_seconds"])
+        rpc_ms         = int(body["rpc_duration_ms"])
 
-    per_month_keys = {"month", "label_en", "label_ar", "amount", "record_count"}
-    for i, entry in enumerate(months):
-        missing = per_month_keys - set(entry.keys())
-        if not _check(f"months[{i}] has all 5 keys", not missing, f"missing: {missing}"):
-            failures.append(f"months_{i}_missing_keys")
+        # ── Step 5: months array — shape and length ───────────────────────────────
+        if not _check("months is a list", isinstance(months, list)):
+            failures.append("months_not_list")
+        elif not _check(f"months has exactly {_EXPECTED_MONTHS} entries", len(months) == _EXPECTED_MONTHS,
+                        f"got {len(months)}"):
+            failures.append("months_count_wrong")
 
-    # ── Step 6: months ordering — oldest first, 6 consecutive months ──────────
-    if len(months) == _EXPECTED_MONTHS:
-        today = date.today()
-        sm    = today.month - 5
-        sy    = today.year
-        if sm <= 0:
-            sm += 12
-            sy -= 1
-        y, m = sy, sm
+        per_month_keys = {"month", "label_en", "label_ar", "amount", "record_count"}
         for i, entry in enumerate(months):
-            expected_ym = f"{y:04d}-{m:02d}"
-            _check(
-                f"months[{i}].month == {expected_ym}",
-                entry.get("month") == expected_ym,
-                f"got {entry.get('month')!r}",
-            )
-            if entry.get("month") != expected_ym:
-                failures.append(f"months_{i}_wrong_ym")
-            m += 1
-            if m > 12:
-                m = 1
-                y += 1
+            missing = per_month_keys - set(entry.keys())
+            if not _check(f"months[{i}] has all 5 keys", not missing, f"missing: {missing}"):
+                failures.append(f"months_{i}_missing_keys")
 
-    # ── Step 7: Zero-month handling (Decision 5.7) ────────────────────────────
-    n_nonzero = sum(1 for e in months if float(e.get("amount", 0)) > 0)
-    n_zero    = _EXPECTED_MONTHS - n_nonzero
-    _log(_INFO, f"Non-zero months: {n_nonzero}/{_EXPECTED_MONTHS}  (zero months expected during data-entry period)")
-    if n_zero > 0:
-        _log(_WARN, f"{n_zero} month(s) have zero amount — EXPECTED per Decision 5.7, not a bug")
+        # ── Step 6: months ordering — oldest first, 6 consecutive months ──────────
+        if len(months) == _EXPECTED_MONTHS:
+            today = date.today()
+            sm    = today.month - 5
+            sy    = today.year
+            if sm <= 0:
+                sm += 12
+                sy -= 1
+            y, m = sy, sm
+            for i, entry in enumerate(months):
+                expected_ym = f"{y:04d}-{m:02d}"
+                _check(
+                    f"months[{i}].month == {expected_ym}",
+                    entry.get("month") == expected_ym,
+                    f"got {entry.get('month')!r}",
+                )
+                if entry.get("month") != expected_ym:
+                    failures.append(f"months_{i}_wrong_ym")
+                m += 1
+                if m > 12:
+                    m = 1
+                    y += 1
 
-    # ── Step 8: total_6m == SUM(months.amount) ────────────────────────────────
-    computed_total = sum(float(e.get("amount", 0)) for e in months)
-    if not _check(
-        "total_6m == SUM(months.amount)",
-        abs(total_6m - computed_total) < 0.01,
-        f"total={total_6m:.2f}, sum={computed_total:.2f}",
-    ):
-        failures.append("total_inconsistency")
+        # ── Step 7: Zero-month handling (Decision 5.7) ────────────────────────────
+        n_nonzero = sum(1 for e in months if float(e.get("amount", 0)) > 0)
+        n_zero    = _EXPECTED_MONTHS - n_nonzero
+        _log(_INFO, f"Non-zero months: {n_nonzero}/{_EXPECTED_MONTHS}  (zero months expected during data-entry period)")
+        if n_zero > 0:
+            _log(_WARN, f"{n_zero} month(s) have zero amount — EXPECTED per Decision 5.7, not a bug")
 
-    computed_count = sum(int(e.get("record_count", 0)) for e in months)
-    if not _check(
-        "total_record_count == SUM(months.record_count)",
-        total_count == computed_count,
-        f"total={total_count}, sum={computed_count}",
-    ):
-        failures.append("count_inconsistency")
-
-    # ── Step 9: average_monthly == total_6m / 6 ──────────────────────────────
-    expected_avg = total_6m / 6
-    if not _check(
-        "average_monthly == total_6m / 6",
-        abs(avg_monthly - expected_avg) < 0.01,
-        f"got {avg_monthly:.2f}, expected {expected_avg:.2f}",
-    ):
-        failures.append("average_wrong")
-
-    # ── Step 10: cache_ttl_seconds == 3600 ────────────────────────────────────
-    if not _check("cache_ttl_seconds == 3600", cache_ttl == 3600, f"got {cache_ttl}"):
-        failures.append("wrong_cache_ttl")
-
-    # ── Step 11: currency ─────────────────────────────────────────────────────
-    if not _check("currency == 'EGP'", body.get("currency") == "EGP"):
-        failures.append("wrong_currency")
-
-    if not _check(
-        "cache_status in {fresh, cached}",
-        cache_status in {"fresh", "cached"},
-        f"got {cache_status!r}",
-    ):
-        failures.append("bad_cache_status")
-
-    # ── Step 12: Response headers ─────────────────────────────────────────────
-    cc = r.headers.get("cache-control", "")
-    _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
-    _check("Cache-Control: max-age=3600", "max-age=3600" in cc, f"header: {cc!r}")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
-
-    # ── Step 13: Domain shape ─────────────────────────────────────────────────
-    domain: list = body.get("domain", [])
-    if _check("domain has 3 clauses", len(domain) == 3, f"got {len(domain)}"):
-        _check("domain[0] == state=post", domain[0] == ["state", "=", "post"])
-        _check("domain[1][0] == date", domain[1][0] == "date")
-        _check("domain[1][1] == >=",   domain[1][1] == ">=")
-        _check("domain[2][0] == date", domain[2][0] == "date")
-        _check("domain[2][1] == <=",   domain[2][1] == "<=")
-    else:
-        failures.append("domain_shape")
-
-    # ── Step 14: December 2025 baseline cross-check ───────────────────────────
-    print()
-    _log(_INFO, "December 2025 baseline cross-check (D0 Part 1 discovery baseline)")
-    dec25_entry = next((e for e in months if e.get("month") == "2025-12"), None)
-    dec25_amount  = float(dec25_entry.get("amount",       0.0)) if dec25_entry else 0.0
-    dec25_records = int(dec25_entry.get("record_count",    0))   if dec25_entry else 0
-
-    if not _check(
-        "December 2025 entry present in months array",
-        dec25_entry is not None,
-    ):
-        failures.append("dec25_missing")
-    else:
-        delta = abs(dec25_amount - _DEC_2025_BASELINE_AMOUNT)
+        # ── Step 8: total_6m == SUM(months.amount) ────────────────────────────────
+        computed_total = sum(float(e.get("amount", 0)) for e in months)
         if not _check(
-            f"Dec 2025 amount == {_DEC_2025_BASELINE_AMOUNT:,.2f} EGP (D0 baseline)",
-            delta <= _DEC_2025_BASELINE_TOLERANCE,
-            f"got {dec25_amount:,.2f}, delta={delta:,.2f}",
+            "total_6m == SUM(months.amount)",
+            abs(total_6m - computed_total) < 0.01,
+            f"total={total_6m:.2f}, sum={computed_total:.2f}",
         ):
-            failures.append(f"dec25_amount_mismatch_delta_{delta:.2f}")
+            failures.append("total_inconsistency")
+
+        computed_count = sum(int(e.get("record_count", 0)) for e in months)
+        if not _check(
+            "total_record_count == SUM(months.record_count)",
+            total_count == computed_count,
+            f"total={total_count}, sum={computed_count}",
+        ):
+            failures.append("count_inconsistency")
+
+        # ── Step 9: average_monthly == total_6m / 6 ──────────────────────────────
+        expected_avg = total_6m / 6
+        if not _check(
+            "average_monthly == total_6m / 6",
+            abs(avg_monthly - expected_avg) < 0.01,
+            f"got {avg_monthly:.2f}, expected {expected_avg:.2f}",
+        ):
+            failures.append("average_wrong")
+
+        # ── Step 10: cache_ttl_seconds == 3600 ────────────────────────────────────
+        if not _check("cache_ttl_seconds == 3600", cache_ttl == 3600, f"got {cache_ttl}"):
+            failures.append("wrong_cache_ttl")
+
+        # ── Step 11: currency ─────────────────────────────────────────────────────
+        if not _check("currency == 'EGP'", body.get("currency") == "EGP"):
+            failures.append("wrong_currency")
 
         if not _check(
-            f"Dec 2025 record_count == {_DEC_2025_BASELINE_RECORDS} (D0 baseline)",
-            dec25_records == _DEC_2025_BASELINE_RECORDS,
-            f"got {dec25_records}",
+            "cache_status in {fresh, cached}",
+            cache_status in {"fresh", "cached"},
+            f"got {cache_status!r}",
         ):
-            failures.append(f"dec25_records_mismatch_{dec25_records}")
+            failures.append("bad_cache_status")
 
-    # ── Step 15: Second request — cache hit ───────────────────────────────────
-    _log(_INFO, "Second request — verifying cache hit ...")
-    with httpx.Client(timeout=30) as client:
-        r2 = client.get(url, auth=(USERNAME, PASSWORD))
-    body2 = r2.json()
-    if not _check(
-        "second call cache_status == 'cached'",
-        body2.get("cache_status") == "cached",
-        f"got {body2.get('cache_status')!r}",
-    ):
-        failures.append("cache_not_hit_on_second_call")
-    if not _check(
-        "second call rpc_duration_ms == 0",
-        int(body2.get("rpc_duration_ms", -1)) == 0,
-        f"got {body2.get('rpc_duration_ms')}",
-    ):
-        failures.append("cache_rpc_ms_nonzero")
+        # ── Step 12: Response headers ─────────────────────────────────────────────
+        cc = r.headers.get("cache-control", "")
+        _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
+        _check("Cache-Control: max-age=3600", "max-age=3600" in cc, f"header: {cc!r}")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
+
+        # ── Step 13: Domain shape ─────────────────────────────────────────────────
+        domain: list = body.get("domain", [])
+        if _check("domain has 3 clauses", len(domain) == 3, f"got {len(domain)}"):
+            _check("domain[0] == state=post", domain[0] == ["state", "=", "post"])
+            _check("domain[1][0] == date", domain[1][0] == "date")
+            _check("domain[1][1] == >=",   domain[1][1] == ">=")
+            _check("domain[2][0] == date", domain[2][0] == "date")
+            _check("domain[2][1] == <=",   domain[2][1] == "<=")
+        else:
+            failures.append("domain_shape")
+
+        # ── Step 14: December 2025 baseline cross-check ───────────────────────────
+        print()
+        _log(_INFO, "December 2025 baseline cross-check (D0 Part 1 discovery baseline)")
+        dec25_entry = next((e for e in months if e.get("month") == "2025-12"), None)
+        dec25_amount  = float(dec25_entry.get("amount",       0.0)) if dec25_entry else 0.0
+        dec25_records = int(dec25_entry.get("record_count",    0))   if dec25_entry else 0
+
+        if not _check(
+            "December 2025 entry present in months array",
+            dec25_entry is not None,
+        ):
+            failures.append("dec25_missing")
+        else:
+            delta = abs(dec25_amount - _DEC_2025_BASELINE_AMOUNT)
+            if not _check(
+                f"Dec 2025 amount == {_DEC_2025_BASELINE_AMOUNT:,.2f} EGP (D0 baseline)",
+                delta <= _DEC_2025_BASELINE_TOLERANCE,
+                f"got {dec25_amount:,.2f}, delta={delta:,.2f}",
+            ):
+                failures.append(f"dec25_amount_mismatch_delta_{delta:.2f}")
+
+            if not _check(
+                f"Dec 2025 record_count == {_DEC_2025_BASELINE_RECORDS} (D0 baseline)",
+                dec25_records == _DEC_2025_BASELINE_RECORDS,
+                f"got {dec25_records}",
+            ):
+                failures.append(f"dec25_records_mismatch_{dec25_records}")
+
+        # ── Step 15: Second request — cache hit ───────────────────────────────────
+        _log(_INFO, "Second request — verifying cache hit ...")
+        r2 = client.get(ENDPOINT, timeout=30)
+        body2 = r2.json()
+        if not _check(
+            "second call cache_status == 'cached'",
+            body2.get("cache_status") == "cached",
+            f"got {body2.get('cache_status')!r}",
+        ):
+            failures.append("cache_not_hit_on_second_call")
+        if not _check(
+            "second call rpc_duration_ms == 0",
+            int(body2.get("rpc_duration_ms", -1)) == 0,
+            f"got {body2.get('rpc_duration_ms')}",
+        ):
+            failures.append("cache_rpc_ms_nonzero")
+    finally:
+        client.close()
 
     # ── Structured output ─────────────────────────────────────────────────────
     print()
