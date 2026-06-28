@@ -58,6 +58,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
 from backend.shared.odoo.client import OdooClient
 
 load_dotenv(dotenv_path=".env")
@@ -259,11 +260,10 @@ async def _direct_odoo_tenure(cairo_today: date) -> dict:
 
 # ── KPI A cross-check ─────────────────────────────────────────────────────────
 
-def _fetch_kpi_a_headcount(base_url: str) -> int | None:
-    """GET KPI A endpoint; return headcount or None on failure."""
+def _fetch_kpi_a_headcount(http: httpx.Client) -> int | None:
+    """GET KPI A endpoint via the shared authed client; return headcount or None on failure."""
     try:
-        with httpx.Client(timeout=30) as http:
-            r = http.get(f"{base_url}{KPI_A_ENDPOINT}", auth=(USERNAME, PASSWORD))
+        r = http.get(KPI_A_ENDPOINT, timeout=30)
         if r.status_code == 200:
             return int(r.json().get("headcount", -1))
     except Exception:
@@ -305,182 +305,190 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET /api/v1/hr/kpi/tenure-distribution ───────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=60) as http:
-            r = http.get(url, auth=(USERNAME, PASSWORD))
+        http = api_login(base_url)
+    except ApiLoginError as exc:
+        msg = f"Session login failed: {exc}"
+        _log(_FAIL, msg)
+        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", error=msg)
+        return 0
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
         _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", error=msg)
         return 0
 
-    # ── Step 2: Status code ───────────────────────────────────────────────────
-    ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
-    if not ok:
-        _log(_INFO, f"Response body: {r.text[:500]}")
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
-                        error=f"HTTP {r.status_code}")
-        return 0
-
-    body: dict = r.json()
-
-    # ── Step 3: Required keys ─────────────────────────────────────────────────
-    required_keys = (
-        "bands", "missing_date_count", "total_employed",
-        "reference_date", "as_of", "cache_status", "rpc_duration_ms",
-    )
-    for k in required_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
-
-    if failures:
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
-                        error=f"missing keys: {failures}")
-        return 0
-
-    # ── Step 4: Extract values ────────────────────────────────────────────────
-    total_employed:     int  = int(body["total_employed"])
-    missing_date_count: int  = int(body["missing_date_count"])
-    bands:              list = body["bands"]
-    reference_date:     str  = body["reference_date"]
-    cache_status:       str  = body["cache_status"]
-    rpc_ms:             int  = int(body["rpc_duration_ms"])
-
-    num_bands   = len(bands)
-    band_sum    = sum(b["count"] for b in bands)
-    band_labels = [b["band"] for b in bands]
-
-    # ── Step 5: Structured summary ────────────────────────────────────────────
-    print(_SEP)
-    print("ENDPOINT RESPONSE SUMMARY")
-    print(_SEP2)
-    bl_note_emp = "(no baseline)" if BASELINE_TOTAL_EMPLOYED is None else f"(baseline {BASELINE_TOTAL_EMPLOYED})"
-    bl_note_mis = "(no baseline)" if BASELINE_MISSING is None else f"(baseline {BASELINE_MISSING})"
-    print(f"  total_employed     : {total_employed:>6}   {bl_note_emp}")
-    print(f"  missing_date_count : {missing_date_count:>6}   {bl_note_mis}")
-    print(f"  sum(band counts)   : {band_sum:>6}   (must == total_employed - missing_date_count)")
-    print(f"  band_sum + missing : {band_sum + missing_date_count:>6}   (must == total_employed {total_employed})")
-    print(f"  num_bands          : {num_bands:>6}   (must == 5)")
-    print(f"  reference_date     : {reference_date}   (cairo today: {cairo_today_str})")
-    print(f"  cache_status       : {cache_status}")
-    print(f"  rpc_duration_ms    : {rpc_ms} ms")
-    print(f"  as_of              : {body.get('as_of')}")
-    print(_SEP2)
-    print("  Band breakdown (endpoint):")
-    for b in bands:
-        print(f"    {b['band']:>6}  :  {b['count']:>4}")
-    print(f"    missing  :  {missing_date_count:>4}  (Running-contract employees with null date_start)")
-    print(_SEP)
-    print()
-
-    # ── Step 6: Drift reporting (INFO only — baselines not yet set) ───────────
-    print("DRIFT SECTION  [INFO only — no hard fail; set baselines after first run]:")
-    _drift("total_employed    ", total_employed,     BASELINE_TOTAL_EMPLOYED)
-    _drift("missing_date_count", missing_date_count, BASELINE_MISSING)
-    print()
-
-    # ── Step 7: Structural integrity (hard FAIL) ──────────────────────────────
-    print("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]:")
-
-    if not _check("total_employed >= 0", total_employed >= 0, f"got {total_employed}"):
-        failures.append("negative_total_employed")
-
-    if not _check("missing_date_count >= 0", missing_date_count >= 0,
-                  f"got {missing_date_count}"):
-        failures.append("negative_missing_date_count")
-
-    if not _check("all band counts >= 0",
-                  all(b["count"] >= 0 for b in bands),
-                  "at least one band count is negative"):
-        failures.append("negative_band_count")
-
-    if not _check("num_bands == 5", num_bands == 5, f"got {num_bands}"):
-        failures.append("wrong_band_count")
-
-    if not _check(
-        "band labels in fixed order",
-        band_labels == EXPECTED_BAND_LABELS,
-        f"got {band_labels}",
-    ):
-        failures.append("band_label_order_wrong")
-
-    if not _check(
-        "band_sum + missing_date_count == total_employed",
-        band_sum + missing_date_count == total_employed,
-        f"{band_sum} + {missing_date_count} = {band_sum + missing_date_count} != {total_employed}",
-    ):
-        failures.append("sanity_invariant_violated")
-
-    if not _check(
-        "reference_date == Cairo today",
-        reference_date == cairo_today_str,
-        f"got {reference_date!r}, expected {cairo_today_str!r}",
-    ):
-        failures.append("reference_date_mismatch")
-
-    if not _check(
-        "cache_status in {fresh, cached}",
-        cache_status in {"fresh", "cached"},
-        f"got {cache_status!r}",
-    ):
-        failures.append("bad_cache_status")
-
-    if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
-        failures.append("negative_rpc_ms")
-
-    print()
-
-    # ── Step 8: Response headers ──────────────────────────────────────────────
-    print("HTTP HEADERS:")
-    cc  = r.headers.get("cache-control", "")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("Cache-Control: private",        "private"    in cc,  f"header: {cc!r}")
-    _check("Cache-Control: max-age=60",     "max-age=60" in cc,  f"header: {cc!r}")
-    _check("X-Cache-Status header present", bool(xcs),           f"got {xcs!r}")
-    print()
-
-    # ── Step 9: Second request — cache hit ───────────────────────────────────
-    print("CACHE HIT CHECK:")
-    _log(_INFO, "Issuing second request to verify cache hit ...")
     try:
-        with httpx.Client(timeout=30) as http:
-            r2 = http.get(url, auth=(USERNAME, PASSWORD))
-        body2: dict = r2.json()
-        if not _check(
-            "second call cache_status == 'cached'",
-            body2.get("cache_status") == "cached",
-            f"got {body2.get('cache_status')!r}",
-        ):
-            failures.append("cache_not_hit_on_second_call")
-        if not _check(
-            "second call rpc_duration_ms == 0",
-            int(body2.get("rpc_duration_ms", -1)) == 0,
-            f"got {body2.get('rpc_duration_ms')}",
-        ):
-            failures.append("cache_rpc_ms_nonzero")
-    except Exception as exc:
-        _log(_FAIL, f"Second request failed: {exc}")
-        failures.append("second_request_failed")
-    print()
+        r = http.get(ENDPOINT, timeout=60)
 
-    # ── Step 10: Cross-KPI consistency (INFO only) ────────────────────────────
-    print("CROSS-KPI CONSISTENCY  [INFO only — both KPIs query same Running population]:")
-    kpi_a_headcount: int | str = "n/a"
-    kpi_a_count = _fetch_kpi_a_headcount(base_url)
-    if kpi_a_count is None:
-        _log(_INFO, "KPI A endpoint unreachable — cross-KPI check skipped")
-        kpi_a_headcount = "error"
-    else:
-        kpi_a_headcount = kpi_a_count
-        if total_employed == kpi_a_count:
-            _log(_INFO,
-                 f"total_employed ({total_employed}) == KPI A headcount ({kpi_a_count}) — consistent")
+        # ── Step 2: Status code ───────────────────────────────────────────────────
+        ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
+        if not ok:
+            _log(_INFO, f"Response body: {r.text[:500]}")
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
+                            error=f"HTTP {r.status_code}")
+            return 0
+
+        body: dict = r.json()
+
+        # ── Step 3: Required keys ─────────────────────────────────────────────────
+        required_keys = (
+            "bands", "missing_date_count", "total_employed",
+            "reference_date", "as_of", "cache_status", "rpc_duration_ms",
+        )
+        for k in required_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
+
+        if failures:
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
+                            error=f"missing keys: {failures}")
+            return 0
+
+        # ── Step 4: Extract values ────────────────────────────────────────────────
+        total_employed:     int  = int(body["total_employed"])
+        missing_date_count: int  = int(body["missing_date_count"])
+        bands:              list = body["bands"]
+        reference_date:     str  = body["reference_date"]
+        cache_status:       str  = body["cache_status"]
+        rpc_ms:             int  = int(body["rpc_duration_ms"])
+
+        num_bands   = len(bands)
+        band_sum    = sum(b["count"] for b in bands)
+        band_labels = [b["band"] for b in bands]
+
+        # ── Step 5: Structured summary ────────────────────────────────────────────
+        print(_SEP)
+        print("ENDPOINT RESPONSE SUMMARY")
+        print(_SEP2)
+        bl_note_emp = "(no baseline)" if BASELINE_TOTAL_EMPLOYED is None else f"(baseline {BASELINE_TOTAL_EMPLOYED})"
+        bl_note_mis = "(no baseline)" if BASELINE_MISSING is None else f"(baseline {BASELINE_MISSING})"
+        print(f"  total_employed     : {total_employed:>6}   {bl_note_emp}")
+        print(f"  missing_date_count : {missing_date_count:>6}   {bl_note_mis}")
+        print(f"  sum(band counts)   : {band_sum:>6}   (must == total_employed - missing_date_count)")
+        print(f"  band_sum + missing : {band_sum + missing_date_count:>6}   (must == total_employed {total_employed})")
+        print(f"  num_bands          : {num_bands:>6}   (must == 5)")
+        print(f"  reference_date     : {reference_date}   (cairo today: {cairo_today_str})")
+        print(f"  cache_status       : {cache_status}")
+        print(f"  rpc_duration_ms    : {rpc_ms} ms")
+        print(f"  as_of              : {body.get('as_of')}")
+        print(_SEP2)
+        print("  Band breakdown (endpoint):")
+        for b in bands:
+            print(f"    {b['band']:>6}  :  {b['count']:>4}")
+        print(f"    missing  :  {missing_date_count:>4}  (Running-contract employees with null date_start)")
+        print(_SEP)
+        print()
+
+        # ── Step 6: Drift reporting (INFO only — baselines not yet set) ───────────
+        print("DRIFT SECTION  [INFO only — no hard fail; set baselines after first run]:")
+        _drift("total_employed    ", total_employed,     BASELINE_TOTAL_EMPLOYED)
+        _drift("missing_date_count", missing_date_count, BASELINE_MISSING)
+        print()
+
+        # ── Step 7: Structural integrity (hard FAIL) ──────────────────────────────
+        print("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]:")
+
+        if not _check("total_employed >= 0", total_employed >= 0, f"got {total_employed}"):
+            failures.append("negative_total_employed")
+
+        if not _check("missing_date_count >= 0", missing_date_count >= 0,
+                      f"got {missing_date_count}"):
+            failures.append("negative_missing_date_count")
+
+        if not _check("all band counts >= 0",
+                      all(b["count"] >= 0 for b in bands),
+                      "at least one band count is negative"):
+            failures.append("negative_band_count")
+
+        if not _check("num_bands == 5", num_bands == 5, f"got {num_bands}"):
+            failures.append("wrong_band_count")
+
+        if not _check(
+            "band labels in fixed order",
+            band_labels == EXPECTED_BAND_LABELS,
+            f"got {band_labels}",
+        ):
+            failures.append("band_label_order_wrong")
+
+        if not _check(
+            "band_sum + missing_date_count == total_employed",
+            band_sum + missing_date_count == total_employed,
+            f"{band_sum} + {missing_date_count} = {band_sum + missing_date_count} != {total_employed}",
+        ):
+            failures.append("sanity_invariant_violated")
+
+        if not _check(
+            "reference_date == Cairo today",
+            reference_date == cairo_today_str,
+            f"got {reference_date!r}, expected {cairo_today_str!r}",
+        ):
+            failures.append("reference_date_mismatch")
+
+        if not _check(
+            "cache_status in {fresh, cached}",
+            cache_status in {"fresh", "cached"},
+            f"got {cache_status!r}",
+        ):
+            failures.append("bad_cache_status")
+
+        if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
+            failures.append("negative_rpc_ms")
+
+        print()
+
+        # ── Step 8: Response headers ──────────────────────────────────────────────
+        print("HTTP HEADERS:")
+        cc  = r.headers.get("cache-control", "")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("Cache-Control: private",        "private"    in cc,  f"header: {cc!r}")
+        _check("Cache-Control: max-age=60",     "max-age=60" in cc,  f"header: {cc!r}")
+        _check("X-Cache-Status header present", bool(xcs),           f"got {xcs!r}")
+        print()
+
+        # ── Step 9: Second request — cache hit ───────────────────────────────────
+        print("CACHE HIT CHECK:")
+        _log(_INFO, "Issuing second request to verify cache hit ...")
+        try:
+            r2 = http.get(ENDPOINT, timeout=30)
+            body2: dict = r2.json()
+            if not _check(
+                "second call cache_status == 'cached'",
+                body2.get("cache_status") == "cached",
+                f"got {body2.get('cache_status')!r}",
+            ):
+                failures.append("cache_not_hit_on_second_call")
+            if not _check(
+                "second call rpc_duration_ms == 0",
+                int(body2.get("rpc_duration_ms", -1)) == 0,
+                f"got {body2.get('rpc_duration_ms')}",
+            ):
+                failures.append("cache_rpc_ms_nonzero")
+        except Exception as exc:
+            _log(_FAIL, f"Second request failed: {exc}")
+            failures.append("second_request_failed")
+        print()
+
+        # ── Step 10: Cross-KPI consistency (INFO only) ────────────────────────────
+        print("CROSS-KPI CONSISTENCY  [INFO only — both KPIs query same Running population]:")
+        kpi_a_headcount: int | str = "n/a"
+        kpi_a_count = _fetch_kpi_a_headcount(http)
+        if kpi_a_count is None:
+            _log(_INFO, "KPI A endpoint unreachable — cross-KPI check skipped")
+            kpi_a_headcount = "error"
         else:
-            _log(_INFO,
-                 f"total_employed ({total_employed}) != KPI A headcount ({kpi_a_count}) "
-                 f"— investigate: possible cache skew or population divergence")
-    print()
+            kpi_a_headcount = kpi_a_count
+            if total_employed == kpi_a_count:
+                _log(_INFO,
+                     f"total_employed ({total_employed}) == KPI A headcount ({kpi_a_count}) — consistent")
+            else:
+                _log(_INFO,
+                     f"total_employed ({total_employed}) != KPI A headcount ({kpi_a_count}) "
+                     f"— investigate: possible cache skew or population divergence")
+        print()
+    finally:
+        http.close()
 
     # ── Step 11: Independent Odoo cross-check (hard FAIL if mismatch) ─────────
     print("INDEPENDENT ODOO CROSS-CHECK  [FAIL if endpoint != direct Odoo computation]:")
