@@ -45,6 +45,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=".env")
 
 # Force UTF-8 stdout (Windows consoles default to cp1252)
@@ -190,10 +192,14 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET /api/v1/collections/kpi/late-uncollected ─────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=30) as client:
-            r = client.get(url, auth=(USERNAME, PASSWORD))
+        client = api_login(base_url)
+    except ApiLoginError as exc:
+        _log(_FAIL, f"Session login failed: {exc}")
+        log_row["error"] = f"login failed: {exc}"
+        _append_log_row(log_row)
+        return 1
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
@@ -201,170 +207,174 @@ def main() -> int:
         _append_log_row(log_row)
         return 1
 
-    # ── Step 2: Status code ───────────────────────────────────────────────────
-    ok = _check("HTTP 200", r.status_code == 200,
-                f"got {r.status_code}")
-    if not ok:
-        failures.append("http_status")
-        _log(_INFO, f"Response body: {r.text[:500]}")
-        log_row["error"] = f"HTTP {r.status_code}"
-        _append_log_row(log_row)
-        return 1
+    try:
+        r = client.get(ENDPOINT, timeout=30)
 
-    body: dict = r.json()
-    _log(_INFO, f"Response body: {body}")
+        # ── Step 2: Status code ───────────────────────────────────────────────────
+        ok = _check("HTTP 200", r.status_code == 200,
+                    f"got {r.status_code}")
+        if not ok:
+            failures.append("http_status")
+            _log(_INFO, f"Response body: {r.text[:500]}")
+            log_row["error"] = f"HTTP {r.status_code}"
+            _append_log_row(log_row)
+            return 1
 
-    # ── Step 3: Required keys ─────────────────────────────────────────────────
-    required_keys = ("value", "currency", "record_count", "as_of",
-                     "cache_status", "rpc_duration_ms", "domain",
-                     "cheques_in_pipeline", "cheques_record_count",
-                     "drill_down_domain", "cheques_drill_down_domain",
-                     "data_quality_warning")
-    for k in required_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
+        body: dict = r.json()
+        _log(_INFO, f"Response body: {body}")
 
-    if failures:
-        log_row["error"] = f"missing keys: {failures}"
-        _append_log_row(log_row)
-        return 1
+        # ── Step 3: Required keys ─────────────────────────────────────────────────
+        required_keys = ("value", "currency", "record_count", "as_of",
+                         "cache_status", "rpc_duration_ms", "domain",
+                         "cheques_in_pipeline", "cheques_record_count",
+                         "drill_down_domain", "cheques_drill_down_domain",
+                         "data_quality_warning")
+        for k in required_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
 
-    # ── Step 4: Value sanity ──────────────────────────────────────────────────
-    value: float = float(body["value"])
-    record_count: int = int(body["record_count"])
-    cache_status: str = body["cache_status"]
-    rpc_ms: int = int(body["rpc_duration_ms"])
+        if failures:
+            log_row["error"] = f"missing keys: {failures}"
+            _append_log_row(log_row)
+            return 1
 
-    log_row.update({
-        "value_egp": f"{value:,.2f}",
-        "record_count": record_count,
-        "cache_status": cache_status,
-        "rpc_duration_ms": rpc_ms,
-    })
+        # ── Step 4: Value sanity ──────────────────────────────────────────────────
+        value: float = float(body["value"])
+        record_count: int = int(body["record_count"])
+        cache_status: str = body["cache_status"]
+        rpc_ms: int = int(body["rpc_duration_ms"])
 
-    _log(_INFO, f"Late Uncollected: EGP {value:>20,.2f}")
-    _log(_INFO, f"Record count:     {record_count:>20,}")
-    _log(_INFO, f"Cache status:     {cache_status:>20}")
-    _log(_INFO, f"RPC duration:     {rpc_ms:>17} ms")
+        log_row.update({
+            "value_egp": f"{value:,.2f}",
+            "record_count": record_count,
+            "cache_status": cache_status,
+            "rpc_duration_ms": rpc_ms,
+        })
 
-    if not _check("value >= MIN_VALUE_EGP",
-                  value >= MIN_VALUE_EGP,
-                  f"{value:,.2f} >= {MIN_VALUE_EGP:,.2f}"):
-        failures.append("value_below_min")
+        _log(_INFO, f"Late Uncollected: EGP {value:>20,.2f}")
+        _log(_INFO, f"Record count:     {record_count:>20,}")
+        _log(_INFO, f"Cache status:     {cache_status:>20}")
+        _log(_INFO, f"RPC duration:     {rpc_ms:>17} ms")
 
-    if not _check("value <= MAX_VALUE_EGP",
-                  value <= MAX_VALUE_EGP,
-                  f"{value:,.2f} <= {MAX_VALUE_EGP:,.2f}"):
-        failures.append("value_above_max")
+        if not _check("value >= MIN_VALUE_EGP",
+                      value >= MIN_VALUE_EGP,
+                      f"{value:,.2f} >= {MIN_VALUE_EGP:,.2f}"):
+            failures.append("value_below_min")
 
-    if not _check("record_count >= MIN_RECORD_COUNT",
-                  record_count >= MIN_RECORD_COUNT,
-                  f"got {record_count}"):
-        failures.append("record_count_zero")
+        if not _check("value <= MAX_VALUE_EGP",
+                      value <= MAX_VALUE_EGP,
+                      f"{value:,.2f} <= {MAX_VALUE_EGP:,.2f}"):
+            failures.append("value_above_max")
 
-    if not _check("currency == 'EGP'",
-                  body.get("currency") == "EGP",
-                  f"got {body.get('currency')!r}"):
-        failures.append("wrong_currency")
+        if not _check("record_count >= MIN_RECORD_COUNT",
+                      record_count >= MIN_RECORD_COUNT,
+                      f"got {record_count}"):
+            failures.append("record_count_zero")
 
-    if not _check("cache_status in {fresh, cached}",
-                  cache_status in {"fresh", "cached"},
-                  f"got {cache_status!r}"):
-        failures.append("bad_cache_status")
+        if not _check("currency == 'EGP'",
+                      body.get("currency") == "EGP",
+                      f"got {body.get('currency')!r}"):
+            failures.append("wrong_currency")
 
-    # ── Step 5: Response headers ──────────────────────────────────────────────
-    cc = r.headers.get("cache-control", "")
-    _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
-    _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
+        if not _check("cache_status in {fresh, cached}",
+                      cache_status in {"fresh", "cached"},
+                      f"got {cache_status!r}"):
+            failures.append("bad_cache_status")
 
-    # ── Step 6: Domain shape ──────────────────────────────────────────────────
-    domain: list = body.get("domain", [])
-    if _check("domain has 3 clauses", len(domain) == 3, f"got {len(domain)}"):
-        _check("domain[0] == state=post",
-               domain[0] == ["state", "=", "post"])
-        _check("domain[1] == payment_state in [unpaid,partial]",
-               domain[1] == ["payment_state", "in", ["unpaid", "partial"]])
-        _check("domain[2][0] == date", domain[2][0] == "date")
-        _check("domain[2][1] == <", domain[2][1] == "<")
-        date_str = domain[2][2]
-        try:
-            parsed_date = date.fromisoformat(date_str)
-            today_utc = date.today()
-            delta_days = abs((parsed_date - today_utc).days)
-            if not _check(
-                "domain[2][2] is a valid recent ISO date",
-                delta_days <= 1,
-                f"got {date_str!r}",
-            ):
-                failures.append("domain_date_stale")
-                _log(_INFO, f"  delta from UTC today: {delta_days} day(s)")
-        except ValueError as exc:
-            _log(_FAIL, f"domain[2][2] is not a valid ISO date — got {date_str!r}: {exc}")
-            failures.append("domain_date_invalid")
+        # ── Step 5: Response headers ──────────────────────────────────────────────
+        cc = r.headers.get("cache-control", "")
+        _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
+        _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
+
+        # ── Step 6: Domain shape ──────────────────────────────────────────────────
+        domain: list = body.get("domain", [])
+        if _check("domain has 3 clauses", len(domain) == 3, f"got {len(domain)}"):
+            _check("domain[0] == state=post",
+                   domain[0] == ["state", "=", "post"])
+            _check("domain[1] == payment_state in [unpaid,partial]",
+                   domain[1] == ["payment_state", "in", ["unpaid", "partial"]])
+            _check("domain[2][0] == date", domain[2][0] == "date")
+            _check("domain[2][1] == <", domain[2][1] == "<")
+            date_str = domain[2][2]
+            try:
+                parsed_date = date.fromisoformat(date_str)
+                today_utc = date.today()
+                delta_days = abs((parsed_date - today_utc).days)
+                if not _check(
+                    "domain[2][2] is a valid recent ISO date",
+                    delta_days <= 1,
+                    f"got {date_str!r}",
+                ):
+                    failures.append("domain_date_stale")
+                    _log(_INFO, f"  delta from UTC today: {delta_days} day(s)")
+            except ValueError as exc:
+                _log(_FAIL, f"domain[2][2] is not a valid ISO date — got {date_str!r}: {exc}")
+                failures.append("domain_date_invalid")
+                date_str = ""
+        else:
+            failures.append("domain_shape")
             date_str = ""
-    else:
-        failures.append("domain_shape")
-        date_str = ""
 
-    # ── Step 6b: Cheques fields ───────────────────────────────────────────────
-    cheques_in_pipeline: float = float(body.get("cheques_in_pipeline") or 0.0)
-    cheques_record_count = body.get("cheques_record_count")
-    drill_down_domain: list = body.get("drill_down_domain", [])
-    cheques_drill_down_domain = body.get("cheques_drill_down_domain")
-    data_quality_warning = body.get("data_quality_warning")
+        # ── Step 6b: Cheques fields ───────────────────────────────────────────────
+        cheques_in_pipeline: float = float(body.get("cheques_in_pipeline") or 0.0)
+        cheques_record_count = body.get("cheques_record_count")
+        drill_down_domain: list = body.get("drill_down_domain", [])
+        cheques_drill_down_domain = body.get("cheques_drill_down_domain")
+        data_quality_warning = body.get("data_quality_warning")
 
-    _log(_INFO, f"Cheques in pipeline:  EGP {cheques_in_pipeline:>16,.2f}")
-    _log(_INFO, f"Cheques record count: {str(cheques_record_count):>20}")
-    _log(_INFO, f"Cheques drill_down:   {str(cheques_drill_down_domain):>20}")
+        _log(_INFO, f"Cheques in pipeline:  EGP {cheques_in_pipeline:>16,.2f}")
+        _log(_INFO, f"Cheques record count: {str(cheques_record_count):>20}")
+        _log(_INFO, f"Cheques drill_down:   {str(cheques_drill_down_domain):>20}")
 
-    if not _check("cheques_in_pipeline >= 0",
-                  cheques_in_pipeline >= 0,
-                  f"{cheques_in_pipeline:,.2f}"):
-        failures.append("cheques_negative")
+        if not _check("cheques_in_pipeline >= 0",
+                      cheques_in_pipeline >= 0,
+                      f"{cheques_in_pipeline:,.2f}"):
+            failures.append("cheques_negative")
 
-    if not _check("cheques_in_pipeline <= value",
-                  cheques_in_pipeline <= value,
-                  f"{cheques_in_pipeline:,.2f} <= {value:,.2f}"):
-        failures.append("cheques_exceeds_value")
+        if not _check("cheques_in_pipeline <= value",
+                      cheques_in_pipeline <= value,
+                      f"{cheques_in_pipeline:,.2f} <= {value:,.2f}"):
+            failures.append("cheques_exceeds_value")
 
-    if not _check("cheques_record_count is null",
-                  cheques_record_count is None,
-                  f"got {cheques_record_count!r}"):
-        failures.append("cheques_record_count_not_null")
+        if not _check("cheques_record_count is null",
+                      cheques_record_count is None,
+                      f"got {cheques_record_count!r}"):
+            failures.append("cheques_record_count_not_null")
 
-    if _check("drill_down_domain has 3 clauses",
-              len(drill_down_domain) == 3,
-              f"got {len(drill_down_domain)}"):
-        if not _check("drill_down_domain == legacy domain",
-                      drill_down_domain == domain,
-                      f"drill_down={drill_down_domain!r}"):
-            failures.append("drill_down_domain_mismatch")
-    else:
-        failures.append("drill_down_domain_shape")
+        if _check("drill_down_domain has 3 clauses",
+                  len(drill_down_domain) == 3,
+                  f"got {len(drill_down_domain)}"):
+            if not _check("drill_down_domain == legacy domain",
+                          drill_down_domain == domain,
+                          f"drill_down={drill_down_domain!r}"):
+                failures.append("drill_down_domain_mismatch")
+        else:
+            failures.append("drill_down_domain_shape")
 
-    if not _check("cheques_drill_down_domain is null",
-                  cheques_drill_down_domain is None,
-                  f"got {cheques_drill_down_domain!r}"):
-        failures.append("cheques_drill_down_not_null")
+        if not _check("cheques_drill_down_domain is null",
+                      cheques_drill_down_domain is None,
+                      f"got {cheques_drill_down_domain!r}"):
+            failures.append("cheques_drill_down_not_null")
 
-    if data_quality_warning is not None:
-        _log(_WARN, f"data_quality_warning present: {data_quality_warning!r}")
+        if data_quality_warning is not None:
+            _log(_WARN, f"data_quality_warning present: {data_quality_warning!r}")
 
-    # ── Step 7: Second request — cache hit ───────────────────────────────────
-    _log(_INFO, "Issuing second request to verify cache hit ...")
-    with httpx.Client(timeout=30) as client:
-        r2 = client.get(url, auth=(USERNAME, PASSWORD))
-    body2: dict = r2.json()
-    if not _check("second call cache_status == 'cached'",
-                  body2.get("cache_status") == "cached",
-                  f"got {body2.get('cache_status')!r}"):
-        failures.append("cache_not_hit_on_second_call")
-    if not _check("second call rpc_duration_ms == 0",
-                  int(body2.get("rpc_duration_ms", -1)) == 0,
-                  f"got {body2.get('rpc_duration_ms')}"):
-        failures.append("cache_rpc_ms_nonzero")
+        # ── Step 7: Second request — cache hit ───────────────────────────────────
+        _log(_INFO, "Issuing second request to verify cache hit ...")
+        r2 = client.get(ENDPOINT, timeout=30)
+        body2: dict = r2.json()
+        if not _check("second call cache_status == 'cached'",
+                      body2.get("cache_status") == "cached",
+                      f"got {body2.get('cache_status')!r}"):
+            failures.append("cache_not_hit_on_second_call")
+        if not _check("second call rpc_duration_ms == 0",
+                      int(body2.get("rpc_duration_ms", -1)) == 0,
+                      f"got {body2.get('rpc_duration_ms')}"):
+            failures.append("cache_rpc_ms_nonzero")
+    finally:
+        client.close()
 
     # ── Step 8: Cross-check via direct Odoo read_group (PATH A — Decision 11.13) ──
     _log(_INFO, "Cross-checking KPI 2 PATH A assertions against direct Odoo read_group ...")
