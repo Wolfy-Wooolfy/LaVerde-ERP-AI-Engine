@@ -40,6 +40,8 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=".env")
 
 if hasattr(sys.stdout, "buffer"):
@@ -145,270 +147,276 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: First call (fresh) ────────────────────────────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then fresh call ────
     _log(_INFO, "Step 1 — Fresh call …")
     try:
-        with httpx.Client(timeout=60) as http:
-            r1 = http.get(url_5b, auth=(USERNAME, PASSWORD))
+        http = api_login(base_url)
+    except ApiLoginError as exc:
+        _log(_FAIL, f"Session login failed: {exc}")
+        _append_log(run_at, today_local, [], False, "", "", ["login_failed"])
+        return 1
     except httpx.ConnectError as exc:
         _log(_FAIL, f"Cannot reach {base_url} — is the server running? ({exc})")
         _append_log(run_at, today_local, [], False, "", "", ["connect_error"])
         return 1
 
-    if not _check("HTTP 200 (first call)", r1.status_code == 200, f"got {r1.status_code}"):
-        _log(_INFO, f"Body: {r1.text[:500]}")
-        _append_log(run_at, today_local, [], False, "", "", [f"http_{r1.status_code}"])
-        return 1
+    try:
+        r1 = http.get(ENDPOINT_5B, timeout=60)
 
-    body: dict = r1.json()
-    _log(_INFO, f"Top-level keys: {sorted(body.keys())}")
+        if not _check("HTTP 200 (first call)", r1.status_code == 200, f"got {r1.status_code}"):
+            _log(_INFO, f"Body: {r1.text[:500]}")
+            _append_log(run_at, today_local, [], False, "", "", [f"http_{r1.status_code}"])
+            return 1
 
-    # ── Step 2: Top-level shape ───────────────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 2 — Response shape")
+        body: dict = r1.json()
+        _log(_INFO, f"Top-level keys: {sorted(body.keys())}")
 
-    required_top = {"mtd", "ytd", "ytd_period_assumption", "currency",
-                    "as_of", "cache_status", "rpc_duration_ms"}
-    for k in required_top:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_top_{k}")
+        # ── Step 2: Top-level shape ───────────────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 2 — Response shape")
 
-    if failures:
-        _append_log(run_at, today_local, [], False, "", "", failures)
-        return 1
+        required_top = {"mtd", "ytd", "ytd_period_assumption", "currency",
+                        "as_of", "cache_status", "rpc_duration_ms"}
+        for k in required_top:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_top_{k}")
 
-    period_top_keys  = {"projects", "total_numerator_egp", "total_denominator_egp",
-                        "total_rate_percent", "period_start", "period_end"}
-    per_project_keys = {"project_id", "project_name", "numerator_egp",
-                        "denominator_egp", "rate_percent",
-                        "record_count_num", "record_count_den"}
+        if failures:
+            _append_log(run_at, today_local, [], False, "", "", failures)
+            return 1
 
-    for period_name in ("mtd", "ytd"):
-        sub = body.get(period_name, {})
-        for k in period_top_keys:
-            if not _check(f"{period_name}.{k} present", k in sub):
-                failures.append(f"missing_{period_name}_{k}")
-        projs = sub.get("projects", [])
-        if not _check(f"{period_name}.projects has exactly 3 entries", len(projs) == 3,
-                      f"got {len(projs)}"):
-            failures.append(f"{period_name}_projects_count")
-        for proj in projs:
-            for k in per_project_keys:
-                if not _check(f"{period_name}.project.{k} present", k in proj):
-                    failures.append(f"missing_{period_name}_proj_{k}")
+        period_top_keys  = {"projects", "total_numerator_egp", "total_denominator_egp",
+                            "total_rate_percent", "period_start", "period_end"}
+        per_project_keys = {"project_id", "project_name", "numerator_egp",
+                            "denominator_egp", "rate_percent",
+                            "record_count_num", "record_count_den"}
 
-    if failures:
-        _append_log(run_at, today_local, [], False, "", "", failures)
-        return 1
+        for period_name in ("mtd", "ytd"):
+            sub = body.get(period_name, {})
+            for k in period_top_keys:
+                if not _check(f"{period_name}.{k} present", k in sub):
+                    failures.append(f"missing_{period_name}_{k}")
+            projs = sub.get("projects", [])
+            if not _check(f"{period_name}.projects has exactly 3 entries", len(projs) == 3,
+                          f"got {len(projs)}"):
+                failures.append(f"{period_name}_projects_count")
+            for proj in projs:
+                for k in per_project_keys:
+                    if not _check(f"{period_name}.project.{k} present", k in proj):
+                        failures.append(f"missing_{period_name}_proj_{k}")
 
-    _check("currency == 'EGP'", body.get("currency") == "EGP")
-    _check("ytd_period_assumption == 'calendar_year'",
-           body.get("ytd_period_assumption") == "calendar_year",
-           f"got {body.get('ytd_period_assumption')!r}")
+        if failures:
+            _append_log(run_at, today_local, [], False, "", "", failures)
+            return 1
 
-    # ── Step 3: Project order and names ──────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 3 — Project order, names, period dates")
+        _check("currency == 'EGP'", body.get("currency") == "EGP")
+        _check("ytd_period_assumption == 'calendar_year'",
+               body.get("ytd_period_assumption") == "calendar_year",
+               f"got {body.get('ytd_period_assumption')!r}")
 
-    for period_name in ("mtd", "ytd"):
-        projs = body[period_name]["projects"]
-        ids   = [p["project_id"] for p in projs]
-        names = [p["project_name"] for p in projs]
-        if not _check(f"{period_name}: project_ids == [1, 2, 3]", ids == [1, 2, 3],
-                      f"got {ids}"):
-            failures.append(f"{period_name}_project_order")
-        expected_names = ["New Capital", "Cassette", "La puerta"]
-        if not _check(f"{period_name}: project_names correct", names == expected_names,
-                      f"got {names}"):
-            failures.append(f"{period_name}_project_names")
-        for p in projs:
-            if not _check(f"{period_name}: {p['project_name']} name has no 'Project#' prefix",
-                          not str(p["project_name"]).startswith("Project#")):
-                failures.append(f"{period_name}_raw_name")
+        # ── Step 3: Project order and names ──────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 3 — Project order, names, period dates")
 
-    # Period date assertions
-    _today_obj = date.fromisoformat(today_local)
-    expected_mtd_start = date(_today_obj.year, _today_obj.month, 1).isoformat()
-    expected_ytd_start = f"{_today_obj.year}-01-01"
+        for period_name in ("mtd", "ytd"):
+            projs = body[period_name]["projects"]
+            ids   = [p["project_id"] for p in projs]
+            names = [p["project_name"] for p in projs]
+            if not _check(f"{period_name}: project_ids == [1, 2, 3]", ids == [1, 2, 3],
+                          f"got {ids}"):
+                failures.append(f"{period_name}_project_order")
+            expected_names = ["New Capital", "Cassette", "La puerta"]
+            if not _check(f"{period_name}: project_names correct", names == expected_names,
+                          f"got {names}"):
+                failures.append(f"{period_name}_project_names")
+            for p in projs:
+                if not _check(f"{period_name}: {p['project_name']} name has no 'Project#' prefix",
+                              not str(p["project_name"]).startswith("Project#")):
+                    failures.append(f"{period_name}_raw_name")
 
-    _check(f"mtd.period_start == {expected_mtd_start}",
-           body["mtd"].get("period_start") == expected_mtd_start,
-           f"got {body['mtd'].get('period_start')!r}")
-    _check(f"mtd.period_end == {today_local}",
-           body["mtd"].get("period_end") == today_local,
-           f"got {body['mtd'].get('period_end')!r}")
-    _check(f"ytd.period_start == {expected_ytd_start}",
-           body["ytd"].get("period_start") == expected_ytd_start,
-           f"got {body['ytd'].get('period_start')!r}")
-    _check(f"ytd.period_end == {today_local}",
-           body["ytd"].get("period_end") == today_local,
-           f"got {body['ytd'].get('period_end')!r}")
+        # Period date assertions
+        _today_obj = date.fromisoformat(today_local)
+        expected_mtd_start = date(_today_obj.year, _today_obj.month, 1).isoformat()
+        expected_ytd_start = f"{_today_obj.year}-01-01"
 
-    # ── Step 4: Rate math and totals ──────────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 4 — Rate math and totals")
+        _check(f"mtd.period_start == {expected_mtd_start}",
+               body["mtd"].get("period_start") == expected_mtd_start,
+               f"got {body['mtd'].get('period_start')!r}")
+        _check(f"mtd.period_end == {today_local}",
+               body["mtd"].get("period_end") == today_local,
+               f"got {body['mtd'].get('period_end')!r}")
+        _check(f"ytd.period_start == {expected_ytd_start}",
+               body["ytd"].get("period_start") == expected_ytd_start,
+               f"got {body['ytd'].get('period_start')!r}")
+        _check(f"ytd.period_end == {today_local}",
+               body["ytd"].get("period_end") == today_local,
+               f"got {body['ytd'].get('period_end')!r}")
 
-    result_rows: list[dict] = []
-    for period_name in ("mtd", "ytd"):
-        sub   = body[period_name]
-        projs = sub["projects"]
+        # ── Step 4: Rate math and totals ──────────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 4 — Rate math and totals")
 
-        sum_num = sum(float(p["numerator_egp"])   for p in projs)
-        sum_den = sum(float(p["denominator_egp"]) for p in projs)
+        result_rows: list[dict] = []
+        for period_name in ("mtd", "ytd"):
+            sub   = body[period_name]
+            projs = sub["projects"]
 
-        if not _check(
-            f"{period_name}: total_numerator_egp == sum(project numerators)",
-            abs(float(sub["total_numerator_egp"]) - sum_num) < 0.01,
-            f"got {sub['total_numerator_egp']:.2f}, sum={sum_num:.2f}",
-        ):
-            failures.append(f"{period_name}_total_num_wrong")
+            sum_num = sum(float(p["numerator_egp"])   for p in projs)
+            sum_den = sum(float(p["denominator_egp"]) for p in projs)
 
-        if not _check(
-            f"{period_name}: total_denominator_egp == sum(project denominators)",
-            abs(float(sub["total_denominator_egp"]) - sum_den) < 0.01,
-            f"got {sub['total_denominator_egp']:.2f}, sum={sum_den:.2f}",
-        ):
-            failures.append(f"{period_name}_total_den_wrong")
-
-        for proj in projs:
-            pid   = proj["project_id"]
-            n_amt = float(proj["numerator_egp"])
-            d_amt = float(proj["denominator_egp"])
-            rate  = proj["rate_percent"]
-            _log(_INFO, f"  {period_name.upper()} {_PROJECT_NAMES.get(pid, pid):12}: "
-                        f"num={n_amt:>20,.2f}  den={d_amt:>20,.2f}  → {_rate_label(rate)}")
-            # rate_percent: None iff denominator == 0
             if not _check(
-                f"{period_name}.{_PROJECT_NAMES.get(pid, pid)}: rate_percent is None iff den==0",
-                (rate is None) == (d_amt == 0.0),
-                f"rate={rate!r}, den={d_amt}",
+                f"{period_name}: total_numerator_egp == sum(project numerators)",
+                abs(float(sub["total_numerator_egp"]) - sum_num) < 0.01,
+                f"got {sub['total_numerator_egp']:.2f}, sum={sum_num:.2f}",
             ):
-                failures.append(f"{period_name}_proj{pid}_rate_none_inconsistency")
-            # rate math
-            if rate is not None and d_amt != 0.0:
-                expected = n_amt / d_amt * 100
+                failures.append(f"{period_name}_total_num_wrong")
+
+            if not _check(
+                f"{period_name}: total_denominator_egp == sum(project denominators)",
+                abs(float(sub["total_denominator_egp"]) - sum_den) < 0.01,
+                f"got {sub['total_denominator_egp']:.2f}, sum={sum_den:.2f}",
+            ):
+                failures.append(f"{period_name}_total_den_wrong")
+
+            for proj in projs:
+                pid   = proj["project_id"]
+                n_amt = float(proj["numerator_egp"])
+                d_amt = float(proj["denominator_egp"])
+                rate  = proj["rate_percent"]
+                _log(_INFO, f"  {period_name.upper()} {_PROJECT_NAMES.get(pid, pid):12}: "
+                            f"num={n_amt:>20,.2f}  den={d_amt:>20,.2f}  → {_rate_label(rate)}")
+                # rate_percent: None iff denominator == 0
                 if not _check(
-                    f"{period_name}.{_PROJECT_NAMES.get(pid, pid)}: rate = num/den*100",
-                    abs(rate - expected) < 0.01,
-                    f"got {rate:.6f}, expected {expected:.6f}",
+                    f"{period_name}.{_PROJECT_NAMES.get(pid, pid)}: rate_percent is None iff den==0",
+                    (rate is None) == (d_amt == 0.0),
+                    f"rate={rate!r}, den={d_amt}",
                 ):
-                    failures.append(f"{period_name}_proj{pid}_rate_math")
-            result_rows.append({
-                "pid": pid, "name": _PROJECT_NAMES.get(pid, str(pid)),
-                "period": period_name.upper(),
-                "num": n_amt, "den": d_amt, "rate": rate,
-            })
+                    failures.append(f"{period_name}_proj{pid}_rate_none_inconsistency")
+                # rate math
+                if rate is not None and d_amt != 0.0:
+                    expected = n_amt / d_amt * 100
+                    if not _check(
+                        f"{period_name}.{_PROJECT_NAMES.get(pid, pid)}: rate = num/den*100",
+                        abs(rate - expected) < 0.01,
+                        f"got {rate:.6f}, expected {expected:.6f}",
+                    ):
+                        failures.append(f"{period_name}_proj{pid}_rate_math")
+                result_rows.append({
+                    "pid": pid, "name": _PROJECT_NAMES.get(pid, str(pid)),
+                    "period": period_name.upper(),
+                    "num": n_amt, "den": d_amt, "rate": rate,
+                })
 
-        _log(_INFO, f"  {period_name.upper()} TOTAL: "
-                    f"num={sub['total_numerator_egp']:>20,.2f}  "
-                    f"den={sub['total_denominator_egp']:>20,.2f}  "
-                    f"→ {_rate_label(sub.get('total_rate_percent'))}")
+            _log(_INFO, f"  {period_name.upper()} TOTAL: "
+                        f"num={sub['total_numerator_egp']:>20,.2f}  "
+                        f"den={sub['total_denominator_egp']:>20,.2f}  "
+                        f"→ {_rate_label(sub.get('total_rate_percent'))}")
 
-    # ── Step 5: YTD denominator baseline cross-check ─────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 5 — YTD denominator baseline (D0 2026-05-17 checkpoint)")
-    _log(_INFO, "  Denominators grow daily as new installments are posted.")
+        # ── Step 5: YTD denominator baseline cross-check ─────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 5 — YTD denominator baseline (D0 2026-05-17 checkpoint)")
+        _log(_INFO, "  Denominators grow daily as new installments are posted.")
 
-    ytd_projs = body["ytd"]["projects"]
-    for proj in ytd_projs:
-        pid    = proj["project_id"]
-        d_amt  = float(proj["denominator_egp"])
-        base   = _BASELINE_YTD_DEN.get(pid, 0.0)
-        delta  = abs(d_amt - base)
-        name   = _PROJECT_NAMES.get(pid, str(pid))
-        _log(_INFO, f"  {name:12}: backend={d_amt:>20,.2f}  D0={base:>20,.2f}  delta={delta:>12,.2f}")
-        if delta > _BASELINE_TOLERANCE:
-            _log(_WARN, f"  {name}: delta {delta:,.2f} exceeds tolerance {_BASELINE_TOLERANCE:,.0f} — investigate")
+        ytd_projs = body["ytd"]["projects"]
+        for proj in ytd_projs:
+            pid    = proj["project_id"]
+            d_amt  = float(proj["denominator_egp"])
+            base   = _BASELINE_YTD_DEN.get(pid, 0.0)
+            delta  = abs(d_amt - base)
+            name   = _PROJECT_NAMES.get(pid, str(pid))
+            _log(_INFO, f"  {name:12}: backend={d_amt:>20,.2f}  D0={base:>20,.2f}  delta={delta:>12,.2f}")
+            if delta > _BASELINE_TOLERANCE:
+                _log(_WARN, f"  {name}: delta {delta:,.2f} exceeds tolerance {_BASELINE_TOLERANCE:,.0f} — investigate")
+            else:
+                _log(_PASS, f"  {name}: within tolerance")
+
+        # ── Step 6: Cross-KPI consistency (Decision 7.3) ─────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 6 — Cross-KPI consistency: KPI 5b totals == KPI 4 standalone")
+        _log(_INFO, f"  Calling GET {url_kpi4} …")
+
+        cross_kpi_pass = False
+        try:
+            r_kpi4 = http.get(ENDPOINT_KPI4, timeout=60)
+        except httpx.ConnectError as exc:
+            _log(_WARN, f"  Cannot reach KPI 4 endpoint — {exc}")
+            failures.append("cross_kpi_connect_error")
         else:
-            _log(_PASS, f"  {name}: within tolerance")
+            if r_kpi4.status_code != 200:
+                _log(_WARN, f"  KPI 4 returned HTTP {r_kpi4.status_code}")
+                failures.append(f"cross_kpi_http_{r_kpi4.status_code}")
+            else:
+                kpi4 = r_kpi4.json()
+                for period_name in ("mtd", "ytd"):
+                    kpi4_num = float(kpi4[period_name]["numerator_egp"])
+                    kpi4_den = float(kpi4[period_name]["denominator_egp"])
+                    kpi5b_num = float(body[period_name]["total_numerator_egp"])
+                    kpi5b_den = float(body[period_name]["total_denominator_egp"])
+                    delta_num = abs(kpi5b_num - kpi4_num)
+                    delta_den = abs(kpi5b_den - kpi4_den)
+                    _log(_INFO, f"  {period_name.upper()} KPI4 num={kpi4_num:>20,.2f}  "
+                                f"KPI5b total num={kpi5b_num:>20,.2f}  Δ={delta_num:.2f}")
+                    _log(_INFO, f"  {period_name.upper()} KPI4 den={kpi4_den:>20,.2f}  "
+                                f"KPI5b total den={kpi5b_den:>20,.2f}  Δ={delta_den:.2f}")
+                    num_ok = _check(
+                        f"{period_name.upper()} numerator: KPI 5b total == KPI 4 (delta < 0.01 EGP)",
+                        delta_num < 0.01,
+                        f"delta={delta_num:.6f}",
+                    )
+                    den_ok = _check(
+                        f"{period_name.upper()} denominator: KPI 5b total == KPI 4 (delta < 0.01 EGP)",
+                        delta_den < 0.01,
+                        f"delta={delta_den:.6f}",
+                    )
+                    if not num_ok:
+                        failures.append(f"cross_kpi_{period_name}_num_delta")
+                    if not den_ok:
+                        failures.append(f"cross_kpi_{period_name}_den_delta")
 
-    # ── Step 6: Cross-KPI consistency (Decision 7.3) ─────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 6 — Cross-KPI consistency: KPI 5b totals == KPI 4 standalone")
-    _log(_INFO, f"  Calling GET {url_kpi4} …")
-
-    cross_kpi_pass = False
-    try:
-        with httpx.Client(timeout=60) as http:
-            r_kpi4 = http.get(url_kpi4, auth=(USERNAME, PASSWORD))
-    except httpx.ConnectError as exc:
-        _log(_WARN, f"  Cannot reach KPI 4 endpoint — {exc}")
-        failures.append("cross_kpi_connect_error")
-    else:
-        if r_kpi4.status_code != 200:
-            _log(_WARN, f"  KPI 4 returned HTTP {r_kpi4.status_code}")
-            failures.append(f"cross_kpi_http_{r_kpi4.status_code}")
-        else:
-            kpi4 = r_kpi4.json()
-            for period_name in ("mtd", "ytd"):
-                kpi4_num = float(kpi4[period_name]["numerator_egp"])
-                kpi4_den = float(kpi4[period_name]["denominator_egp"])
-                kpi5b_num = float(body[period_name]["total_numerator_egp"])
-                kpi5b_den = float(body[period_name]["total_denominator_egp"])
-                delta_num = abs(kpi5b_num - kpi4_num)
-                delta_den = abs(kpi5b_den - kpi4_den)
-                _log(_INFO, f"  {period_name.upper()} KPI4 num={kpi4_num:>20,.2f}  "
-                            f"KPI5b total num={kpi5b_num:>20,.2f}  Δ={delta_num:.2f}")
-                _log(_INFO, f"  {period_name.upper()} KPI4 den={kpi4_den:>20,.2f}  "
-                            f"KPI5b total den={kpi5b_den:>20,.2f}  Δ={delta_den:.2f}")
-                num_ok = _check(
-                    f"{period_name.upper()} numerator: KPI 5b total == KPI 4 (delta < 0.01 EGP)",
-                    delta_num < 0.01,
-                    f"delta={delta_num:.6f}",
+                cross_kpi_num_pass = all(
+                    abs(float(body[p]["total_numerator_egp"]) - float(kpi4[p]["numerator_egp"])) < 0.01
+                    for p in ("mtd", "ytd")
                 )
-                den_ok = _check(
-                    f"{period_name.upper()} denominator: KPI 5b total == KPI 4 (delta < 0.01 EGP)",
-                    delta_den < 0.01,
-                    f"delta={delta_den:.6f}",
+                cross_kpi_den_pass = all(
+                    abs(float(body[p]["total_denominator_egp"]) - float(kpi4[p]["denominator_egp"])) < 0.01
+                    for p in ("mtd", "ytd")
                 )
-                if not num_ok:
-                    failures.append(f"cross_kpi_{period_name}_num_delta")
-                if not den_ok:
-                    failures.append(f"cross_kpi_{period_name}_den_delta")
+                cross_kpi_pass = cross_kpi_num_pass and cross_kpi_den_pass
 
-            cross_kpi_num_pass = all(
-                abs(float(body[p]["total_numerator_egp"]) - float(kpi4[p]["numerator_egp"])) < 0.01
-                for p in ("mtd", "ytd")
-            )
-            cross_kpi_den_pass = all(
-                abs(float(body[p]["total_denominator_egp"]) - float(kpi4[p]["denominator_egp"])) < 0.01
-                for p in ("mtd", "ytd")
-            )
-            cross_kpi_pass = cross_kpi_num_pass and cross_kpi_den_pass
-
-    # ── Step 7: Cache hit ─────────────────────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 7 — Cache hit (second call)")
-    try:
-        with httpx.Client(timeout=60) as http:
-            r2 = http.get(url_5b, auth=(USERNAME, PASSWORD))
-    except httpx.ConnectError as exc:
-        _log(_WARN, f"  Second call failed — {exc}")
-        failures.append("second_call_connect_error")
-    else:
-        if r2.status_code == 200:
-            body2 = r2.json()
-            if not _check("cache_status == 'cached' on second call",
-                          body2.get("cache_status") == "cached",
-                          f"got {body2.get('cache_status')!r}"):
-                failures.append("cache_hit_not_seen")
-            if not _check("rpc_duration_ms == 0 on cached call",
-                          int(body2.get("rpc_duration_ms", -1)) == 0,
-                          f"got {body2.get('rpc_duration_ms')}"):
-                failures.append("cached_rpc_ms_nonzero")
-            xcs2 = r2.headers.get("x-cache-status", "")
-            _check("X-Cache-Status: cached on second call", xcs2 == "cached", f"got {xcs2!r}")
+        # ── Step 7: Cache hit ─────────────────────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 7 — Cache hit (second call)")
+        try:
+            r2 = http.get(ENDPOINT_5B, timeout=60)
+        except httpx.ConnectError as exc:
+            _log(_WARN, f"  Second call failed — {exc}")
+            failures.append("second_call_connect_error")
         else:
-            failures.append(f"second_call_http_{r2.status_code}")
+            if r2.status_code == 200:
+                body2 = r2.json()
+                if not _check("cache_status == 'cached' on second call",
+                              body2.get("cache_status") == "cached",
+                              f"got {body2.get('cache_status')!r}"):
+                    failures.append("cache_hit_not_seen")
+                if not _check("rpc_duration_ms == 0 on cached call",
+                              int(body2.get("rpc_duration_ms", -1)) == 0,
+                              f"got {body2.get('rpc_duration_ms')}"):
+                    failures.append("cached_rpc_ms_nonzero")
+                xcs2 = r2.headers.get("x-cache-status", "")
+                _check("X-Cache-Status: cached on second call", xcs2 == "cached", f"got {xcs2!r}")
+            else:
+                failures.append(f"second_call_http_{r2.status_code}")
 
-    # ── Step 8: Response headers ──────────────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 8 — Response headers (first call)")
-    cc  = r1.headers.get("cache-control", "")
-    xcs = r1.headers.get("x-cache-status", "")
-    _check("Cache-Control: private",    "private"    in cc, f"header: {cc!r}")
-    _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
-    _check("X-Cache-Status present",    bool(xcs),          f"got {xcs!r}")
+        # ── Step 8: Response headers ──────────────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 8 — Response headers (first call)")
+        cc  = r1.headers.get("cache-control", "")
+        xcs = r1.headers.get("x-cache-status", "")
+        _check("Cache-Control: private",    "private"    in cc, f"header: {cc!r}")
+        _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
+        _check("X-Cache-Status present",    bool(xcs),          f"got {xcs!r}")
+    finally:
+        http.close()
 
     # ── Final summary ─────────────────────────────────────────────────────────
     print()
