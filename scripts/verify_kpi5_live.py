@@ -23,6 +23,8 @@ from datetime import date, datetime, timezone
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=".env")
 
 # Force UTF-8 stdout (Windows consoles default to cp1252)
@@ -106,150 +108,157 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET endpoint ──────────────────────────────────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=60) as client:
-            r = client.get(url, auth=(USERNAME, PASSWORD))
+        client = api_login(base_url)
+    except ApiLoginError as exc:
+        _log(_FAIL, f"Session login failed: {exc}")
+        _append_log_row(run_at, "", "", "", "", "", "", "", f"login failed: {exc}")
+        return 1
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
         _append_log_row(run_at, "", "", "", "", "", "", "", msg)
         return 1
 
-    # ── Step 2: HTTP 200 ──────────────────────────────────────────────────────
-    if not _check("HTTP 200", r.status_code == 200, f"got {r.status_code}"):
-        _log(_INFO, f"Response body: {r.text[:500]}")
-        _append_log_row(run_at, "", "", "", "", "", "", "", f"HTTP {r.status_code}")
-        return 1
+    try:
+        r = client.get(ENDPOINT, timeout=60)
 
-    body: dict = r.json()
-    _log(_INFO, f"Response body (top-level keys): {list(body.keys())}")
+        # ── Step 2: HTTP 200 ──────────────────────────────────────────────────────
+        if not _check("HTTP 200", r.status_code == 200, f"got {r.status_code}"):
+            _log(_INFO, f"Response body: {r.text[:500]}")
+            _append_log_row(run_at, "", "", "", "", "", "", "", f"HTTP {r.status_code}")
+            return 1
 
-    # ── Step 3: Required top-level keys ───────────────────────────────────────
-    required_keys = (
-        "projects", "total_late_uncollected", "total_record_count",
-        "currency", "as_of", "cache_status", "rpc_duration_ms", "domain",
-    )
-    for k in required_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
+        body: dict = r.json()
+        _log(_INFO, f"Response body (top-level keys): {list(body.keys())}")
 
-    if failures:
-        _append_log_row(run_at, "", "", "", "", "", "", "", f"missing keys: {failures}")
-        return 1
-
-    # ── Step 4: Extract values ────────────────────────────────────────────────
-    projects: list = body["projects"]
-    total_late: float = float(body["total_late_uncollected"])
-    total_count: int = int(body["total_record_count"])
-    cache_status: str = body["cache_status"]
-    rpc_ms: int = int(body["rpc_duration_ms"])
-    domain: list = body.get("domain", [])
-
-    # ── Step 5: projects array structure ─────────────────────────────────────
-    if not _check("projects array has exactly 3 entries", len(projects) == 3, f"got {len(projects)}"):
-        failures.append("projects_count_wrong")
-
-    per_project_keys = {"project_id", "project_name", "late_uncollected", "record_count"}
-    for i, proj in enumerate(projects):
-        missing = per_project_keys - set(proj.keys())
-        if not _check(f"projects[{i}] has all 4 keys", not missing, f"missing: {missing}"):
-            failures.append(f"project_{i}_missing_keys")
-
-    # ── Step 6: Project IDs and names ─────────────────────────────────────────
-    if len(projects) == 3:
-        for i, (actual, expected) in enumerate(zip(projects, _EXPECTED_PROJECTS)):
-            if not _check(
-                f"projects[{i}].project_id == {expected['project_id']}",
-                actual.get("project_id") == expected["project_id"],
-                f"got {actual.get('project_id')!r}",
-            ):
-                failures.append(f"project_{i}_wrong_id")
-            if not _check(
-                f"projects[{i}].project_name == {expected['project_name']!r}",
-                actual.get("project_name") == expected["project_name"],
-                f"got {actual.get('project_name')!r}",
-            ):
-                failures.append(f"project_{i}_wrong_name")
-
-    # ── Step 7: Total consistency ─────────────────────────────────────────────
-    if len(projects) == 3:
-        computed_total = sum(float(p.get("late_uncollected", 0)) for p in projects)
-        if not _check(
-            "total_late_uncollected == sum of per-project values",
-            abs(total_late - computed_total) < 0.01,
-            f"total={total_late:.2f}, sum={computed_total:.2f}, delta={abs(total_late - computed_total):.2f}",
-        ):
-            failures.append("total_inconsistency")
-
-        computed_count = sum(int(p.get("record_count", 0)) for p in projects)
-        if not _check(
-            "total_record_count == sum of per-project counts",
-            total_count == computed_count,
-            f"total={total_count}, sum={computed_count}",
-        ):
-            failures.append("count_inconsistency")
-
-    # ── Step 8: currency ──────────────────────────────────────────────────────
-    if not _check("currency == 'EGP'", body.get("currency") == "EGP", f"got {body.get('currency')!r}"):
-        failures.append("wrong_currency")
-
-    if not _check(
-        "cache_status in {fresh, cached}",
-        cache_status in {"fresh", "cached"},
-        f"got {cache_status!r}",
-    ):
-        failures.append("bad_cache_status")
-
-    # ── Step 9: Response headers ──────────────────────────────────────────────
-    cc = r.headers.get("cache-control", "")
-    _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
-    _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
-
-    # ── Step 10: Domain shape — Candidate C three-clause ──────────────────────
-    if _check("domain has 3 clauses", len(domain) == 3, f"got {len(domain)}"):
-        _check("domain[0] == state=post", domain[0] == ["state", "=", "post"])
-        _check(
-            "domain[1] == payment_state in [unpaid,partial]",
-            domain[1] == ["payment_state", "in", ["unpaid", "partial"]],
+        # ── Step 3: Required top-level keys ───────────────────────────────────────
+        required_keys = (
+            "projects", "total_late_uncollected", "total_record_count",
+            "currency", "as_of", "cache_status", "rpc_duration_ms", "domain",
         )
-        _check("domain[2][0] == date", domain[2][0] == "date")
-        _check("domain[2][1] == <", domain[2][1] == "<")
-        date_str = domain[2][2]
-        try:
-            parsed_date = date.fromisoformat(date_str)
-            delta_days = abs((parsed_date - date.today()).days)
-            if not _check(
-                "domain[2][2] is a valid recent ISO date",
-                delta_days <= 1,
-                f"got {date_str!r}",
-            ):
-                failures.append("domain_date_stale")
-        except ValueError as exc:
-            _log(_FAIL, f"domain[2][2] not a valid ISO date — got {date_str!r}: {exc}")
-            failures.append("domain_date_invalid")
-    else:
-        failures.append("domain_shape")
+        for k in required_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
 
-    # ── Step 11: Second request — cache hit ───────────────────────────────────
-    _log(_INFO, "Issuing second request to verify cache hit ...")
-    with httpx.Client(timeout=30) as client:
-        r2 = client.get(url, auth=(USERNAME, PASSWORD))
-    body2: dict = r2.json()
-    if not _check(
-        "second call cache_status == 'cached'",
-        body2.get("cache_status") == "cached",
-        f"got {body2.get('cache_status')!r}",
-    ):
-        failures.append("cache_not_hit_on_second_call")
-    if not _check(
-        "second call rpc_duration_ms == 0",
-        int(body2.get("rpc_duration_ms", -1)) == 0,
-        f"got {body2.get('rpc_duration_ms')}",
-    ):
-        failures.append("cache_rpc_ms_nonzero")
+        if failures:
+            _append_log_row(run_at, "", "", "", "", "", "", "", f"missing keys: {failures}")
+            return 1
+
+        # ── Step 4: Extract values ────────────────────────────────────────────────
+        projects: list = body["projects"]
+        total_late: float = float(body["total_late_uncollected"])
+        total_count: int = int(body["total_record_count"])
+        cache_status: str = body["cache_status"]
+        rpc_ms: int = int(body["rpc_duration_ms"])
+        domain: list = body.get("domain", [])
+
+        # ── Step 5: projects array structure ─────────────────────────────────────
+        if not _check("projects array has exactly 3 entries", len(projects) == 3, f"got {len(projects)}"):
+            failures.append("projects_count_wrong")
+
+        per_project_keys = {"project_id", "project_name", "late_uncollected", "record_count"}
+        for i, proj in enumerate(projects):
+            missing = per_project_keys - set(proj.keys())
+            if not _check(f"projects[{i}] has all 4 keys", not missing, f"missing: {missing}"):
+                failures.append(f"project_{i}_missing_keys")
+
+        # ── Step 6: Project IDs and names ─────────────────────────────────────────
+        if len(projects) == 3:
+            for i, (actual, expected) in enumerate(zip(projects, _EXPECTED_PROJECTS)):
+                if not _check(
+                    f"projects[{i}].project_id == {expected['project_id']}",
+                    actual.get("project_id") == expected["project_id"],
+                    f"got {actual.get('project_id')!r}",
+                ):
+                    failures.append(f"project_{i}_wrong_id")
+                if not _check(
+                    f"projects[{i}].project_name == {expected['project_name']!r}",
+                    actual.get("project_name") == expected["project_name"],
+                    f"got {actual.get('project_name')!r}",
+                ):
+                    failures.append(f"project_{i}_wrong_name")
+
+        # ── Step 7: Total consistency ─────────────────────────────────────────────
+        if len(projects) == 3:
+            computed_total = sum(float(p.get("late_uncollected", 0)) for p in projects)
+            if not _check(
+                "total_late_uncollected == sum of per-project values",
+                abs(total_late - computed_total) < 0.01,
+                f"total={total_late:.2f}, sum={computed_total:.2f}, delta={abs(total_late - computed_total):.2f}",
+            ):
+                failures.append("total_inconsistency")
+
+            computed_count = sum(int(p.get("record_count", 0)) for p in projects)
+            if not _check(
+                "total_record_count == sum of per-project counts",
+                total_count == computed_count,
+                f"total={total_count}, sum={computed_count}",
+            ):
+                failures.append("count_inconsistency")
+
+        # ── Step 8: currency ──────────────────────────────────────────────────────
+        if not _check("currency == 'EGP'", body.get("currency") == "EGP", f"got {body.get('currency')!r}"):
+            failures.append("wrong_currency")
+
+        if not _check(
+            "cache_status in {fresh, cached}",
+            cache_status in {"fresh", "cached"},
+            f"got {cache_status!r}",
+        ):
+            failures.append("bad_cache_status")
+
+        # ── Step 9: Response headers ──────────────────────────────────────────────
+        cc = r.headers.get("cache-control", "")
+        _check("Cache-Control: private", "private" in cc, f"header: {cc!r}")
+        _check("Cache-Control: max-age=60", "max-age=60" in cc, f"header: {cc!r}")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("X-Cache-Status header present", bool(xcs), f"got {xcs!r}")
+
+        # ── Step 10: Domain shape — Candidate C three-clause ──────────────────────
+        if _check("domain has 3 clauses", len(domain) == 3, f"got {len(domain)}"):
+            _check("domain[0] == state=post", domain[0] == ["state", "=", "post"])
+            _check(
+                "domain[1] == payment_state in [unpaid,partial]",
+                domain[1] == ["payment_state", "in", ["unpaid", "partial"]],
+            )
+            _check("domain[2][0] == date", domain[2][0] == "date")
+            _check("domain[2][1] == <", domain[2][1] == "<")
+            date_str = domain[2][2]
+            try:
+                parsed_date = date.fromisoformat(date_str)
+                delta_days = abs((parsed_date - date.today()).days)
+                if not _check(
+                    "domain[2][2] is a valid recent ISO date",
+                    delta_days <= 1,
+                    f"got {date_str!r}",
+                ):
+                    failures.append("domain_date_stale")
+            except ValueError as exc:
+                _log(_FAIL, f"domain[2][2] not a valid ISO date — got {date_str!r}: {exc}")
+                failures.append("domain_date_invalid")
+        else:
+            failures.append("domain_shape")
+
+        # ── Step 11: Second request — cache hit ───────────────────────────────────
+        _log(_INFO, "Issuing second request to verify cache hit ...")
+        r2 = client.get(ENDPOINT, timeout=30)
+        body2: dict = r2.json()
+        if not _check(
+            "second call cache_status == 'cached'",
+            body2.get("cache_status") == "cached",
+            f"got {body2.get('cache_status')!r}",
+        ):
+            failures.append("cache_not_hit_on_second_call")
+        if not _check(
+            "second call rpc_duration_ms == 0",
+            int(body2.get("rpc_duration_ms", -1)) == 0,
+            f"got {body2.get('rpc_duration_ms')}",
+        ):
+            failures.append("cache_rpc_ms_nonzero")
+    finally:
+        client.close()
 
     # ── Structured output ─────────────────────────────────────────────────────
     print()
