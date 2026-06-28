@@ -42,6 +42,8 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=".env")
 
 if hasattr(sys.stdout, "buffer"):
@@ -267,183 +269,190 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: First call (fresh) ────────────────────────────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then fresh call ────
     _log(_INFO, "Step 1 — Fresh call …")
     try:
-        with httpx.Client(timeout=60) as http:
-            r1 = http.get(url, auth=(USERNAME, PASSWORD))
+        http = api_login(base_url)
+    except ApiLoginError as exc:
+        _log(_FAIL, f"Session login failed: {exc}")
+        _append_log(run_at, today_local, "", "", "", "", "", "", "", "", ["login_failed"])
+        return 1
     except httpx.ConnectError as exc:
         _log(_FAIL, f"Cannot reach {base_url} — is the server running? ({exc})")
         _append_log(run_at, today_local, "", "", "", "", "", "", "", "", ["connect_error"])
         return 1
 
-    if not _check("HTTP 200 (first call)", r1.status_code == 200, f"got {r1.status_code}"):
-        _log(_INFO, f"Body: {r1.text[:500]}")
-        _append_log(run_at, today_local, "", "", "", "", "", "", "", "", [f"http_{r1.status_code}"])
-        return 1
-
-    body: dict = r1.json()
-    _log(_INFO, f"Top-level keys: {list(body.keys())}")
-
-    # ── Step 2: Required top-level keys ──────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 2 — Response shape")
-    required_top = {"mtd", "ytd", "ytd_period_assumption", "currency", "as_of",
-                    "cache_status", "rpc_duration_ms"}
-    for k in required_top:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
-
-    if "mtd" in body and "ytd" in body:
-        period_keys = {"numerator_egp", "denominator_egp", "rate_percent",
-                       "period_start", "period_end", "record_count_num", "record_count_den"}
-        for period_name in ("mtd", "ytd"):
-            sub = body[period_name]
-            for k in period_keys:
-                if not _check(f"{period_name}.{k} present", k in sub):
-                    failures.append(f"missing_key_{period_name}_{k}")
-
-    if failures:
-        _append_log(run_at, today_local, "", "", "", "", "", "", "", "", failures)
-        return 1
-
-    # ── Step 3: Extract values ────────────────────────────────────────────────
-    mtd = body["mtd"]
-    ytd = body["ytd"]
-    mtd_num    = float(mtd["numerator_egp"])
-    mtd_den    = float(mtd["denominator_egp"])
-    mtd_rate   = mtd["rate_percent"]          # float or None
-    ytd_num    = float(ytd["numerator_egp"])
-    ytd_den    = float(ytd["denominator_egp"])
-    ytd_rate   = ytd["rate_percent"]
-    cache_status = body["cache_status"]
-    rpc_ms     = int(body["rpc_duration_ms"])
-
-    # ── Step 4: Period date assertions ────────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 4 — Period date assertions")
-    _check("ytd_period_assumption == 'calendar_year'",
-           body.get("ytd_period_assumption") == "calendar_year",
-           f"got {body.get('ytd_period_assumption')!r}")
-    _check("currency == 'EGP'", body.get("currency") == "EGP")
-
-    today_iso = today_local
-    _check(f"mtd.period_end == {today_iso}",
-           mtd.get("period_end") == today_iso,
-           f"got {mtd.get('period_end')!r}")
-    _check(f"ytd.period_end == {today_iso}",
-           ytd.get("period_end") == today_iso,
-           f"got {ytd.get('period_end')!r}")
-
-    # MTD start = first day of current month
-    from datetime import date as _date
-    _today_obj = _date.fromisoformat(today_iso)
-    expected_mtd_start = _date(_today_obj.year, _today_obj.month, 1).isoformat()
-    _check(f"mtd.period_start == {expected_mtd_start} (first of month)",
-           mtd.get("period_start") == expected_mtd_start,
-           f"got {mtd.get('period_start')!r}")
-
-    # YTD start = Jan 1 of current year
-    expected_ytd_start = f"{_today_obj.year}-01-01"
-    _check(f"ytd.period_start == {expected_ytd_start} (Jan 1 — Decision 6.2)",
-           ytd.get("period_start") == expected_ytd_start,
-           f"got {ytd.get('period_start')!r}")
-
-    # ── Step 5: Rate sanity ───────────────────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 5 — Rate sanity")
-    _log(_INFO, f"  MTD: num={mtd_num:>20,.2f} EGP  den={mtd_den:>20,.2f} EGP  →  {_rate_label(mtd_rate)}")
-    _log(_INFO, f"  YTD: num={ytd_num:>20,.2f} EGP  den={ytd_den:>20,.2f} EGP  →  {_rate_label(ytd_rate)}")
-
-    # rate_percent: None iff denominator == 0 (Decision 6.3)
-    if not _check(
-        "mtd.rate_percent is None iff mtd.denominator_egp == 0",
-        (mtd_rate is None) == (mtd_den == 0.0),
-        f"rate_percent={mtd_rate!r}, denominator_egp={mtd_den}",
-    ):
-        failures.append("mtd_rate_none_inconsistency")
-
-    if not _check(
-        "ytd.rate_percent is None iff ytd.denominator_egp == 0",
-        (ytd_rate is None) == (ytd_den == 0.0),
-        f"rate_percent={ytd_rate!r}, denominator_egp={ytd_den}",
-    ):
-        failures.append("ytd_rate_none_inconsistency")
-
-    # Rate math: rate == num/den*100 (within float precision)
-    if mtd_rate is not None and mtd_den != 0.0:
-        expected_mtd_rate = mtd_num / mtd_den * 100
-        if not _check(
-            "mtd.rate_percent == mtd_num / mtd_den * 100",
-            abs(mtd_rate - expected_mtd_rate) < 0.01,
-            f"got {mtd_rate:.6f}, expected {expected_mtd_rate:.6f}",
-        ):
-            failures.append("mtd_rate_math_wrong")
-
-    if ytd_rate is not None and ytd_den != 0.0:
-        expected_ytd_rate = ytd_num / ytd_den * 100
-        if not _check(
-            "ytd.rate_percent == ytd_num / ytd_den * 100",
-            abs(ytd_rate - expected_ytd_rate) < 0.01,
-            f"got {ytd_rate:.6f}, expected {expected_ytd_rate:.6f}",
-        ):
-            failures.append("ytd_rate_math_wrong")
-
-    # ── Step 6: Denominator baseline cross-check ──────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 6 — Denominator baseline cross-check (D0 2026-05-17 baseline)")
-    _log(_INFO, "  NOTE: Denominators increase daily as new installments are posted.")
-    _log(_INFO, f"  D0 MTD baseline: {_MTD_DEN_BASELINE:>15,.2f} EGP  tolerance: ±{_BASELINE_TOLERANCE:,.0f}")
-    _log(_INFO, f"  D0 YTD baseline: {_YTD_DEN_BASELINE:>15,.2f} EGP  tolerance: ±{_BASELINE_TOLERANCE:,.0f}")
-    _log(_INFO, f"  Current MTD den: {mtd_den:>15,.2f} EGP")
-    _log(_INFO, f"  Current YTD den: {ytd_den:>15,.2f} EGP")
-
-    mtd_den_delta = abs(mtd_den - _MTD_DEN_BASELINE)
-    ytd_den_delta = abs(ytd_den - _YTD_DEN_BASELINE)
-    if mtd_den_delta > _BASELINE_TOLERANCE:
-        _log(_WARN, f"MTD denominator drifted {mtd_den_delta:,.2f} EGP from D0 baseline — investigate if unexpected")
-    else:
-        _log(_PASS, f"MTD denominator within {_BASELINE_TOLERANCE:,.0f} EGP of D0 baseline (delta={mtd_den_delta:,.2f})")
-
-    if ytd_den_delta > _BASELINE_TOLERANCE:
-        _log(_WARN, f"YTD denominator drifted {ytd_den_delta:,.2f} EGP from D0 baseline — investigate if unexpected")
-    else:
-        _log(_PASS, f"YTD denominator within {_BASELINE_TOLERANCE:,.0f} EGP of D0 baseline (delta={ytd_den_delta:,.2f})")
-
-    # ── Step 7: Cache hit (second call) ───────────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 7 — Cache hit (second call, same process)")
     try:
-        with httpx.Client(timeout=60) as http:
-            r2 = http.get(url, auth=(USERNAME, PASSWORD))
-    except httpx.ConnectError as exc:
-        _log(_WARN, f"Second call failed — {exc}")
-        failures.append("second_call_connect_error")
-    else:
-        if r2.status_code == 200:
-            body2 = r2.json()
-            if not _check("cache_status == 'cached' on second call",
-                          body2.get("cache_status") == "cached",
-                          f"got {body2.get('cache_status')!r}"):
-                failures.append("cache_hit_not_seen")
-            if not _check("rpc_duration_ms == 0 on cached call",
-                          int(body2.get("rpc_duration_ms", -1)) == 0,
-                          f"got {body2.get('rpc_duration_ms')}"):
-                failures.append("cached_rpc_ms_nonzero")
-            xcs2 = r2.headers.get("x-cache-status", "")
-            _check("X-Cache-Status: cached on second call", xcs2 == "cached", f"got {xcs2!r}")
-        else:
-            _log(_WARN, f"Second call returned HTTP {r2.status_code}")
-            failures.append(f"second_call_http_{r2.status_code}")
+        r1 = http.get(ENDPOINT, timeout=60)
 
-    # ── Step 8: Response headers (first call) ─────────────────────────────────
-    print(_SEP2)
-    _log(_INFO, "Step 8 — Response headers")
-    cc  = r1.headers.get("cache-control", "")
-    xcs = r1.headers.get("x-cache-status", "")
-    _check("Cache-Control: private",      "private"    in cc,  f"header: {cc!r}")
-    _check("Cache-Control: max-age=60",   "max-age=60" in cc,  f"header: {cc!r}")
-    _check("X-Cache-Status header present", bool(xcs),         f"got {xcs!r}")
+        if not _check("HTTP 200 (first call)", r1.status_code == 200, f"got {r1.status_code}"):
+            _log(_INFO, f"Body: {r1.text[:500]}")
+            _append_log(run_at, today_local, "", "", "", "", "", "", "", "", [f"http_{r1.status_code}"])
+            return 1
+
+        body: dict = r1.json()
+        _log(_INFO, f"Top-level keys: {list(body.keys())}")
+
+        # ── Step 2: Required top-level keys ──────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 2 — Response shape")
+        required_top = {"mtd", "ytd", "ytd_period_assumption", "currency", "as_of",
+                        "cache_status", "rpc_duration_ms"}
+        for k in required_top:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
+
+        if "mtd" in body and "ytd" in body:
+            period_keys = {"numerator_egp", "denominator_egp", "rate_percent",
+                           "period_start", "period_end", "record_count_num", "record_count_den"}
+            for period_name in ("mtd", "ytd"):
+                sub = body[period_name]
+                for k in period_keys:
+                    if not _check(f"{period_name}.{k} present", k in sub):
+                        failures.append(f"missing_key_{period_name}_{k}")
+
+        if failures:
+            _append_log(run_at, today_local, "", "", "", "", "", "", "", "", failures)
+            return 1
+
+        # ── Step 3: Extract values ────────────────────────────────────────────────
+        mtd = body["mtd"]
+        ytd = body["ytd"]
+        mtd_num    = float(mtd["numerator_egp"])
+        mtd_den    = float(mtd["denominator_egp"])
+        mtd_rate   = mtd["rate_percent"]          # float or None
+        ytd_num    = float(ytd["numerator_egp"])
+        ytd_den    = float(ytd["denominator_egp"])
+        ytd_rate   = ytd["rate_percent"]
+        cache_status = body["cache_status"]
+        rpc_ms     = int(body["rpc_duration_ms"])
+
+        # ── Step 4: Period date assertions ────────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 4 — Period date assertions")
+        _check("ytd_period_assumption == 'calendar_year'",
+               body.get("ytd_period_assumption") == "calendar_year",
+               f"got {body.get('ytd_period_assumption')!r}")
+        _check("currency == 'EGP'", body.get("currency") == "EGP")
+
+        today_iso = today_local
+        _check(f"mtd.period_end == {today_iso}",
+               mtd.get("period_end") == today_iso,
+               f"got {mtd.get('period_end')!r}")
+        _check(f"ytd.period_end == {today_iso}",
+               ytd.get("period_end") == today_iso,
+               f"got {ytd.get('period_end')!r}")
+
+        # MTD start = first day of current month
+        from datetime import date as _date
+        _today_obj = _date.fromisoformat(today_iso)
+        expected_mtd_start = _date(_today_obj.year, _today_obj.month, 1).isoformat()
+        _check(f"mtd.period_start == {expected_mtd_start} (first of month)",
+               mtd.get("period_start") == expected_mtd_start,
+               f"got {mtd.get('period_start')!r}")
+
+        # YTD start = Jan 1 of current year
+        expected_ytd_start = f"{_today_obj.year}-01-01"
+        _check(f"ytd.period_start == {expected_ytd_start} (Jan 1 — Decision 6.2)",
+               ytd.get("period_start") == expected_ytd_start,
+               f"got {ytd.get('period_start')!r}")
+
+        # ── Step 5: Rate sanity ───────────────────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 5 — Rate sanity")
+        _log(_INFO, f"  MTD: num={mtd_num:>20,.2f} EGP  den={mtd_den:>20,.2f} EGP  →  {_rate_label(mtd_rate)}")
+        _log(_INFO, f"  YTD: num={ytd_num:>20,.2f} EGP  den={ytd_den:>20,.2f} EGP  →  {_rate_label(ytd_rate)}")
+
+        # rate_percent: None iff denominator == 0 (Decision 6.3)
+        if not _check(
+            "mtd.rate_percent is None iff mtd.denominator_egp == 0",
+            (mtd_rate is None) == (mtd_den == 0.0),
+            f"rate_percent={mtd_rate!r}, denominator_egp={mtd_den}",
+        ):
+            failures.append("mtd_rate_none_inconsistency")
+
+        if not _check(
+            "ytd.rate_percent is None iff ytd.denominator_egp == 0",
+            (ytd_rate is None) == (ytd_den == 0.0),
+            f"rate_percent={ytd_rate!r}, denominator_egp={ytd_den}",
+        ):
+            failures.append("ytd_rate_none_inconsistency")
+
+        # Rate math: rate == num/den*100 (within float precision)
+        if mtd_rate is not None and mtd_den != 0.0:
+            expected_mtd_rate = mtd_num / mtd_den * 100
+            if not _check(
+                "mtd.rate_percent == mtd_num / mtd_den * 100",
+                abs(mtd_rate - expected_mtd_rate) < 0.01,
+                f"got {mtd_rate:.6f}, expected {expected_mtd_rate:.6f}",
+            ):
+                failures.append("mtd_rate_math_wrong")
+
+        if ytd_rate is not None and ytd_den != 0.0:
+            expected_ytd_rate = ytd_num / ytd_den * 100
+            if not _check(
+                "ytd.rate_percent == ytd_num / ytd_den * 100",
+                abs(ytd_rate - expected_ytd_rate) < 0.01,
+                f"got {ytd_rate:.6f}, expected {expected_ytd_rate:.6f}",
+            ):
+                failures.append("ytd_rate_math_wrong")
+
+        # ── Step 6: Denominator baseline cross-check ──────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 6 — Denominator baseline cross-check (D0 2026-05-17 baseline)")
+        _log(_INFO, "  NOTE: Denominators increase daily as new installments are posted.")
+        _log(_INFO, f"  D0 MTD baseline: {_MTD_DEN_BASELINE:>15,.2f} EGP  tolerance: ±{_BASELINE_TOLERANCE:,.0f}")
+        _log(_INFO, f"  D0 YTD baseline: {_YTD_DEN_BASELINE:>15,.2f} EGP  tolerance: ±{_BASELINE_TOLERANCE:,.0f}")
+        _log(_INFO, f"  Current MTD den: {mtd_den:>15,.2f} EGP")
+        _log(_INFO, f"  Current YTD den: {ytd_den:>15,.2f} EGP")
+
+        mtd_den_delta = abs(mtd_den - _MTD_DEN_BASELINE)
+        ytd_den_delta = abs(ytd_den - _YTD_DEN_BASELINE)
+        if mtd_den_delta > _BASELINE_TOLERANCE:
+            _log(_WARN, f"MTD denominator drifted {mtd_den_delta:,.2f} EGP from D0 baseline — investigate if unexpected")
+        else:
+            _log(_PASS, f"MTD denominator within {_BASELINE_TOLERANCE:,.0f} EGP of D0 baseline (delta={mtd_den_delta:,.2f})")
+
+        if ytd_den_delta > _BASELINE_TOLERANCE:
+            _log(_WARN, f"YTD denominator drifted {ytd_den_delta:,.2f} EGP from D0 baseline — investigate if unexpected")
+        else:
+            _log(_PASS, f"YTD denominator within {_BASELINE_TOLERANCE:,.0f} EGP of D0 baseline (delta={ytd_den_delta:,.2f})")
+
+        # ── Step 7: Cache hit (second call) ───────────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 7 — Cache hit (second call, same process)")
+        try:
+            r2 = http.get(ENDPOINT, timeout=60)
+        except httpx.ConnectError as exc:
+            _log(_WARN, f"Second call failed — {exc}")
+            failures.append("second_call_connect_error")
+        else:
+            if r2.status_code == 200:
+                body2 = r2.json()
+                if not _check("cache_status == 'cached' on second call",
+                              body2.get("cache_status") == "cached",
+                              f"got {body2.get('cache_status')!r}"):
+                    failures.append("cache_hit_not_seen")
+                if not _check("rpc_duration_ms == 0 on cached call",
+                              int(body2.get("rpc_duration_ms", -1)) == 0,
+                              f"got {body2.get('rpc_duration_ms')}"):
+                    failures.append("cached_rpc_ms_nonzero")
+                xcs2 = r2.headers.get("x-cache-status", "")
+                _check("X-Cache-Status: cached on second call", xcs2 == "cached", f"got {xcs2!r}")
+            else:
+                _log(_WARN, f"Second call returned HTTP {r2.status_code}")
+                failures.append(f"second_call_http_{r2.status_code}")
+
+        # ── Step 8: Response headers (first call) ─────────────────────────────────
+        print(_SEP2)
+        _log(_INFO, "Step 8 — Response headers")
+        cc  = r1.headers.get("cache-control", "")
+        xcs = r1.headers.get("x-cache-status", "")
+        _check("Cache-Control: private",      "private"    in cc,  f"header: {cc!r}")
+        _check("Cache-Control: max-age=60",   "max-age=60" in cc,  f"header: {cc!r}")
+        _check("X-Cache-Status header present", bool(xcs),         f"got {xcs!r}")
+    finally:
+        http.close()
 
     # ── Step 9: Date-range sanity via direct Odoo queries ─────────────────────
     date_range_failures: list[str] = []
