@@ -49,9 +49,13 @@ import sys
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+# sys.path.insert so script runs without PYTHONPATH set
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
 from backend.shared.odoo.client import OdooClient
 
 load_dotenv(dotenv_path=".env")
@@ -184,172 +188,180 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET /api/v1/hr/kpi/headcount ─────────────────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=60) as http:
-            r = http.get(url, auth=(USERNAME, PASSWORD))
+        http = api_login(base_url)
+    except ApiLoginError as exc:
+        msg = f"Session login failed: {exc}"
+        _log(_FAIL, msg)
+        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", error=msg)
+        return 0
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
         _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", error=msg)
         return 0
 
-    # ── Step 2: Status code ───────────────────────────────────────────────────
-    ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
-    if not ok:
-        _log(_INFO, f"Response body: {r.text[:500]}")
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
-                        error=f"HTTP {r.status_code}")
-        return 0
-
-    body: dict = r.json()
-
-    # ── Step 3: Required keys ─────────────────────────────────────────────────
-    required_keys = (
-        "headcount", "by_department", "by_job",
-        "incoming_count", "active_flag_count", "active_without_running",
-        "reference_date", "as_of", "cache_status", "rpc_duration_ms",
-    )
-    for k in required_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
-
-    if failures:
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
-                        error=f"missing keys: {failures}")
-        return 0
-
-    # ── Step 4: Extract values ────────────────────────────────────────────────
-    headcount:              int  = int(body["headcount"])
-    incoming_count:         int  = int(body["incoming_count"])
-    active_flag_count:      int  = int(body["active_flag_count"])
-    active_without_running: int  = int(body["active_without_running"])
-    by_department:          list = body["by_department"]
-    by_job:                 list = body["by_job"]
-    reference_date:         str  = body["reference_date"]
-    cache_status:           str  = body["cache_status"]
-    rpc_ms:                 int  = int(body["rpc_duration_ms"])
-
-    dept_sum    = sum(row["count"] for row in by_department)
-    job_sum     = sum(row["count"] for row in by_job)
-    dept_groups = len(by_department)
-    job_groups  = len(by_job)
-
-    # ── Step 5: Structured summary ────────────────────────────────────────────
-    print(_SEP)
-    print("ENDPOINT RESPONSE SUMMARY")
-    print(_SEP2)
-    print(f"  headcount              : {headcount:>6}   (baseline {BASELINE_HEADCOUNT})")
-    print(f"  incoming_count         : {incoming_count:>6}   (baseline {BASELINE_INCOMING_COUNT})")
-    print(f"  active_flag_count      : {active_flag_count:>6}   (baseline {BASELINE_ACTIVE_FLAG_COUNT})")
-    print(f"  active_without_running : {active_without_running:>6}   (baseline {BASELINE_ACTIVE_WITHOUT_RUNNING})")
-    print(f"  sum(by_department)     : {dept_sum:>6}   (must == headcount {headcount})")
-    print(f"  sum(by_job)            : {job_sum:>6}   (must == headcount {headcount})")
-    print(f"  len(by_department)     : {dept_groups:>6}")
-    print(f"  len(by_job)            : {job_groups:>6}")
-    print(f"  reference_date         : {reference_date}   (cairo today: {cairo_today})")
-    print(f"  cache_status           : {cache_status}")
-    print(f"  rpc_duration_ms        : {rpc_ms} ms")
-    print(f"  as_of                  : {body.get('as_of')}")
-    print(_SEP)
-    print()
-
-    # ── Step 6: Drift reporting (INFO only) ───────────────────────────────────
-    print("DRIFT vs 2026-06-03 BASELINES  [INFO only — not structural]:")
-    _drift("headcount             ", headcount,              BASELINE_HEADCOUNT)
-    _drift("incoming_count        ", incoming_count,         BASELINE_INCOMING_COUNT)
-    _drift("active_flag_count     ", active_flag_count,      BASELINE_ACTIVE_FLAG_COUNT)
-    _drift("active_without_running", active_without_running, BASELINE_ACTIVE_WITHOUT_RUNNING)
-    print()
-
-    # ── Step 7: Structural integrity (hard FAIL) ──────────────────────────────
-    print("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]:")
-
-    if not _check("headcount >= 0", headcount >= 0, f"got {headcount}"):
-        failures.append("negative_headcount")
-
-    if not _check("incoming_count >= 0", incoming_count >= 0, f"got {incoming_count}"):
-        failures.append("negative_incoming_count")
-
-    if not _check("active_flag_count >= 0", active_flag_count >= 0, f"got {active_flag_count}"):
-        failures.append("negative_active_flag_count")
-
-    if not _check("active_without_running >= 0",
-                  active_without_running >= 0, f"got {active_without_running}"):
-        failures.append("negative_active_without_running")
-
-    if not _check(
-        "active_without_running <= active_flag_count",
-        active_without_running <= active_flag_count,
-        f"{active_without_running} > {active_flag_count}",
-    ):
-        failures.append("active_without_running_exceeds_active_flag")
-
-    if not _check(
-        "sum(by_department counts) == headcount",
-        dept_sum == headcount,
-        f"{dept_sum} != {headcount}",
-    ):
-        failures.append("dept_sum_mismatch")
-
-    if not _check(
-        "sum(by_job counts) == headcount",
-        job_sum == headcount,
-        f"{job_sum} != {headcount}",
-    ):
-        failures.append("job_sum_mismatch")
-
-    if not _check(
-        "reference_date == Cairo today",
-        reference_date == cairo_today,
-        f"got {reference_date!r}, expected {cairo_today!r}",
-    ):
-        failures.append("reference_date_mismatch")
-
-    if not _check(
-        "cache_status in {fresh, cached}",
-        cache_status in {"fresh", "cached"},
-        f"got {cache_status!r}",
-    ):
-        failures.append("bad_cache_status")
-
-    if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
-        failures.append("negative_rpc_ms")
-
-    print()
-
-    # ── Step 8: Response headers ──────────────────────────────────────────────
-    print("HTTP HEADERS:")
-    cc  = r.headers.get("cache-control", "")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("Cache-Control: private",        "private"    in cc,  f"header: {cc!r}")
-    _check("Cache-Control: max-age=60",     "max-age=60" in cc,  f"header: {cc!r}")
-    _check("X-Cache-Status header present", bool(xcs),           f"got {xcs!r}")
-    print()
-
-    # ── Step 9: Second request — cache hit ───────────────────────────────────
-    print("CACHE HIT CHECK:")
-    _log(_INFO, "Issuing second request to verify cache hit ...")
     try:
-        with httpx.Client(timeout=30) as http:
-            r2 = http.get(url, auth=(USERNAME, PASSWORD))
-        body2: dict = r2.json()
+        r = http.get(ENDPOINT, timeout=60)
+
+        # ── Step 2: Status code ───────────────────────────────────────────────────
+        ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
+        if not ok:
+            _log(_INFO, f"Response body: {r.text[:500]}")
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
+                            error=f"HTTP {r.status_code}")
+            return 0
+
+        body: dict = r.json()
+
+        # ── Step 3: Required keys ─────────────────────────────────────────────────
+        required_keys = (
+            "headcount", "by_department", "by_job",
+            "incoming_count", "active_flag_count", "active_without_running",
+            "reference_date", "as_of", "cache_status", "rpc_duration_ms",
+        )
+        for k in required_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
+
+        if failures:
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "",
+                            error=f"missing keys: {failures}")
+            return 0
+
+        # ── Step 4: Extract values ────────────────────────────────────────────────
+        headcount:              int  = int(body["headcount"])
+        incoming_count:         int  = int(body["incoming_count"])
+        active_flag_count:      int  = int(body["active_flag_count"])
+        active_without_running: int  = int(body["active_without_running"])
+        by_department:          list = body["by_department"]
+        by_job:                 list = body["by_job"]
+        reference_date:         str  = body["reference_date"]
+        cache_status:           str  = body["cache_status"]
+        rpc_ms:                 int  = int(body["rpc_duration_ms"])
+
+        dept_sum    = sum(row["count"] for row in by_department)
+        job_sum     = sum(row["count"] for row in by_job)
+        dept_groups = len(by_department)
+        job_groups  = len(by_job)
+
+        # ── Step 5: Structured summary ────────────────────────────────────────────
+        print(_SEP)
+        print("ENDPOINT RESPONSE SUMMARY")
+        print(_SEP2)
+        print(f"  headcount              : {headcount:>6}   (baseline {BASELINE_HEADCOUNT})")
+        print(f"  incoming_count         : {incoming_count:>6}   (baseline {BASELINE_INCOMING_COUNT})")
+        print(f"  active_flag_count      : {active_flag_count:>6}   (baseline {BASELINE_ACTIVE_FLAG_COUNT})")
+        print(f"  active_without_running : {active_without_running:>6}   (baseline {BASELINE_ACTIVE_WITHOUT_RUNNING})")
+        print(f"  sum(by_department)     : {dept_sum:>6}   (must == headcount {headcount})")
+        print(f"  sum(by_job)            : {job_sum:>6}   (must == headcount {headcount})")
+        print(f"  len(by_department)     : {dept_groups:>6}")
+        print(f"  len(by_job)            : {job_groups:>6}")
+        print(f"  reference_date         : {reference_date}   (cairo today: {cairo_today})")
+        print(f"  cache_status           : {cache_status}")
+        print(f"  rpc_duration_ms        : {rpc_ms} ms")
+        print(f"  as_of                  : {body.get('as_of')}")
+        print(_SEP)
+        print()
+
+        # ── Step 6: Drift reporting (INFO only) ───────────────────────────────────
+        print("DRIFT vs 2026-06-03 BASELINES  [INFO only — not structural]:")
+        _drift("headcount             ", headcount,              BASELINE_HEADCOUNT)
+        _drift("incoming_count        ", incoming_count,         BASELINE_INCOMING_COUNT)
+        _drift("active_flag_count     ", active_flag_count,      BASELINE_ACTIVE_FLAG_COUNT)
+        _drift("active_without_running", active_without_running, BASELINE_ACTIVE_WITHOUT_RUNNING)
+        print()
+
+        # ── Step 7: Structural integrity (hard FAIL) ──────────────────────────────
+        print("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]:")
+
+        if not _check("headcount >= 0", headcount >= 0, f"got {headcount}"):
+            failures.append("negative_headcount")
+
+        if not _check("incoming_count >= 0", incoming_count >= 0, f"got {incoming_count}"):
+            failures.append("negative_incoming_count")
+
+        if not _check("active_flag_count >= 0", active_flag_count >= 0, f"got {active_flag_count}"):
+            failures.append("negative_active_flag_count")
+
+        if not _check("active_without_running >= 0",
+                      active_without_running >= 0, f"got {active_without_running}"):
+            failures.append("negative_active_without_running")
+
         if not _check(
-            "second call cache_status == 'cached'",
-            body2.get("cache_status") == "cached",
-            f"got {body2.get('cache_status')!r}",
+            "active_without_running <= active_flag_count",
+            active_without_running <= active_flag_count,
+            f"{active_without_running} > {active_flag_count}",
         ):
-            failures.append("cache_not_hit_on_second_call")
+            failures.append("active_without_running_exceeds_active_flag")
+
         if not _check(
-            "second call rpc_duration_ms == 0",
-            int(body2.get("rpc_duration_ms", -1)) == 0,
-            f"got {body2.get('rpc_duration_ms')}",
+            "sum(by_department counts) == headcount",
+            dept_sum == headcount,
+            f"{dept_sum} != {headcount}",
         ):
-            failures.append("cache_rpc_ms_nonzero")
-    except Exception as exc:
-        _log(_FAIL, f"Second request failed: {exc}")
-        failures.append("second_request_failed")
-    print()
+            failures.append("dept_sum_mismatch")
+
+        if not _check(
+            "sum(by_job counts) == headcount",
+            job_sum == headcount,
+            f"{job_sum} != {headcount}",
+        ):
+            failures.append("job_sum_mismatch")
+
+        if not _check(
+            "reference_date == Cairo today",
+            reference_date == cairo_today,
+            f"got {reference_date!r}, expected {cairo_today!r}",
+        ):
+            failures.append("reference_date_mismatch")
+
+        if not _check(
+            "cache_status in {fresh, cached}",
+            cache_status in {"fresh", "cached"},
+            f"got {cache_status!r}",
+        ):
+            failures.append("bad_cache_status")
+
+        if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
+            failures.append("negative_rpc_ms")
+
+        print()
+
+        # ── Step 8: Response headers ──────────────────────────────────────────────
+        print("HTTP HEADERS:")
+        cc  = r.headers.get("cache-control", "")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("Cache-Control: private",        "private"    in cc,  f"header: {cc!r}")
+        _check("Cache-Control: max-age=60",     "max-age=60" in cc,  f"header: {cc!r}")
+        _check("X-Cache-Status header present", bool(xcs),           f"got {xcs!r}")
+        print()
+
+        # ── Step 9: Second request — cache hit ───────────────────────────────────
+        print("CACHE HIT CHECK:")
+        _log(_INFO, "Issuing second request to verify cache hit ...")
+        try:
+            r2 = http.get(ENDPOINT, timeout=30)
+            body2: dict = r2.json()
+            if not _check(
+                "second call cache_status == 'cached'",
+                body2.get("cache_status") == "cached",
+                f"got {body2.get('cache_status')!r}",
+            ):
+                failures.append("cache_not_hit_on_second_call")
+            if not _check(
+                "second call rpc_duration_ms == 0",
+                int(body2.get("rpc_duration_ms", -1)) == 0,
+                f"got {body2.get('rpc_duration_ms')}",
+            ):
+                failures.append("cache_rpc_ms_nonzero")
+        except Exception as exc:
+            _log(_FAIL, f"Second request failed: {exc}")
+            failures.append("second_request_failed")
+        print()
+    finally:
+        http.close()
 
     # ── Step 10: Independent Odoo cross-check ─────────────────────────────────
     print("INDEPENDENT ODOO CROSS-CHECK:")
