@@ -60,6 +60,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
 from backend.shared.odoo.client import OdooClient
 
 load_dotenv(dotenv_path=".env")
@@ -225,10 +226,9 @@ async def _direct_odoo_buckets(cairo_today: date) -> dict:
 
 # ── KPI A cross-check ─────────────────────────────────────────────────────────
 
-def _fetch_kpi_a_headcount(base_url: str) -> int | None:
+def _fetch_kpi_a_headcount(http: httpx.Client) -> int | None:
     try:
-        with httpx.Client(timeout=30) as http:
-            r = http.get(f"{base_url}{KPI_A_ENDPOINT}", auth=(USERNAME, PASSWORD))
+        r = http.get(KPI_A_ENDPOINT, timeout=30)
         if r.status_code == 200:
             return int(r.json().get("headcount", -1))
     except Exception:
@@ -271,236 +271,244 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET /api/v1/hr/kpi/payroll-risk-dashboard ────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=60) as http:
-            r = http.get(url, auth=(USERNAME, PASSWORD))
+        http = api_login(base_url)
+    except ApiLoginError as exc:
+        msg = f"Session login failed: {exc}"
+        _log(_FAIL, msg)
+        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", "", error=msg)
+        return 0
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
         _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", "", error=msg)
         return 0
 
-    # ── Step 2: Status code ───────────────────────────────────────────────────
-    ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
-    if not ok:
-        _log(_INFO, f"Response body: {r.text[:500]}")
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", "",
-                        error=f"HTTP {r.status_code}")
-        return 0
-
-    body: dict = r.json()
-
-    # ── Step 3: Required keys ─────────────────────────────────────────────────
-    required_keys = (
-        "buckets",
-        "department_breakdown_expired",
-        "department_breakdown_expiring_45d",
-        "archived_with_running_count",
-        "active_flag_no_running_count",
-        "active_flag_no_running_exit_gap",
-        "active_flag_no_running_incoming",
-        "active_flag_no_running_data_gap",
-        "total_employed",
-        "reference_date",
-        "as_of",
-        "cache_status",
-        "rpc_duration_ms",
-    )
-    for k in required_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
-
-    if failures:
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", "",
-                        error=f"missing keys: {failures}")
-        return 0
-
-    # ── Step 4: Extract values ────────────────────────────────────────────────
-    total_employed:                int  = int(body["total_employed"])
-    archived_with_running_count:   int  = int(body["archived_with_running_count"])
-    active_flag_no_running_count:  int  = int(body["active_flag_no_running_count"])
-    awc_exit_gap:                  int  = int(body["active_flag_no_running_exit_gap"])
-    awc_incoming:                  int  = int(body["active_flag_no_running_incoming"])
-    awc_data_gap:                  int  = int(body["active_flag_no_running_data_gap"])
-    buckets:                       list = body["buckets"]
-    reference_date:                str  = body["reference_date"]
-    cache_status:                  str  = body["cache_status"]
-    rpc_ms:                        int  = int(body["rpc_duration_ms"])
-
-    num_buckets   = len(buckets)
-    bucket_sum    = sum(b["count"] for b in buckets)
-    bucket_labels = [b["label"] for b in buckets]
-    bucket_dict   = {b["label"]: b["count"] for b in buckets}
-    expired_count = bucket_dict.get("expired", -1)
-
-    # ── Step 5: Structured summary ────────────────────────────────────────────
-    print(_SEP)
-    print("ENDPOINT RESPONSE SUMMARY")
-    print(_SEP2)
-    bl_note = "(no baseline)" if BASELINE_TOTAL_EMPLOYED is None else f"(baseline {BASELINE_TOTAL_EMPLOYED})"
-    print(f"  total_employed                   : {total_employed:>6}   {bl_note}")
-    print(f"  sum(6 bucket counts)             : {bucket_sum:>6}   (must == total_employed)")
-    print(f"  num_buckets                      : {num_buckets:>6}   (must == 6)")
-    print(f"  archived_with_running_count      : {archived_with_running_count:>6}   (employed, stale archive flag)")
-    print(f"  active_flag_no_running_count     : {active_flag_no_running_count:>6}   (NOT employed — metadata only)")
-    print(f"    ↳ exit_gap                     : {awc_exit_gap:>6}   (departed, unarchived)")
-    print(f"    ↳ incoming                     : {awc_incoming:>6}   (draft contract, new hire)")
-    print(f"    ↳ data_gap                     : {awc_data_gap:>6}   (no contract record at all)")
-    print(f"  awc_exit_gap+incoming+data_gap   : {awc_exit_gap+awc_incoming+awc_data_gap:>6}   (must == active_flag_no_running_count {active_flag_no_running_count})")
-    print(f"  reference_date                   : {reference_date}   (cairo today: {cairo_today_str})")
-    print(f"  cache_status                     : {cache_status}")
-    print(f"  rpc_duration_ms                  : {rpc_ms} ms")
-    print(f"  as_of                            : {body.get('as_of')}")
-    print(_SEP2)
-    print("  Bucket breakdown (endpoint):")
-    for b in buckets:
-        print(f"    {b['label']:<20}  :  {b['count']:>5}")
-    print(_SEP2)
-    print("  Department breakdown (expired):")
-    for row in body.get("department_breakdown_expired", []):
-        print(f"    {row.get('department_name', '?'):<30} : {row.get('count', 0):>5}")
-    if not body.get("department_breakdown_expired"):
-        print("    (empty — expected when expired bucket == 0)")
-    print("  Department breakdown (expiring_45d):")
-    for row in body.get("department_breakdown_expiring_45d", []):
-        print(f"    {row.get('department_name', '?'):<30} : {row.get('count', 0):>5}")
-    if not body.get("department_breakdown_expiring_45d"):
-        print("    (empty)")
-    print(_SEP)
-    print()
-
-    # ── Step 6: Drift reporting (INFO only) ───────────────────────────────────
-    print("DRIFT SECTION  [INFO only — no hard fail; set BASELINE_TOTAL_EMPLOYED after first run]:")
-    _drift("total_employed", total_employed, BASELINE_TOTAL_EMPLOYED)
-    print()
-
-    # ── Step 7: expired == 0 expected (ALERT if > 0) ──────────────────────────
-    if expired_count > 0:
-        _log(_ALERT, (
-            f"bucket 'expired' == {expired_count} (> 0). "
-            "Employed employees have payroll-blocking expired contracts. "
-            "HR must renew immediately. This is an ALERT, not a script FAIL."
-        ))
-    else:
-        _log(_INFO, f"bucket 'expired' == 0  (expected — no payroll-blocking expired contracts)")
-
-    # ── Step 8: Structural invariants (hard FAIL) ─────────────────────────────
-    print()
-    print("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]:")
-
-    if not _check("total_employed >= 0", total_employed >= 0, f"got {total_employed}"):
-        failures.append("negative_total_employed")
-
-    if not _check("all bucket counts >= 0",
-                  all(b["count"] >= 0 for b in buckets),
-                  "at least one bucket count is negative"):
-        failures.append("negative_bucket_count")
-
-    if not _check("num_buckets == 6", num_buckets == 6, f"got {num_buckets}"):
-        failures.append("wrong_bucket_count")
-
-    if not _check(
-        "bucket labels in fixed order",
-        bucket_labels == EXPECTED_BUCKET_LABELS,
-        f"got {bucket_labels}",
-    ):
-        failures.append("bucket_label_order_wrong")
-
-    if not _check(
-        f"sum(buckets) == total_employed ({total_employed})",
-        bucket_sum == total_employed,
-        f"bucket_sum={bucket_sum} != total_employed={total_employed}",
-    ):
-        failures.append("sanity_invariant_violated")
-
-    if not _check("archived_with_running_count >= 0",
-                  archived_with_running_count >= 0,
-                  f"got {archived_with_running_count}"):
-        failures.append("negative_archived_with_running")
-
-    if not _check("active_flag_no_running_count >= 0",
-                  active_flag_no_running_count >= 0,
-                  f"got {active_flag_no_running_count}"):
-        failures.append("negative_active_flag_no_running")
-
-    awc_three_way_sum = awc_exit_gap + awc_incoming + awc_data_gap
-    if not _check(
-        f"awc_exit_gap + awc_incoming + awc_data_gap == active_flag_no_running_count ({active_flag_no_running_count})",
-        awc_three_way_sum == active_flag_no_running_count,
-        f"{awc_exit_gap}+{awc_incoming}+{awc_data_gap}={awc_three_way_sum} != {active_flag_no_running_count}",
-    ):
-        failures.append("awc_three_way_split_mismatch")
-
-    if not _check(
-        "reference_date == Cairo today",
-        reference_date == cairo_today_str,
-        f"got {reference_date!r}, expected {cairo_today_str!r}",
-    ):
-        failures.append("reference_date_mismatch")
-
-    if not _check(
-        "cache_status in {fresh, cached}",
-        cache_status in {"fresh", "cached"},
-        f"got {cache_status!r}",
-    ):
-        failures.append("bad_cache_status")
-
-    if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
-        failures.append("negative_rpc_ms")
-
-    print()
-
-    # ── Step 9: Response headers ──────────────────────────────────────────────
-    print("HTTP HEADERS:")
-    cc  = r.headers.get("cache-control", "")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("Cache-Control: private",        "private"    in cc, f"header: {cc!r}")
-    _check("Cache-Control: max-age=60",     "max-age=60" in cc, f"header: {cc!r}")
-    _check("X-Cache-Status header present", bool(xcs),          f"got {xcs!r}")
-    print()
-
-    # ── Step 10: Second request — cache hit ───────────────────────────────────
-    print("CACHE HIT CHECK:")
-    _log(_INFO, "Issuing second request to verify cache hit ...")
     try:
-        with httpx.Client(timeout=30) as http:
-            r2 = http.get(url, auth=(USERNAME, PASSWORD))
-        body2: dict = r2.json()
-        if not _check(
-            "second call cache_status == 'cached'",
-            body2.get("cache_status") == "cached",
-            f"got {body2.get('cache_status')!r}",
-        ):
-            failures.append("cache_not_hit_on_second_call")
-        if not _check(
-            "second call rpc_duration_ms == 0",
-            int(body2.get("rpc_duration_ms", -1)) == 0,
-            f"got {body2.get('rpc_duration_ms')}",
-        ):
-            failures.append("cache_rpc_ms_nonzero")
-    except Exception as exc:
-        _log(_FAIL, f"Second request failed: {exc}")
-        failures.append("second_request_failed")
-    print()
+        r = http.get(ENDPOINT, timeout=60)
 
-    # ── Step 11: Cross-KPI consistency (INFO only) ────────────────────────────
-    print("CROSS-KPI CONSISTENCY  [INFO only — both KPIs query same Running population]:")
-    kpi_a_headcount: int | str = "n/a"
-    kpi_a_count = _fetch_kpi_a_headcount(base_url)
-    if kpi_a_count is None:
-        _log(_INFO, "KPI A endpoint unreachable — cross-KPI check skipped")
-        kpi_a_headcount = "error"
-    else:
-        kpi_a_headcount = kpi_a_count
-        if total_employed == kpi_a_count:
-            _log(_INFO,
-                 f"total_employed ({total_employed}) == KPI A headcount ({kpi_a_count}) — consistent")
+        # ── Step 2: Status code ───────────────────────────────────────────────────
+        ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
+        if not ok:
+            _log(_INFO, f"Response body: {r.text[:500]}")
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", "",
+                            error=f"HTTP {r.status_code}")
+            return 0
+
+        body: dict = r.json()
+
+        # ── Step 3: Required keys ─────────────────────────────────────────────────
+        required_keys = (
+            "buckets",
+            "department_breakdown_expired",
+            "department_breakdown_expiring_45d",
+            "archived_with_running_count",
+            "active_flag_no_running_count",
+            "active_flag_no_running_exit_gap",
+            "active_flag_no_running_incoming",
+            "active_flag_no_running_data_gap",
+            "total_employed",
+            "reference_date",
+            "as_of",
+            "cache_status",
+            "rpc_duration_ms",
+        )
+        for k in required_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
+
+        if failures:
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", "",
+                            error=f"missing keys: {failures}")
+            return 0
+
+        # ── Step 4: Extract values ────────────────────────────────────────────────
+        total_employed:                int  = int(body["total_employed"])
+        archived_with_running_count:   int  = int(body["archived_with_running_count"])
+        active_flag_no_running_count:  int  = int(body["active_flag_no_running_count"])
+        awc_exit_gap:                  int  = int(body["active_flag_no_running_exit_gap"])
+        awc_incoming:                  int  = int(body["active_flag_no_running_incoming"])
+        awc_data_gap:                  int  = int(body["active_flag_no_running_data_gap"])
+        buckets:                       list = body["buckets"]
+        reference_date:                str  = body["reference_date"]
+        cache_status:                  str  = body["cache_status"]
+        rpc_ms:                        int  = int(body["rpc_duration_ms"])
+
+        num_buckets   = len(buckets)
+        bucket_sum    = sum(b["count"] for b in buckets)
+        bucket_labels = [b["label"] for b in buckets]
+        bucket_dict   = {b["label"]: b["count"] for b in buckets}
+        expired_count = bucket_dict.get("expired", -1)
+
+        # ── Step 5: Structured summary ────────────────────────────────────────────
+        print(_SEP)
+        print("ENDPOINT RESPONSE SUMMARY")
+        print(_SEP2)
+        bl_note = "(no baseline)" if BASELINE_TOTAL_EMPLOYED is None else f"(baseline {BASELINE_TOTAL_EMPLOYED})"
+        print(f"  total_employed                   : {total_employed:>6}   {bl_note}")
+        print(f"  sum(6 bucket counts)             : {bucket_sum:>6}   (must == total_employed)")
+        print(f"  num_buckets                      : {num_buckets:>6}   (must == 6)")
+        print(f"  archived_with_running_count      : {archived_with_running_count:>6}   (employed, stale archive flag)")
+        print(f"  active_flag_no_running_count     : {active_flag_no_running_count:>6}   (NOT employed — metadata only)")
+        print(f"    ↳ exit_gap                     : {awc_exit_gap:>6}   (departed, unarchived)")
+        print(f"    ↳ incoming                     : {awc_incoming:>6}   (draft contract, new hire)")
+        print(f"    ↳ data_gap                     : {awc_data_gap:>6}   (no contract record at all)")
+        print(f"  awc_exit_gap+incoming+data_gap   : {awc_exit_gap+awc_incoming+awc_data_gap:>6}   (must == active_flag_no_running_count {active_flag_no_running_count})")
+        print(f"  reference_date                   : {reference_date}   (cairo today: {cairo_today_str})")
+        print(f"  cache_status                     : {cache_status}")
+        print(f"  rpc_duration_ms                  : {rpc_ms} ms")
+        print(f"  as_of                            : {body.get('as_of')}")
+        print(_SEP2)
+        print("  Bucket breakdown (endpoint):")
+        for b in buckets:
+            print(f"    {b['label']:<20}  :  {b['count']:>5}")
+        print(_SEP2)
+        print("  Department breakdown (expired):")
+        for row in body.get("department_breakdown_expired", []):
+            print(f"    {row.get('department_name', '?'):<30} : {row.get('count', 0):>5}")
+        if not body.get("department_breakdown_expired"):
+            print("    (empty — expected when expired bucket == 0)")
+        print("  Department breakdown (expiring_45d):")
+        for row in body.get("department_breakdown_expiring_45d", []):
+            print(f"    {row.get('department_name', '?'):<30} : {row.get('count', 0):>5}")
+        if not body.get("department_breakdown_expiring_45d"):
+            print("    (empty)")
+        print(_SEP)
+        print()
+
+        # ── Step 6: Drift reporting (INFO only) ───────────────────────────────────
+        print("DRIFT SECTION  [INFO only — no hard fail; set BASELINE_TOTAL_EMPLOYED after first run]:")
+        _drift("total_employed", total_employed, BASELINE_TOTAL_EMPLOYED)
+        print()
+
+        # ── Step 7: expired == 0 expected (ALERT if > 0) ──────────────────────────
+        if expired_count > 0:
+            _log(_ALERT, (
+                f"bucket 'expired' == {expired_count} (> 0). "
+                "Employed employees have payroll-blocking expired contracts. "
+                "HR must renew immediately. This is an ALERT, not a script FAIL."
+            ))
         else:
-            _log(_INFO,
-                 f"total_employed ({total_employed}) != KPI A headcount ({kpi_a_count}) "
-                 f"— investigate: possible cache skew or population divergence")
-    print()
+            _log(_INFO, f"bucket 'expired' == 0  (expected — no payroll-blocking expired contracts)")
+
+        # ── Step 8: Structural invariants (hard FAIL) ─────────────────────────────
+        print()
+        print("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]:")
+
+        if not _check("total_employed >= 0", total_employed >= 0, f"got {total_employed}"):
+            failures.append("negative_total_employed")
+
+        if not _check("all bucket counts >= 0",
+                      all(b["count"] >= 0 for b in buckets),
+                      "at least one bucket count is negative"):
+            failures.append("negative_bucket_count")
+
+        if not _check("num_buckets == 6", num_buckets == 6, f"got {num_buckets}"):
+            failures.append("wrong_bucket_count")
+
+        if not _check(
+            "bucket labels in fixed order",
+            bucket_labels == EXPECTED_BUCKET_LABELS,
+            f"got {bucket_labels}",
+        ):
+            failures.append("bucket_label_order_wrong")
+
+        if not _check(
+            f"sum(buckets) == total_employed ({total_employed})",
+            bucket_sum == total_employed,
+            f"bucket_sum={bucket_sum} != total_employed={total_employed}",
+        ):
+            failures.append("sanity_invariant_violated")
+
+        if not _check("archived_with_running_count >= 0",
+                      archived_with_running_count >= 0,
+                      f"got {archived_with_running_count}"):
+            failures.append("negative_archived_with_running")
+
+        if not _check("active_flag_no_running_count >= 0",
+                      active_flag_no_running_count >= 0,
+                      f"got {active_flag_no_running_count}"):
+            failures.append("negative_active_flag_no_running")
+
+        awc_three_way_sum = awc_exit_gap + awc_incoming + awc_data_gap
+        if not _check(
+            f"awc_exit_gap + awc_incoming + awc_data_gap == active_flag_no_running_count ({active_flag_no_running_count})",
+            awc_three_way_sum == active_flag_no_running_count,
+            f"{awc_exit_gap}+{awc_incoming}+{awc_data_gap}={awc_three_way_sum} != {active_flag_no_running_count}",
+        ):
+            failures.append("awc_three_way_split_mismatch")
+
+        if not _check(
+            "reference_date == Cairo today",
+            reference_date == cairo_today_str,
+            f"got {reference_date!r}, expected {cairo_today_str!r}",
+        ):
+            failures.append("reference_date_mismatch")
+
+        if not _check(
+            "cache_status in {fresh, cached}",
+            cache_status in {"fresh", "cached"},
+            f"got {cache_status!r}",
+        ):
+            failures.append("bad_cache_status")
+
+        if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
+            failures.append("negative_rpc_ms")
+
+        print()
+
+        # ── Step 9: Response headers ──────────────────────────────────────────────
+        print("HTTP HEADERS:")
+        cc  = r.headers.get("cache-control", "")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("Cache-Control: private",        "private"    in cc, f"header: {cc!r}")
+        _check("Cache-Control: max-age=60",     "max-age=60" in cc, f"header: {cc!r}")
+        _check("X-Cache-Status header present", bool(xcs),          f"got {xcs!r}")
+        print()
+
+        # ── Step 10: Second request — cache hit ───────────────────────────────────
+        print("CACHE HIT CHECK:")
+        _log(_INFO, "Issuing second request to verify cache hit ...")
+        try:
+            r2 = http.get(ENDPOINT, timeout=30)
+            body2: dict = r2.json()
+            if not _check(
+                "second call cache_status == 'cached'",
+                body2.get("cache_status") == "cached",
+                f"got {body2.get('cache_status')!r}",
+            ):
+                failures.append("cache_not_hit_on_second_call")
+            if not _check(
+                "second call rpc_duration_ms == 0",
+                int(body2.get("rpc_duration_ms", -1)) == 0,
+                f"got {body2.get('rpc_duration_ms')}",
+            ):
+                failures.append("cache_rpc_ms_nonzero")
+        except Exception as exc:
+            _log(_FAIL, f"Second request failed: {exc}")
+            failures.append("second_request_failed")
+        print()
+
+        # ── Step 11: Cross-KPI consistency (INFO only) ────────────────────────────
+        print("CROSS-KPI CONSISTENCY  [INFO only — both KPIs query same Running population]:")
+        kpi_a_headcount: int | str = "n/a"
+        kpi_a_count = _fetch_kpi_a_headcount(http)
+        if kpi_a_count is None:
+            _log(_INFO, "KPI A endpoint unreachable — cross-KPI check skipped")
+            kpi_a_headcount = "error"
+        else:
+            kpi_a_headcount = kpi_a_count
+            if total_employed == kpi_a_count:
+                _log(_INFO,
+                     f"total_employed ({total_employed}) == KPI A headcount ({kpi_a_count}) — consistent")
+            else:
+                _log(_INFO,
+                     f"total_employed ({total_employed}) != KPI A headcount ({kpi_a_count}) "
+                     f"— investigate: possible cache skew or population divergence")
+        print()
+    finally:
+        http.close()
 
     # ── Step 12: Independent Odoo cross-check (hard FAIL if mismatch) ─────────
     print("INDEPENDENT ODOO CROSS-CHECK  [FAIL if endpoint != direct Odoo computation]:")
