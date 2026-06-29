@@ -3606,3 +3606,71 @@ tests + verify-script + this entry — single atomic commit on `main`.
   non-forecast drill-downs is Khaled's gate before push.
 - **Commit:** (this session) `drilldown.js` `!isForecast` gate in
   `_renderFilterBar` + this entry — single atomic commit on `main`.
+
+---
+
+## Session 24 — 2026-06-29 — Backfill: Forecast Drill-down Installment-Type Filter (retroactive capture)
+
+### Decision 24.1 — Forecast drill-down single-select server-side installment-type filter (retroactive backfill)
+
+- **Backfill note (honest retroactive capture):** This entry is written
+  **2026-06-29 after the fact**. The forecast installment-type filter shipped
+  earlier the SAME day across three commits that did NOT touch this log, leaving
+  the append-only decisions log with a gap (confirmed by a read-only audit:
+  none of the three commits modified `MODULE_2_IMPLEMENTATION_DECISIONS.md`, and
+  the only prior mention of the filter was incidental — inside Decision 23.1 as
+  a "preserved" item). This entry documents that already-shipped work
+  retroactively; it records what the code actually does, NOT a decision
+  narrative that was never captured at the time. Placed at end-of-file per the
+  log's append-only / chronological-by-write convention — the feature itself
+  PRE-DATES Decision 23.1 (its commits are ancestors of 23.1's commit
+  `3ac6c56`), so that ordering is stated here in text rather than implied by
+  physical position.
+- **Feature:** A single-select, **server-side** installment-type filter on the
+  **forecast drill-down ONLY** — a `<select>` that narrows the open segment's
+  rows (and its list-total) to one `rs.installment` type, or "All types".
+- **Ship record:** commits `2aa9168` (server-side), `6e07244` (frontend),
+  `72d4f72` (verify); tag `checkpoint-collections-forecast-type-filter`
+  (→ `72d4f72`); shipped **2026-06-29**. These three are the parents behind
+  today's `3ac6c56` / Decision 23.1.
+- **Backend (`2aa9168`):** a new `installment_type_id` query param on the
+  forecast-segment route
+  `GET /api/v1/collections/drilldown/forecast/{bucket}/{segment}`
+  (`backend/api/v1/endpoints/collections.py`), forwarded to
+  `get_forecast_segment_drilldown` in
+  `backend/modules/collections/services/drilldown_service.py`, where it is
+  appended to the base domain BEFORE the segment split so `search_count`, the
+  `read_group` total, and all three segments recompute against the type-filtered
+  set. The endpoint genuinely HONORS the param (unlike the phantom status/cheque
+  controls later hidden in Decision 23.1). Arabic type names are resolved via
+  `backend/modules/collections/installment_type_names.py`, which was **reused
+  from Stage 7 (created in `a01304f`); `2aa9168` only modified it — it did NOT
+  introduce it.**
+- **Frontend (`6e07244`):** the `<select data-dd-filter-type>` built in
+  `_renderFilterBar` in `frontend/static/js/drilldown.js`, **gated by
+  `_isForecastTarget()`** so it renders on forecast only; the
+  `installment_type_id` URL param emitted in `_buildUrl` (also gated by
+  `_isForecastTarget()`); and the **"(filtered)" / "(مُفلتر)" list-total
+  marker**, driven SOLELY by `_state.filters.installment_type_id` — when a type
+  is selected the list-total recomputes against the filtered set and the marker
+  is shown (so it no longer equals the card figure). i18n strings added to
+  `frontend/translations/ar.json` + `frontend/translations/en.json`; trigger
+  wiring in `frontend/templates/collections/dashboard.html`.
+- **Verify (`72d4f72`):** `scripts/verify_forecast_drilldown_live.py` extended to
+  assert the installment-type filter partitions the segment cleanly (the
+  per-type filtered totals reconcile to the unfiltered segment).
+- **Scope:** Forecast-ONLY — scoped via `_isForecastTarget()` (both the render
+  gate and the `_buildUrl` param), so late / project / trend / portfolio never
+  show it. Single-select (one type id, or "All types"). Server-side (the param
+  is honored by the forecast endpoint). The "(filtered)" marker depends only on
+  `installment_type_id`, independent of any other control. NOT to be conflated
+  with Session 16 / Decisions 16.x (the earlier installment-type display COLUMN
+  + KPI 7 `type_breakdown`, the latter removed by Decision 19.1) — those are a
+  different, earlier feature.
+- **Relationship to Decision 23.1:** Decision 23.1 (same 2026-06-29 write
+  window) later HID the phantom status/cheque controls on the forecast filter
+  bar and explicitly PRESERVED this type filter — so this backfilled entry
+  documents the feature that 23.1 references as "preserved."
+- **This commit:** docs-only backfill — appends this entry to
+  `MODULE_2_IMPLEMENTATION_DECISIONS.md`; no code, frontend, backend, schema,
+  test, or translation file touched; no tag.
