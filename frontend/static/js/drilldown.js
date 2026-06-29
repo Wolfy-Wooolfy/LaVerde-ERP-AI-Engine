@@ -18,7 +18,7 @@
   var _state = {
     target:    null,
     endpoint:  null,
-    filters:   {},     // {payment_state, has_pending_cheque, sort_by, sort_dir, project_id}
+    filters:   {},     // {payment_state, has_pending_cheque, sort_by, sort_dir, project_id, installment_type_id}
     cursor:    null,
     hasNext:   false,
     isLoading: false,
@@ -60,6 +60,13 @@
     var segment = rest.slice(dash + 1);
     if (!bucket || !segment) return null;
     return { bucket: bucket, segment: segment };
+  }
+
+  // True when the active drill-down is a forecast (bucket, segment) target — the
+  // ONLY drill-down that accepts the installment-type filter (scoped per spec, so
+  // the control never appears on late/project/trend/portfolio).
+  function _isForecastTarget() {
+    return !!(_state.target && _state.target.indexOf('forecast-') === 0);
   }
 
   // ── Endpoint resolver ──────────────────────────────────────────────────────
@@ -209,6 +216,10 @@
       }
       if (f.sort_by)  params.set('sort_by',  f.sort_by);
       if (f.sort_dir) params.set('sort_dir', f.sort_dir);
+      // Forecast drill-down ONLY: single-select installment-type filter.
+      if (_isForecastTarget() && f.installment_type_id) {
+        params.set('installment_type_id', String(f.installment_type_id));
+      }
     } else {
       // Portfolio supports only project_id filter
       if (f.project_id) params.set('project_id', String(f.project_id));
@@ -308,6 +319,12 @@
         var totStr = F.formatEGP
           ? F.formatEGP(data.segment_total_egp, lang, { fullValue: true })
           : _fmtEgp(data.segment_total_egp);
+        // When a type filter is active the total recomputes against the filtered
+        // set, so it no longer equals the card figure: append a "(filtered)" marker
+        // to the value and drop the now-false "equals the card" subtitle.
+        var isTypeFiltered = !!_state.filters.installment_type_id;
+        var totDisplay = totStr
+          + (isTypeFiltered ? ' ' + (S.dd_filtered_marker || '(filtered)') : '');
         var totSection = document.createElement('div');
         totSection.id = 'dd-segment-total';
         totSection.className = 'px-5 py-3 border-b border-neutral-100 dark:border-neutral-800';
@@ -318,12 +335,13 @@
               + _esc(S.dd_forecast_list_total || 'List total')
             + '</span>'
             + '<span class="text-sm font-semibold tabular text-neutral-900 dark:text-neutral-100">'
-              + _esc(totStr)
+              + _esc(totDisplay)
             + '</span>'
           + '</div>'
-          + '<p class="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">'
-            + _esc(S.dd_forecast_equals_card || 'Equals this segment’s figure on the card')
-          + '</p>';
+          + (isTypeFiltered ? '' : (''
+            + '<p class="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">'
+              + _esc(S.dd_forecast_equals_card || 'Equals this segment’s figure on the card')
+            + '</p>'));
         _listBody.parentNode.insertBefore(totSection, _listBody);
       }
 
@@ -713,6 +731,35 @@
         + _esc(o.label) + '</button>';
     }).join('');
 
+    // Forecast-only single-select installment-type control. Scoped to the forecast
+    // target so it does NOT render on late/project/trend/portfolio and therefore
+    // never widens the pre-existing shown-but-ignored Status/Cheques chip quirk.
+    // Options come from S.dd_type_names (the 8 populated ids, localized via the
+    // template) plus an "All types" default; selected id is mirrored from state.
+    var typeGroupHtml = '';
+    if (_isForecastTarget()) {
+      var typeNames   = S.dd_type_names || {};
+      var currentType = f.installment_type_id ? String(f.installment_type_id) : '';
+      var typeIds     = Object.keys(typeNames).sort(function (a, b) { return Number(a) - Number(b); });
+      var typeOpts    = '<option value="">' + _esc(S.dd_type_all || 'All types') + '</option>';
+      typeIds.forEach(function (id) {
+        var sel = id === currentType ? ' selected' : '';
+        typeOpts += '<option value="' + _esc(id) + '"' + sel + '>' + _esc(typeNames[id]) + '</option>';
+      });
+      typeGroupHtml = ''
+        + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
+        + '<div class="flex items-center gap-1">'
+          + '<span class="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">'
+            + _esc(S.dd_filter_type_label || 'Type') + '</span>'
+          + '<select data-dd-filter-type'
+            + ' class="text-xs rounded-md border border-neutral-200 dark:border-neutral-700'
+            + ' bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200'
+            + ' px-2 py-1 focus-visible:ring-2 focus-visible:ring-primary-500">'
+            + typeOpts
+          + '</select>'
+        + '</div>';
+    }
+
     _filterBar.innerHTML = ''
       + '<div class="flex flex-wrap items-center gap-x-3 gap-y-2">'
         + '<div class="flex items-center gap-1">'
@@ -722,6 +769,7 @@
         + '</div>'
         + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
         + chequeHtml
+        + typeGroupHtml
         + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
         + '<div class="flex items-center gap-1">'
           + sortHtml
@@ -761,6 +809,18 @@
         window.drilldownController._refetch();
       });
     });
+
+    var typeSel = _filterBar.querySelector('[data-dd-filter-type]');
+    if (typeSel) {
+      typeSel.addEventListener('change', function () {
+        var v = typeSel.value;
+        _state.filters = Object.assign({}, _state.filters, {
+          installment_type_id: v ? parseInt(v, 10) : null,
+        });
+        _renderFilterBar(_state.target);
+        window.drilldownController._refetch();
+      });
+    }
   }
 
   // ── Event wiring ───────────────────────────────────────────────────────────
