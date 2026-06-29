@@ -54,6 +54,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
 from backend.shared.odoo.client import OdooClient
 
 load_dotenv(dotenv_path=".env")
@@ -217,10 +218,9 @@ async def _direct_odoo_computation() -> dict:
 
 # ── KPI A headcount fetch ─────────────────────────────────────────────────────
 
-def _fetch_kpi_a_headcount(base_url: str) -> int | None:
+def _fetch_kpi_a_headcount(http: httpx.Client) -> int | None:
     try:
-        with httpx.Client(timeout=30) as http:
-            r = http.get(f"{base_url}{KPI_A_ENDPOINT}", auth=(USERNAME, PASSWORD))
+        r = http.get(KPI_A_ENDPOINT, timeout=30)
         if r.status_code == 200:
             return int(r.json().get("headcount", -1))
     except Exception:
@@ -262,216 +262,224 @@ def main() -> int:
 
     failures: list[str] = []
 
-    # ── Step 1: GET /api/v1/hr/kpi/department-cost ────────────────────────────
+    # ── Step 1: ONE login per process (limiter 10/minute), then GET ──────────
     try:
-        with httpx.Client(timeout=60) as http:
-            r = http.get(url, auth=(USERNAME, PASSWORD))
+        http = api_login(base_url)
+    except ApiLoginError as exc:
+        msg = f"Session login failed: {exc}"
+        _log(_FAIL, msg)
+        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", error=msg)
+        return 0
     except httpx.ConnectError as exc:
         msg = f"Cannot reach {base_url} — is the server running? ({exc})"
         _log(_FAIL, msg)
         _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "", error=msg)
         return 0
 
-    # ── Step 2: Status code ───────────────────────────────────────────────────
-    ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
-    if not ok:
-        _log(_INFO, f"Response body: {r.text[:500]}")
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "",
-                        error=f"HTTP {r.status_code}")
-        return 0
-
-    body: dict = r.json()
-
-    # ── Step 3: Required keys ─────────────────────────────────────────────────
-    required_keys = (
-        "rows", "grand_total_wage", "total_running_contracts",
-        "currency", "basis", "reference_date", "as_of",
-        "cache_status", "rpc_duration_ms",
-    )
-    for k in required_keys:
-        if not _check(f"key '{k}' present", k in body):
-            failures.append(f"missing_key_{k}")
-
-    if failures:
-        _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "",
-                        error=f"missing keys: {failures}")
-        return 0
-
-    # ── Step 4: Extract values ────────────────────────────────────────────────
-    rows:                    list  = body["rows"]
-    grand_total_wage:        float = float(body["grand_total_wage"])
-    total_running_contracts: int   = int(body["total_running_contracts"])
-    currency:                str   = body["currency"]
-    basis:                   str   = body["basis"]
-    reference_date:          str   = body["reference_date"]
-    cache_status:            str   = body["cache_status"]
-    rpc_ms:                  int   = int(body["rpc_duration_ms"])
-
-    row_count_sum = sum(
-        int(row.get("running_contract_count", 0))
-        for row in rows
-        if isinstance(row, dict)
-    )
-    num_rows = len(rows)
-
-    # ── Step 5: Structured summary ────────────────────────────────────────────
-    _section("ENDPOINT RESPONSE SUMMARY")
-    bl_note = (
-        f"(baseline {BASELINE_TOTAL_RUNNING_CONTRACTS})"
-        if BASELINE_TOTAL_RUNNING_CONTRACTS is not None
-        else "(no baseline)"
-    )
-    print(f"  total_running_contracts : {total_running_contracts:>6}   {bl_note}")
-    print(f"  sum(row counts)         : {row_count_sum:>6}   (must == total_running_contracts)")
-    print(f"  num_rows                : {num_rows:>6}   (departments + possible Other row)")
-    print(f"  grand_total_wage        : {grand_total_wage:>12.2f} EGP  (org-level aggregate)")
-    print(f"  currency                : {currency}")
-    print(f"  basis                   : {basis}")
-    print(f"  reference_date          : {reference_date}   (cairo today: {cairo_today_str})")
-    print(f"  cache_status            : {cache_status}")
-    print(f"  rpc_duration_ms         : {rpc_ms} ms")
-    print(f"  as_of                   : {body.get('as_of')}")
-    print(_SEP2)
-    print("  Service rows (k-anon already applied — Board-safe):")
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        dept_name = row.get("department_name", "?")
-        count     = row.get("running_contract_count", 0)
-        wage_val  = row.get("total_wage")
-        wage_str  = f"{wage_val:>12.2f} EGP" if wage_val is not None else "   [suppressed]"
-        print(f"    {dept_name:<38} count={count:>4}   wage={wage_str}")
-
-    # ── Step 6: Drift (INFO only) ─────────────────────────────────────────────
-    _section("DRIFT  [INFO only — no hard fail]")
-    _drift("total_running_contracts", total_running_contracts, BASELINE_TOTAL_RUNNING_CONTRACTS)
-
-    # ── Step 7: Structural invariants (hard FAIL) ─────────────────────────────
-    _section("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]")
-
-    if not _check("rows is a list", isinstance(rows, list)):
-        failures.append("rows_not_list")
-
-    if not _check(
-        "total_running_contracts >= 0",
-        total_running_contracts >= 0,
-        f"got {total_running_contracts}",
-    ):
-        failures.append("negative_total_running_contracts")
-
-    if not _check(
-        "grand_total_wage >= 0",
-        grand_total_wage >= 0.0,
-        f"got {grand_total_wage}",
-    ):
-        failures.append("negative_grand_total_wage")
-
-    if not _check(
-        "all row running_contract_count >= 0",
-        all(
-            isinstance(row, dict) and int(row.get("running_contract_count", 0)) >= 0
-            for row in rows
-        ),
-        "at least one row has a negative running_contract_count",
-    ):
-        failures.append("negative_row_count")
-
-    if not _check(
-        f"sum(row.running_contract_count) == total_running_contracts ({total_running_contracts})",
-        row_count_sum == total_running_contracts,
-        f"row_count_sum={row_count_sum} != total_running_contracts={total_running_contracts}",
-    ):
-        failures.append("count_reconciliation_failed")
-
-    if not _check('currency == "EGP"', currency == "EGP", f"got {currency!r}"):
-        failures.append("wrong_currency")
-
-    if not _check('basis == "monthly"', basis == "monthly", f"got {basis!r}"):
-        failures.append("wrong_basis")
-
-    if not _check(
-        "reference_date == Cairo today",
-        reference_date == cairo_today_str,
-        f"got {reference_date!r}, expected {cairo_today_str!r}",
-    ):
-        failures.append("reference_date_mismatch")
-
-    if not _check(
-        "cache_status in {fresh, cached}",
-        cache_status in {"fresh", "cached"},
-        f"got {cache_status!r}",
-    ):
-        failures.append("bad_cache_status")
-
-    if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
-        failures.append("negative_rpc_ms")
-
-    # ── Step 8: Baseline hard check ───────────────────────────────────────────
-    _section("BASELINE HARD CHECK  [FAIL if not 115]")
-    if not _check(
-        "total_running_contracts == 115",
-        total_running_contracts == 115,
-        f"got {total_running_contracts} — expected 115 (§3.6.D post-fix baseline, 2026-06-03)",
-    ):
-        failures.append(f"total_running_contracts_not_115:got={total_running_contracts}")
-
-    # ── Step 9: HTTP headers ──────────────────────────────────────────────────
-    _section("HTTP HEADERS")
-    cc  = r.headers.get("cache-control", "")
-    xcs = r.headers.get("x-cache-status", "")
-    _check("Cache-Control: private",        "private"    in cc, f"header: {cc!r}")
-    _check("Cache-Control: max-age=60",     "max-age=60" in cc, f"header: {cc!r}")
-    _check("X-Cache-Status header present", bool(xcs),          f"got {xcs!r}")
-
-    # ── Step 10: Cache hit check ──────────────────────────────────────────────
-    _section("CACHE HIT CHECK")
-    _log(_INFO, "Issuing second request to verify cache hit ...")
     try:
-        with httpx.Client(timeout=30) as http:
-            r2 = http.get(url, auth=(USERNAME, PASSWORD))
-        body2: dict = r2.json()
-        if not _check(
-            "second call cache_status == 'cached'",
-            body2.get("cache_status") == "cached",
-            f"got {body2.get('cache_status')!r}",
-        ):
-            failures.append("cache_not_hit_on_second_call")
-        if not _check(
-            "second call rpc_duration_ms == 0",
-            int(body2.get("rpc_duration_ms", -1)) == 0,
-            f"got {body2.get('rpc_duration_ms')}",
-        ):
-            failures.append("cache_rpc_ms_nonzero")
-    except Exception as exc:
-        _log(_FAIL, f"Second request failed: {exc}")
-        failures.append("second_request_failed")
+        r = http.get(ENDPOINT, timeout=60)
 
-    # ── Step 11: KPI A population identity — HARD FAIL ───────────────────────
-    _section("POPULATION IDENTITY — KPI A CROSS-CHECK  [FAIL if mismatch]")
-    _log(_INFO, "Fetching KPI A headcount to verify population identity ...")
-    _log(_INFO, "Both KPIs derive from [('state','=','open')] on hr.contract — must be equal.")
-    kpi_a_headcount: int | str = "n/a"
-    population_match           = "n/a"
-    kpi_a_count = _fetch_kpi_a_headcount(base_url)
-    if kpi_a_count is None:
-        _log(_FAIL, "KPI A endpoint unreachable — population identity check skipped")
-        failures.append("kpi_a_unreachable")
-        population_match = "error"
-    else:
-        kpi_a_headcount = kpi_a_count
+        # ── Step 2: Status code ───────────────────────────────────────────────────
+        ok = _check("HTTP 200", r.status_code == 200, f"got {r.status_code}")
+        if not ok:
+            _log(_INFO, f"Response body: {r.text[:500]}")
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "",
+                            error=f"HTTP {r.status_code}")
+            return 0
+
+        body: dict = r.json()
+
+        # ── Step 3: Required keys ─────────────────────────────────────────────────
+        required_keys = (
+            "rows", "grand_total_wage", "total_running_contracts",
+            "currency", "basis", "reference_date", "as_of",
+            "cache_status", "rpc_duration_ms",
+        )
+        for k in required_keys:
+            if not _check(f"key '{k}' present", k in body):
+                failures.append(f"missing_key_{k}")
+
+        if failures:
+            _append_log_row(run_at, "", "", "", "", "", "", "", "", "", "", "",
+                            error=f"missing keys: {failures}")
+            return 0
+
+        # ── Step 4: Extract values ────────────────────────────────────────────────
+        rows:                    list  = body["rows"]
+        grand_total_wage:        float = float(body["grand_total_wage"])
+        total_running_contracts: int   = int(body["total_running_contracts"])
+        currency:                str   = body["currency"]
+        basis:                   str   = body["basis"]
+        reference_date:          str   = body["reference_date"]
+        cache_status:            str   = body["cache_status"]
+        rpc_ms:                  int   = int(body["rpc_duration_ms"])
+
+        row_count_sum = sum(
+            int(row.get("running_contract_count", 0))
+            for row in rows
+            if isinstance(row, dict)
+        )
+        num_rows = len(rows)
+
+        # ── Step 5: Structured summary ────────────────────────────────────────────
+        _section("ENDPOINT RESPONSE SUMMARY")
+        bl_note = (
+            f"(baseline {BASELINE_TOTAL_RUNNING_CONTRACTS})"
+            if BASELINE_TOTAL_RUNNING_CONTRACTS is not None
+            else "(no baseline)"
+        )
+        print(f"  total_running_contracts : {total_running_contracts:>6}   {bl_note}")
+        print(f"  sum(row counts)         : {row_count_sum:>6}   (must == total_running_contracts)")
+        print(f"  num_rows                : {num_rows:>6}   (departments + possible Other row)")
+        print(f"  grand_total_wage        : {grand_total_wage:>12.2f} EGP  (org-level aggregate)")
+        print(f"  currency                : {currency}")
+        print(f"  basis                   : {basis}")
+        print(f"  reference_date          : {reference_date}   (cairo today: {cairo_today_str})")
+        print(f"  cache_status            : {cache_status}")
+        print(f"  rpc_duration_ms         : {rpc_ms} ms")
+        print(f"  as_of                   : {body.get('as_of')}")
+        print(_SEP2)
+        print("  Service rows (k-anon already applied — Board-safe):")
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            dept_name = row.get("department_name", "?")
+            count     = row.get("running_contract_count", 0)
+            wage_val  = row.get("total_wage")
+            wage_str  = f"{wage_val:>12.2f} EGP" if wage_val is not None else "   [suppressed]"
+            print(f"    {dept_name:<38} count={count:>4}   wage={wage_str}")
+
+        # ── Step 6: Drift (INFO only) ─────────────────────────────────────────────
+        _section("DRIFT  [INFO only — no hard fail]")
+        _drift("total_running_contracts", total_running_contracts, BASELINE_TOTAL_RUNNING_CONTRACTS)
+
+        # ── Step 7: Structural invariants (hard FAIL) ─────────────────────────────
+        _section("STRUCTURAL INTEGRITY  [hard checks — must hold regardless of drift]")
+
+        if not _check("rows is a list", isinstance(rows, list)):
+            failures.append("rows_not_list")
+
         if not _check(
-            f"total_running_contracts ({total_running_contracts}) "
-            f"== KPI A headcount ({kpi_a_count})",
-            total_running_contracts == kpi_a_count,
-            "population identity violated — KPI D and KPI A must count identical employees",
+            "total_running_contracts >= 0",
+            total_running_contracts >= 0,
+            f"got {total_running_contracts}",
         ):
-            failures.append(
-                f"population_identity_violated:"
-                f"kpi_d={total_running_contracts},kpi_a={kpi_a_count}"
-            )
-            population_match = f"MISMATCH:kpi_d={total_running_contracts},kpi_a={kpi_a_count}"
+            failures.append("negative_total_running_contracts")
+
+        if not _check(
+            "grand_total_wage >= 0",
+            grand_total_wage >= 0.0,
+            f"got {grand_total_wage}",
+        ):
+            failures.append("negative_grand_total_wage")
+
+        if not _check(
+            "all row running_contract_count >= 0",
+            all(
+                isinstance(row, dict) and int(row.get("running_contract_count", 0)) >= 0
+                for row in rows
+            ),
+            "at least one row has a negative running_contract_count",
+        ):
+            failures.append("negative_row_count")
+
+        if not _check(
+            f"sum(row.running_contract_count) == total_running_contracts ({total_running_contracts})",
+            row_count_sum == total_running_contracts,
+            f"row_count_sum={row_count_sum} != total_running_contracts={total_running_contracts}",
+        ):
+            failures.append("count_reconciliation_failed")
+
+        if not _check('currency == "EGP"', currency == "EGP", f"got {currency!r}"):
+            failures.append("wrong_currency")
+
+        if not _check('basis == "monthly"', basis == "monthly", f"got {basis!r}"):
+            failures.append("wrong_basis")
+
+        if not _check(
+            "reference_date == Cairo today",
+            reference_date == cairo_today_str,
+            f"got {reference_date!r}, expected {cairo_today_str!r}",
+        ):
+            failures.append("reference_date_mismatch")
+
+        if not _check(
+            "cache_status in {fresh, cached}",
+            cache_status in {"fresh", "cached"},
+            f"got {cache_status!r}",
+        ):
+            failures.append("bad_cache_status")
+
+        if not _check("rpc_duration_ms >= 0", rpc_ms >= 0, f"got {rpc_ms}"):
+            failures.append("negative_rpc_ms")
+
+        # ── Step 8: Baseline hard check ───────────────────────────────────────────
+        _section("BASELINE HARD CHECK  [FAIL if not 115]")
+        if not _check(
+            "total_running_contracts == 115",
+            total_running_contracts == 115,
+            f"got {total_running_contracts} — expected 115 (§3.6.D post-fix baseline, 2026-06-03)",
+        ):
+            failures.append(f"total_running_contracts_not_115:got={total_running_contracts}")
+
+        # ── Step 9: HTTP headers ──────────────────────────────────────────────────
+        _section("HTTP HEADERS")
+        cc  = r.headers.get("cache-control", "")
+        xcs = r.headers.get("x-cache-status", "")
+        _check("Cache-Control: private",        "private"    in cc, f"header: {cc!r}")
+        _check("Cache-Control: max-age=60",     "max-age=60" in cc, f"header: {cc!r}")
+        _check("X-Cache-Status header present", bool(xcs),          f"got {xcs!r}")
+
+        # ── Step 10: Cache hit check ──────────────────────────────────────────────
+        _section("CACHE HIT CHECK")
+        _log(_INFO, "Issuing second request to verify cache hit ...")
+        try:
+            r2 = http.get(ENDPOINT, timeout=30)
+            body2: dict = r2.json()
+            if not _check(
+                "second call cache_status == 'cached'",
+                body2.get("cache_status") == "cached",
+                f"got {body2.get('cache_status')!r}",
+            ):
+                failures.append("cache_not_hit_on_second_call")
+            if not _check(
+                "second call rpc_duration_ms == 0",
+                int(body2.get("rpc_duration_ms", -1)) == 0,
+                f"got {body2.get('rpc_duration_ms')}",
+            ):
+                failures.append("cache_rpc_ms_nonzero")
+        except Exception as exc:
+            _log(_FAIL, f"Second request failed: {exc}")
+            failures.append("second_request_failed")
+
+        # ── Step 11: KPI A population identity — HARD FAIL ───────────────────────
+        _section("POPULATION IDENTITY — KPI A CROSS-CHECK  [FAIL if mismatch]")
+        _log(_INFO, "Fetching KPI A headcount to verify population identity ...")
+        _log(_INFO, "Both KPIs derive from [('state','=','open')] on hr.contract — must be equal.")
+        kpi_a_headcount: int | str = "n/a"
+        population_match           = "n/a"
+        kpi_a_count = _fetch_kpi_a_headcount(http)
+        if kpi_a_count is None:
+            _log(_FAIL, "KPI A endpoint unreachable — population identity check skipped")
+            failures.append("kpi_a_unreachable")
+            population_match = "error"
         else:
-            population_match = "MATCH"
+            kpi_a_headcount = kpi_a_count
+            if not _check(
+                f"total_running_contracts ({total_running_contracts}) "
+                f"== KPI A headcount ({kpi_a_count})",
+                total_running_contracts == kpi_a_count,
+                "population identity violated — KPI D and KPI A must count identical employees",
+            ):
+                failures.append(
+                    f"population_identity_violated:"
+                    f"kpi_d={total_running_contracts},kpi_a={kpi_a_count}"
+                )
+                population_match = f"MISMATCH:kpi_d={total_running_contracts},kpi_a={kpi_a_count}"
+            else:
+                population_match = "MATCH"
+    finally:
+        http.close()
 
     # ── Step 12: Independent Odoo cross-check — HARD FAIL ─────────────────────
     _section("INDEPENDENT ODOO CROSS-CHECK  [FAIL if mismatch]")
