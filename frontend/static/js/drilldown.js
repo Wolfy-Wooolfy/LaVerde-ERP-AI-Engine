@@ -697,6 +697,12 @@
       return;
     }
     var f = _state.filters;
+    // Forecast hides the two phantom controls — the Status badge group and the
+    // "Cheques only" toggle — because the forecast endpoint ignores payment_state /
+    // has_pending_cheque (forecast segments are an amount split, so a row-level
+    // status has no consistent meaning). Scoped via _isForecastTarget() so
+    // late/project/trend keep them as real, server-side filters.
+    var isForecast = _isForecastTarget();
     var currentState = f.payment_state || 'all';
     var currentSort  = (f.sort_by || 'date') + ':' + (f.sort_dir || 'desc');
 
@@ -746,8 +752,10 @@
         var sel = id === currentType ? ' selected' : '';
         typeOpts += '<option value="' + _esc(id) + '"' + sel + '>' + _esc(typeNames[id]) + '</option>';
       });
+      // No leading separator: on forecast the Status/Cheques groups are omitted, so
+      // the type group is the FIRST control in the bar and a leading divider would
+      // dangle. (typeGroupHtml is only ever built on forecast, so this is always safe.)
       typeGroupHtml = ''
-        + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
         + '<div class="flex items-center gap-1">'
           + '<span class="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">'
             + _esc(S.dd_filter_type_label || 'Type') + '</span>'
@@ -760,15 +768,20 @@
         + '</div>';
     }
 
+    // Status group + its trailing separator + "Cheques only" toggle render ONLY on
+    // non-forecast drill-downs (late/project/trend), where payment_state /
+    // has_pending_cheque are real server-side filters. On forecast they are omitted
+    // from the markup entirely (phantom there — honest cleanup, not CSS-hidden).
     _filterBar.innerHTML = ''
       + '<div class="flex flex-wrap items-center gap-x-3 gap-y-2">'
-        + '<div class="flex items-center gap-1">'
-          + '<span class="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">'
-            + _esc(S.dd_filter_state_label || 'Status') + '</span>'
-          + stateHtml
-        + '</div>'
-        + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
-        + chequeHtml
+        + (isForecast ? '' : (''
+          + '<div class="flex items-center gap-1">'
+            + '<span class="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500 me-1">'
+              + _esc(S.dd_filter_state_label || 'Status') + '</span>'
+            + stateHtml
+          + '</div>'
+          + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
+          + chequeHtml))
         + typeGroupHtml
         + '<span class="w-px h-4 bg-neutral-200 dark:bg-neutral-700 self-center" aria-hidden="true"></span>'
         + '<div class="flex items-center gap-1">'

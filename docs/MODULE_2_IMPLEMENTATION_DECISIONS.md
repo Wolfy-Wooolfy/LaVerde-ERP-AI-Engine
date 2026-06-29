@@ -3547,3 +3547,62 @@ label changed.
 
 **Commit:** (this session) Check D current-era Tier 2 + label softening +
 tests + verify-script + this entry — single atomic commit on `main`.
+
+---
+
+## Session 23 — 2026-06-29 — Forecast Drill-down Filter-Bar Cleanup (hide phantom Status/Cheques)
+
+### Decision 23.1 — Hide the phantom Status/Cheques filters on the forecast drill-down
+
+- **Problem:** The shared drill-down filter bar is built once for all five
+  drill-downs by `_renderFilterBar(target)` in
+  `frontend/static/js/drilldown.js`. On the forecast `(bucket, segment)`
+  drill-down it rendered the Status badge group (All / Not Paid / Partial) and
+  the "Cheques only" / "الشيكات فقط" toggle, but the forecast endpoint
+  `GET /api/v1/collections/drilldown/forecast/{bucket}/{segment}`
+  (`backend/api/v1/endpoints/collections.py`) declares only
+  `bucket, segment, page_size, cursor, sort_by, sort_dir, installment_type_id`
+  — it has NO `payment_state` / `has_pending_cheque` params (the service
+  `get_forecast_segment_drilldown` signature confirms; FastAPI silently ignores
+  undeclared query params). Those two controls therefore rendered but did
+  nothing — phantom.
+- **Why hide, not wire up:** Forecast segments (cleared / pending / remaining)
+  are an AMOUNT split, not a row split — one installment's value can land in
+  cleared (`x_studio_actual_paid_amount`), pending (`paid_amount − actual`), and
+  remaining (`due_amount`) at once (`_forecast_segment_metric`,
+  `drilldown_service.py`). A single row-level payment status thus has no
+  consistent meaning inside a segment, so making the controls functional would
+  be wrong by design; the honest fix is to hide them. (Making any phantom
+  control functional was explicitly out of scope.)
+- **Choice:** In `_renderFilterBar` ONLY, compute
+  `var isForecast = _isForecastTarget();` (true when `_state.target` starts with
+  `"forecast-"` — the same helper that already scopes the installment-type
+  `<select>`). The Status group + its trailing separator + the "Cheques only"
+  toggle are wrapped in `(isForecast ? '' : (…))`, i.e. omitted from the markup
+  entirely on forecast (NOT CSS-hidden). The installment-type group's former
+  LEADING separator `<span>` was removed because on forecast the type group is
+  now the first control and a leading divider would dangle. Forecast now shows
+  only **Type + Sort** — one separator, no orphaned/leading dividers, uniform
+  across all three segments (no segment key needed).
+- **Non-forecast unchanged:** late / project / trend keep the Status group +
+  "Cheques only" exactly as before — the ternary's false branch emits the
+  original markup byte-for-byte and `typeGroupHtml` is empty there (its
+  `if (_isForecastTarget())` guard is false), so those filters remain real,
+  server-side, and visually identical. Portfolio (`kpi1`) still hits its early
+  `_hide(_filterBar) + return` ahead of the new code.
+- **Scope:** Frontend-only — a single function in `drilldown.js`. NO backend /
+  schema / service change (`collections.py`, `schemas.py`,
+  `drilldown_service.py` untouched), NO `_drilldown_panel.html` edit, NO Odoo
+  calls or writes. The forecast installment-type filter (render gate,
+  `<select data-dd-filter-type>`, the `installment_type_id` URL param), the sort
+  group, and the "(مُفلتر)" / "(filtered)" list-total marker (driven SOLELY by
+  `_state.filters.installment_type_id`, independent of status/cheque) are all
+  preserved.
+- **Verification (this session):** `node --check` clean on the edited file; full
+  Python suite green (**1418 passed, 4 skipped, 29 e2e deselected**) — a JS-only
+  change leaves it unaffected; the diff was adversarially reviewed across three
+  lenses (forecast markup/separator correctness, non-forecast byte-equivalence,
+  scope/regression). Browser confirmation across cleared/pending/remaining +
+  non-forecast drill-downs is Khaled's gate before push.
+- **Commit:** (this session) `drilldown.js` `!isForecast` gate in
+  `_renderFilterBar` + this entry — single atomic commit on `main`.
