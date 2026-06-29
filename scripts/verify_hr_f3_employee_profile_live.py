@@ -52,6 +52,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
 from backend.shared.odoo.client import OdooClient
 
 load_dotenv(dotenv_path=".env")
@@ -214,7 +215,7 @@ def _append_log(
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-async def main(base_url: str) -> None:
+def main(base_url: str) -> None:
     run_at = datetime.now(timezone.utc).isoformat()
     auth = (USERNAME, PASSWORD)
 
@@ -232,7 +233,7 @@ async def main(base_url: str) -> None:
         _log(_INFO, f"Sample employee IDs: {_SAMPLE_IDS}")
         _log(_INFO, "Querying hr.contract (state=open) and hr.employee directly …")
 
-        odoo = await _direct_odoo_query(_SAMPLE_IDS)
+        odoo = asyncio.run(_direct_odoo_query(_SAMPLE_IDS))
         odoo_contracts = odoo["contracts"]
         odoo_employees = odoo["employees"]
 
@@ -250,14 +251,16 @@ async def main(base_url: str) -> None:
         # ── Section 2: Per-employee endpoint checks ───────────────────────────
         _section("Section 2 — Per-employee F3 endpoint checks")
 
-        async with httpx.AsyncClient(base_url=base_url, auth=auth, timeout=30) as http:
+        # Login once (limiter 10/minute); reuse the sync client for all authed probes.
+        client = api_login(base_url)
+        try:
 
             for emp_id in _SAMPLE_IDS:
                 print()
                 print(f"  Employee ID {emp_id}")
 
                 url = F3_ENDPOINT_TPL.format(employee_id=emp_id)
-                r = await http.get(url)
+                r = client.get(url, timeout=30)
 
                 # F3-1: HTTP 200
                 ok_200 = _check(
@@ -357,7 +360,7 @@ async def main(base_url: str) -> None:
             _section("Section 3 — Boundary / guard checks")
 
             # F3-8: id=0 → 400
-            r_zero = await http.get("/api/v1/hr/employee/0")
+            r_zero = client.get("/api/v1/hr/employee/0", timeout=30)
             ok_400 = _check(
                 "F3-8  GET /api/v1/hr/employee/0 → 400",
                 r_zero.status_code == 400,
@@ -366,7 +369,7 @@ async def main(base_url: str) -> None:
             guard_400 = "PASS" if ok_400 else "FAIL"
 
             # F3-9: unknown id → 404
-            r_unk = await http.get("/api/v1/hr/employee/999999")
+            r_unk = client.get("/api/v1/hr/employee/999999", timeout=30)
             ok_404 = _check(
                 "F3-9  GET /api/v1/hr/employee/999999 → 404",
                 r_unk.status_code == 404,
@@ -374,18 +377,21 @@ async def main(base_url: str) -> None:
             )
             guard_404 = "PASS" if ok_404 else "FAIL"
 
-            # F3-10: no auth → 401
-            r_noauth = await http.get(
-                F3_ENDPOINT_TPL.format(employee_id=_SAMPLE_IDS[0]),
-                auth=None,
-                headers={},
-            )
+            # F3-10: no auth → 401.  Under session-cookie auth the cookie lives in
+            # the authed client's jar, and auth=None does NOT clear it — so the
+            # authed client would still send the cookie and get 200.  Issue this
+            # one request from a SEPARATE, cookie-free client to prove the
+            # endpoint still rejects unauthenticated requests.
+            with httpx.Client(base_url=base_url) as anon:
+                r_noauth = anon.get(F3_ENDPOINT_TPL.format(employee_id=_SAMPLE_IDS[0]))
             ok_401 = _check(
                 f"F3-10 GET /api/v1/hr/employee/{_SAMPLE_IDS[0]} without auth → 401",
                 r_noauth.status_code == 401,
                 f"got {r_noauth.status_code}",
             )
             guard_401 = "PASS" if ok_401 else "FAIL"
+        finally:
+            client.close()
 
     except Exception as exc:
         error_msg = str(exc)
@@ -439,4 +445,4 @@ if __name__ == "__main__":
         help=f"FastAPI base URL (default: {DEFAULT_URL})",
     )
     args = parser.parse_args()
-    asyncio.run(main(args.url))
+    main(args.url)
