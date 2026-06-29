@@ -47,6 +47,8 @@ from datetime import timezone
 import httpx
 from dotenv import load_dotenv
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 load_dotenv(dotenv_path=".env")
 
 # Force UTF-8 stdout (Windows consoles default to cp1252)
@@ -151,7 +153,6 @@ def _trailing_months(n: int = 6) -> list[str]:
 def walk_all_pages(
     http: httpx.Client,
     url: str,
-    auth: tuple[str, str],
     extra_params: dict | None = None,
     data_key: str = "items",
     page_size: int = 50,
@@ -180,7 +181,7 @@ def walk_all_pages(
         elif "cursor" in params:
             del params["cursor"]
 
-        r = http.get(url, params=params, auth=auth)
+        r = http.get(url, params=params)
         if r.status_code != 200:
             raise RuntimeError(
                 f"walk_all_pages: HTTP {r.status_code} from {url}  "
@@ -224,14 +225,13 @@ def walk_all_pages(
 def fetch_parent_kpi(
     http: httpx.Client,
     url: str,
-    auth: tuple[str, str],
 ) -> dict:
     """GET a KPI endpoint and return its JSON body.
 
     Raises RuntimeError if the HTTP status is not 200.
     Reads live (no local caching) so natural data drift between sessions is captured.
     """
-    r = http.get(url, auth=auth)
+    r = http.get(url)
     if r.status_code != 200:
         raise RuntimeError(
             f"fetch_parent_kpi: HTTP {r.status_code} from {url}  body={r.text[:300]}"
@@ -254,7 +254,6 @@ def main() -> int:
     args = parser.parse_args()
     base_url: str = args.url.rstrip("/")
 
-    auth = (USERNAME, PASSWORD)
     run_at = datetime.now(timezone.utc).isoformat()
 
     _log(_INFO, f"Target  : {base_url}")
@@ -265,8 +264,19 @@ def main() -> int:
     failures:     list[str] = []
     block_results: dict[str, bool] = {}   # V1..V8 → True/False
 
-    # ── Shared httpx client (all requests in one session) ─────────────────────
-    with httpx.Client(timeout=60) as http:
+    # ── Login once (limiter 10/minute), reuse the client for every request ────
+    try:
+        http = api_login(base_url)
+    except ApiLoginError as exc:
+        _log(_FAIL, f"Session login failed: {exc}")
+        _append_log(run_at, "FAIL", 0, 1, ["login_failed"])
+        return 1
+    except httpx.ConnectError as exc:
+        _log(_FAIL, f"Cannot reach {base_url} — is the server running? ({exc})")
+        _append_log(run_at, "FAIL", 0, 1, ["connect_error"])
+        return 1
+
+    try:
 
         # ── V1 — Late drill-down identity-equal ───────────────────────────────
         print(_SEP)
@@ -276,7 +286,7 @@ def main() -> int:
         try:
             # Read parent KPI 2 live (used as identity target)
             kpi2 = fetch_parent_kpi(
-                http, f"{base_url}{_KPI_PREFIX}/late-uncollected", auth
+                http, f"{base_url}{_KPI_PREFIX}/late-uncollected"
             )
             kpi2_value  = float(kpi2["value"])
             kpi2_count  = int(kpi2["record_count"])
@@ -286,7 +296,6 @@ def main() -> int:
             items, page_count, total_count = walk_all_pages(
                 http,
                 f"{base_url}{_DD_PREFIX}/late",
-                auth,
             )
             late_sum   = sum(item["late_amount"] for item in items)
             item_count = len(items)
@@ -336,7 +345,7 @@ def main() -> int:
         v2_ok = True
         try:
             kpi7 = fetch_parent_kpi(
-                http, f"{base_url}{_KPI_PREFIX}/expected-forecast", auth
+                http, f"{base_url}{_KPI_PREFIX}/expected-forecast"
             )
             buckets_kpi7 = kpi7.get("buckets", {})
 
@@ -368,7 +377,6 @@ def main() -> int:
                 items, page_count, total_count = walk_all_pages(
                     http,
                     f"{base_url}{_DD_PREFIX}/forecast/{url_key}",
-                    auth,
                 )
                 dd_amount = sum(float(it.get("amount",     0)) for it in items)
                 dd_due    = sum(float(it.get("due_amount", 0)) for it in items)
@@ -434,7 +442,7 @@ def main() -> int:
         v3_ok = True
         try:
             kpi1 = fetch_parent_kpi(
-                http, f"{base_url}{_KPI_PREFIX}/total-portfolio-value", auth
+                http, f"{base_url}{_KPI_PREFIX}/total-portfolio-value"
             )
             kpi1_value = float(kpi1["value"])
             kpi1_count = int(kpi1["record_count"])
@@ -444,7 +452,6 @@ def main() -> int:
             customers, page_count, total_count = walk_all_pages(
                 http,
                 f"{base_url}{_DD_PREFIX}/portfolio",
-                auth,
                 data_key="customers",
             )
             port_total_amount = sum(float(c["total_amount"]) for c in customers)
@@ -482,7 +489,7 @@ def main() -> int:
         v4_ok = True
         try:
             kpi5 = fetch_parent_kpi(
-                http, f"{base_url}{_KPI_PREFIX}/late-uncollected-by-project", auth
+                http, f"{base_url}{_KPI_PREFIX}/late-uncollected-by-project"
             )
             # Index KPI 5 by project_id
             kpi5_by_pid = {int(p["project_id"]): p for p in kpi5.get("projects", [])}
@@ -500,7 +507,6 @@ def main() -> int:
                 items, page_count, total_count = walk_all_pages(
                     http,
                     f"{base_url}{_DD_PREFIX}/project/{pid}",
-                    auth,
                 )
                 dd_due   = sum(float(it["due_amount"]) for it in items)
                 delta    = abs(dd_due - kpi5_late)
@@ -548,7 +554,6 @@ def main() -> int:
                 items, page_count, total_count = walk_all_pages(
                     http,
                     f"{base_url}{_DD_PREFIX}/trend/{month_str}",
-                    auth,
                 )
                 _log(_INFO, f"  Month {month_str}: {total_count} records, {page_count} page(s)")
                 if total_count > 0 and test_month is None:
@@ -614,7 +619,6 @@ def main() -> int:
             r = http.get(
                 f"{base_url}{_DD_PREFIX}/late",
                 params={"page_size": 1},
-                auth=auth,
                 headers={"X-Request-ID": custom_rid},
             )
             if not _check("V6a: HTTP 200", r.status_code == 200, f"got {r.status_code}"):
@@ -648,7 +652,6 @@ def main() -> int:
             r2 = http.get(
                 f"{base_url}{_DD_PREFIX}/late",
                 params={"page_size": 1},
-                auth=auth,
             )
             if r2.status_code == 200:
                 auto_rid = r2.json().get("meta", {}).get("request_id", "")
@@ -678,16 +681,16 @@ def main() -> int:
         v7_ok = True
         try:
             _, _, count_all = walk_all_pages(
-                http, f"{base_url}{_DD_PREFIX}/late", auth,
+                http, f"{base_url}{_DD_PREFIX}/late",
                 page_size=200,
             )
             _, _, count_true = walk_all_pages(
-                http, f"{base_url}{_DD_PREFIX}/late", auth,
+                http, f"{base_url}{_DD_PREFIX}/late",
                 extra_params={"has_pending_cheque": "true"},
                 page_size=200,
             )
             _, _, count_false = walk_all_pages(
-                http, f"{base_url}{_DD_PREFIX}/late", auth,
+                http, f"{base_url}{_DD_PREFIX}/late",
                 extra_params={"has_pending_cheque": "false"},
                 page_size=200,
             )
@@ -728,7 +731,7 @@ def main() -> int:
         v8_ok = True
         try:
             kpi7_v8 = fetch_parent_kpi(
-                http, f"{base_url}{_KPI_PREFIX}/expected-forecast", auth
+                http, f"{base_url}{_KPI_PREFIX}/expected-forecast"
             )
             bkts = kpi7_v8.get("buckets", {})
 
@@ -752,6 +755,8 @@ def main() -> int:
 
         block_results["V8"] = v8_ok
         print()
+    finally:
+        http.close()
 
     # ── Summary table ─────────────────────────────────────────────────────────
     total_pass = sum(1 for v in block_results.values() if v)
