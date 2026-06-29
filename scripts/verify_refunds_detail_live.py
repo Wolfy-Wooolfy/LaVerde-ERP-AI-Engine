@@ -10,7 +10,6 @@ Usage:
 Requires: server running on localhost:8000, admin credentials in env/.env.
 """
 
-import asyncio
 import os
 import sys
 from pathlib import Path
@@ -20,9 +19,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import httpx
 from loguru import logger
 
+from _lib.api_session import ApiLoginError, login as api_login
+
 _BASE = "http://localhost:8000"
-_DETAIL_URL  = f"{_BASE}/api/v1/customer-accounts/refunds/detail"
-_SUMMARY_URL = f"{_BASE}/api/v1/customer-accounts/refunds/summary"
+_DETAIL_PATH  = "/api/v1/customer-accounts/refunds/detail"
+_SUMMARY_PATH = "/api/v1/customer-accounts/refunds/summary"
+_DETAIL_URL  = f"{_BASE}{_DETAIL_PATH}"
+_SUMMARY_URL = f"{_BASE}{_SUMMARY_PATH}"
 
 # Credentials from env
 _USER = os.getenv("ODOO_USERNAME", "admin")
@@ -49,12 +52,24 @@ def _info(msg: str) -> None:
     print(f"[INFO] {msg}")
 
 
-async def main() -> int:
-    async with httpx.AsyncClient(auth=_AUTH, timeout=30) as client:
+def main() -> int:
+    base_url = _BASE
+
+    # ── Login once (limiter 10/minute), reuse the sync client ─────────────────
+    try:
+        client = api_login(base_url)
+    except ApiLoginError as exc:
+        _fail(f"Session login failed: {exc}")
+        return 1
+    except httpx.ConnectError as exc:
+        _fail(f"Cannot reach {base_url} — is the server running? ({exc})")
+        return 1
+
+    try:
 
         # ── Call /refunds/detail ──────────────────────────────────────────────
         _info(f"Target: GET {_DETAIL_URL}")
-        r_detail = await client.get(_DETAIL_URL)
+        r_detail = client.get(_DETAIL_PATH, timeout=30)
 
         if r_detail.status_code == 200:
             _pass(f"HTTP 200 — /refunds/detail")
@@ -66,7 +81,7 @@ async def main() -> int:
 
         # ── Call /refunds/summary ─────────────────────────────────────────────
         _info(f"Target: GET {_SUMMARY_URL}")
-        r_summary = await client.get(_SUMMARY_URL)
+        r_summary = client.get(_SUMMARY_PATH, timeout=30)
 
         if r_summary.status_code == 200:
             _pass(f"HTTP 200 — /refunds/summary")
@@ -195,10 +210,12 @@ async def main() -> int:
             "  The sum of Amount should match 'detail total_amount' above (negative).\n"
             "  Expected: identity-equal or < 0.01 EGP drift.\n"
         )
+    finally:
+        client.close()
 
     return 1 if _FAIL_COUNT > 0 else 0
 
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
+    exit_code = main()
     sys.exit(exit_code)
