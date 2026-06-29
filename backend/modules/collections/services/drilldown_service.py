@@ -359,6 +359,7 @@ async def get_forecast_segment_drilldown(
     page_size: int = _DEFAULT_PAGE_SIZE,
     sort_by: str = "date",
     sort_dir: str = "desc",
+    installment_type_id: Optional[int] = None,
     client: Optional[OdooClient] = None,
 ) -> dict:
     """Paginated per-installment drill-down for ONE KPI 7 v2 (bucket, segment).
@@ -391,6 +392,12 @@ async def get_forecast_segment_drilldown(
     data.segment_total_egp is the segment metric summed over the FULL set (not just the
     page) so the UI can prove list-total == the card's segment figure.
 
+    installment_type_id (optional): when set, ONE read-only equality tuple
+    ("installment_type_id", "=", id) is appended to base_domain BEFORE the segment
+    split, so all three segments + search_count + read_group recompute against the
+    type-filtered set (segment_total_egp then reflects the filtered total, not the
+    card figure — the UI flags this with a "(filtered)" marker). omit for all types.
+
     READ-ONLY: search_read / read_group / search_count only.
     """
     if bucket not in _FORECAST_BUCKETS:
@@ -417,6 +424,12 @@ async def get_forecast_segment_drilldown(
         ("date", ">=", start.isoformat()),
         ("date", "<=", end.isoformat()),
     ]
+    # Single-select installment-type filter (read-only). Appended BEFORE the segment
+    # split so it flows uniformly into cleared/remaining (server-side clause), the
+    # pending paid>0 superset, search_count and read_group — counts and
+    # segment_total_egp recompute against the type-filtered set automatically.
+    if installment_type_id is not None:
+        base_domain.append(("installment_type_id", "=", installment_type_id))
 
     offset = 0
     if cursor:
@@ -495,10 +508,11 @@ async def get_forecast_segment_drilldown(
             request_id, rpc_ms, page_size, total_count,
             cursor, next_cur, has_next,
             {
-                "bucket":       bucket,
-                "segment":      segment,
-                "period_start": start.isoformat(),
-                "period_end":   end.isoformat(),
+                "bucket":              bucket,
+                "segment":             segment,
+                "period_start":        start.isoformat(),
+                "period_end":          end.isoformat(),
+                "installment_type_id": installment_type_id,
             },
             {"sort_by": sort_by, "sort_dir": sort_dir},
         ),

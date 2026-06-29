@@ -470,6 +470,7 @@ async def drilldown_forecast_segment(
     cursor: Optional[str] = Query(default=None),
     sort_by: Literal["date", "amount", "due_amount"] = Query(default="date"),
     sort_dir: Literal["asc", "desc"] = Query(default="desc"),
+    installment_type_id: Optional[int] = Query(default=None, ge=1, le=13, description="filter rows to a single rs.installment type id; omit for all types"),
     _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
@@ -482,6 +483,7 @@ async def drilldown_forecast_segment(
             page_size=page_size,
             sort_by=sort_by,
             sort_dir=sort_dir,
+            installment_type_id=installment_type_id,
         )
     except ValueError as exc:
         # Defense-in-depth: the Literal path params already 422 on bad values,

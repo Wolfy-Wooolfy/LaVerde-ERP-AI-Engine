@@ -46,6 +46,19 @@ INSTALLMENT_TYPE_NAMES_EN: dict[int, str] = {
     13: "Administrative Fees",
 }
 
+# Installment-type ids with ZERO rs.installment records as of the 2026-05-22
+# Gate-1 discovery (see module docstring). Defined in Odoo but unused in the data.
+ZERO_RECORD_TYPE_IDS: frozenset[int] = frozenset({5, 9, 10, 11, 12})
+
+# Single source of truth for "types to offer" in read-only filter UIs: every
+# defined type id that actually occurs in the data, sorted. Derived from the
+# AR mapping minus the zero-record set so it stays in sync with the dicts.
+# Current value: [1, 2, 3, 4, 6, 7, 8, 13] (8 populated ids).
+POPULATED_TYPE_IDS: list[int] = [
+    tid for tid in sorted(INSTALLMENT_TYPE_NAMES_AR) if tid not in ZERO_RECORD_TYPE_IDS
+]
+
+
 # Sentinels used when an installment_type_id is not in the mapping.
 # Should never appear in Board-facing output — callers must assert this.
 _UNKNOWN_TYPE_AR = "نوع غير معروف"
