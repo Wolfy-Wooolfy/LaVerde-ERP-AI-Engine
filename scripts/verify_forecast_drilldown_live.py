@@ -30,6 +30,13 @@ Also asserts, per combo:
   - row metric present: when items is non-empty, items[0].segment_metric is
     numeric and items[0].segment == the requested segment.
 
+Type-filter (installment_type_id) — for this_year across all 3 segments, proves the
+single-select filter partitions cleanly: Σ(segment_total over the 8 POPULATED_TYPE_IDS)
+== the unfiltered segment_total AND Σ(per-type counts) == the unfiltered count
+(< 1.0 EGP); each filtered call returns 200, echoes meta.filters_applied
+.installment_type_id, and never exceeds the unfiltered figure. The filter adds ONE
+read-only equality tuple — no write verb (ALLOWED_METHODS unchanged).
+
 Usage:
     python scripts/verify_forecast_drilldown_live.py [--url http://localhost:8000]
 
@@ -63,6 +70,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _lib.api_session import ApiLoginError, login as api_login  # noqa: E402
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient  # noqa: E402
+from backend.modules.collections.installment_type_names import POPULATED_TYPE_IDS  # noqa: E402
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
@@ -313,6 +321,64 @@ def main() -> int:
                                 "delta": worst, "ok": agree,
                                 "total": total, "page": len(items)})
                 print()
+
+        # ── Installment-type filter — per-type identity (this_year) ───────────
+        # The single-select installment_type_id filter appends ONE read-only
+        # equality tuple to base_domain (before the segment split), so summing the
+        # filtered segment_total over the 8 populated type ids must reconcile
+        # EXACTLY to the unfiltered segment_total, and Σ(counts) to the unfiltered
+        # count — a clean partition. Run for this_year across all 3 segments to
+        # cover both the server-side (cleared/remaining) and the python-filtered
+        # (pending) code paths. Each filtered call must echo the id and never
+        # exceed the unfiltered figure.
+        tf_bucket = "this_year"
+        _log(_INFO, f"Type-filter identity over POPULATED_TYPE_IDS = {POPULATED_TYPE_IDS} "
+                    f"(bucket {tf_bucket}) ...")
+        print()
+        for seg in _SEGMENTS:
+            base_path = DD_ENDPOINT.format(bucket=tf_bucket, segment=seg)
+            ru = client.get(f"{base_path}?page_size=1", timeout=120)
+            if not _check(f"type-filter {tf_bucket}/{seg}: unfiltered HTTP 200",
+                          ru.status_code == 200, f"got {ru.status_code}"):
+                failures.append(f"tf_{seg}_unf_http_{ru.status_code}")
+                continue
+            unf = ru.json()
+            unf_total = float(unf.get("data", {}).get("segment_total_egp") or 0.0)
+            unf_count = int(unf.get("meta", {}).get("total_count") or 0)
+
+            sum_total = 0.0
+            sum_count = 0
+            for tid in POPULATED_TYPE_IDS:
+                rt = client.get(f"{base_path}?page_size=1&installment_type_id={tid}", timeout=120)
+                if not _check(f"type-filter {tf_bucket}/{seg}/type={tid}: HTTP 200",
+                              rt.status_code == 200, f"got {rt.status_code}"):
+                    failures.append(f"tf_{seg}_type{tid}_http_{rt.status_code}")
+                    continue
+                et = rt.json()
+                t_total = float(et.get("data", {}).get("segment_total_egp") or 0.0)
+                t_count = int(et.get("meta", {}).get("total_count") or 0)
+                fa = et.get("meta", {}).get("filters_applied", {})
+                if not _check(f"type-filter {tf_bucket}/{seg}/type={tid}: filters_applied echoes id",
+                              fa.get("installment_type_id") == tid,
+                              f"got {fa.get('installment_type_id')!r}"):
+                    failures.append(f"tf_{seg}_type{tid}_echo")
+                if not _check(f"type-filter {tf_bucket}/{seg}/type={tid}: total <= unfiltered",
+                              t_total <= unf_total + _EPS,
+                              f"type {t_total:,.2f} vs unfiltered {unf_total:,.2f}"):
+                    failures.append(f"tf_{seg}_type{tid}_exceeds")
+                sum_total += t_total
+                sum_count += t_count
+
+            if not _check(f"type-filter {tf_bucket}/{seg}: Sum per-type total == unfiltered (< {_EPS} EGP)",
+                          abs(sum_total - unf_total) < _EPS,
+                          f"Sigma-types {sum_total:,.2f} | unfiltered {unf_total:,.2f} | "
+                          f"delta {abs(sum_total - unf_total):,.4f}"):
+                failures.append(f"tf_{seg}_identity_total")
+            if not _check(f"type-filter {tf_bucket}/{seg}: Sum per-type count == unfiltered count",
+                          sum_count == unf_count,
+                          f"Sigma-types {sum_count} | unfiltered {unf_count}"):
+                failures.append(f"tf_{seg}_identity_count")
+            print()
     finally:
         client.close()
 
@@ -336,7 +402,8 @@ def main() -> int:
         _log(_FAIL, f"Verification FAILED — {len(failures)} assertion(s): {failures}")
         return 1
 
-    _log(_PASS, "All 12 combos agree (card == list == direct) and pagination is sane.")
+    _log(_PASS, "All 12 combos agree (card == list == direct), pagination is sane, "
+                "and the installment-type filter partitions cleanly.")
     return 0
 
 
