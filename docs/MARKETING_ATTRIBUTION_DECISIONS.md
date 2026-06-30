@@ -149,3 +149,34 @@ windowed fields are not present in the payload.
 `campperf_window_total_leads_label` (en + ar). No backend service, route signature, schema,
 or cache-key change; the pinned `grand_coverage` / `grand_totals` services and blocks are
 untouched.
+
+---
+
+## 2026-06-30 — Windowed 4-group outcome breakdown beneath the period total
+
+### D14 — Windowed new/interested/bought/no-result breakdown (route-side re-aggregation)
+
+The window-following bottom line (D13) showed only a total. Users want, for the selected
+period, that total PLUS a 4-group outcome split (new جديد / interested مهتم / bought اشترى /
+no-result بلا نتيجة), each group showing a percentage AND the raw count it represents, with
+the four counts adding up to the big total.
+
+**Rationale.** No aggregate 4-group total exists in the windowed payload — only per-entity
+`outcomes`. It is computed by **route-side re-aggregation** of data already fetched: a small
+helper `_aggregate_outcome_groups()` in `dashboard.py` sums each group's COUNT across the
+per-entity outcomes and recomputes the percentage over the windowed total. No new service,
+no Odoo, no schema, no cache. The big total = `total_leads_population` on BOTH pages and the
+breakdown is over POPULATION so the counts reconcile to it: the buyer page sums
+`attr.buyers[].outcomes` PLUS `attr.unattributed.outcomes`; the campaign page sums
+`campperf.campaigns[].outcomes` PLUS the `data_quality.junk_none` / `data_quality.no_campaign`
+buckets (None-guarded). The buyer big number was switched from `coverage_pct` to
+`total_leads_population` so the breakdown reconciles (coverage_pct retained as a secondary
+stat). The helper logs a warning (does not raise) if the summed counts don't reconcile, so a
+future per-entity data-shape drift surfaces without breaking the page. Reuses the existing
+`mktattr_group_*` i18n keys (no new strings) and the per-card legend idiom.
+
+**Scope.** `dashboard.py` (route-side aggregation only) + the two templates
+(`marketing_attribution/dashboard.html`, `campaign_performance/dashboard.html`). No service /
+Odoo / schema / cache change; no new i18n; the pinned `grand_coverage` / `grand_totals` blocks
+are untouched. Gated on `win.is_windowed` — `window_groups` is computed and passed only in the
+windowed branch.

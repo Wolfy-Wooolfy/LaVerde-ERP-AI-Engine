@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from loguru import logger
 
 from backend.api.deps import get_crm_service, get_current_user_html, require_admin_html, require_module_html
 from backend.core.config import settings
@@ -27,6 +28,7 @@ from backend.modules.campaign_performance.services.timeline_service import (
     InvalidTimelineRangeError,
     get_campaign_timeline,
 )
+from backend.modules.marketing_attribution.domain import GROUP_ORDER
 from backend.modules.marketing_attribution.services.attribution_service import (
     get_attribution_grand_coverage,
     get_attribution_overview,
@@ -80,6 +82,38 @@ def _base_ctx(request: Request, user: str) -> dict:
         "allowed_modules": allowed_modules,
         "is_admin": is_admin,
     }
+
+
+def _aggregate_outcome_groups(entity_outcomes, total: int) -> list[dict]:
+    """Sum per-entity 4-group outcomes into ONE windowed funnel (route-side only).
+
+    The windowed payload carries no top-level aggregate, so the bottom "this period"
+    line re-sums the per-entity outcomes the cards already show: add each group's
+    COUNT across the given per-entity outcomes lists (each per-entity `pct` is ignored
+    — recomputed fresh over `total`), returning the 4 groups in GROUP_ORDER. This is a
+    read-only re-aggregation of data already fetched into the windowed payload — no
+    service call, no Odoo, no cache. Logs a warning (does NOT raise) if the summed
+    counts do not reconcile to `total`, so a future per-entity data-shape drift
+    surfaces without breaking the page.
+    """
+    counts = {g: 0 for g in GROUP_ORDER}
+    for outcomes in entity_outcomes:
+        for o in outcomes:
+            counts[o["group"]] = counts.get(o["group"], 0) + int(o["count"])
+    summed = sum(counts.values())
+    if summed != total:
+        logger.warning(
+            f"Windowed outcome breakdown does not reconcile: group sum {summed} "
+            f"!= total {total}. Rendering the breakdown anyway (per-entity drift?)."
+        )
+    return [
+        {
+            "group": g,
+            "count": counts[g],
+            "pct": round(100.0 * counts[g] / total, 1) if total else 0.0,
+        }
+        for g in GROUP_ORDER
+    ]
 
 
 @router.get("/dashboard", response_class=HTMLResponse, summary="CRM dashboard (HTML)", dependencies=[Depends(require_module_html("crm"))])
@@ -199,6 +233,7 @@ async def marketing_attribution_dashboard(
     if not has_custom and window not in campperf_domain.WINDOW_PRESETS:
         window = campperf_domain.DEFAULT_WINDOW
 
+    window_groups = None
     if window == campperf_domain.WINDOW_ALL and not has_custom:
         data = await get_attribution_overview()
         win = {
@@ -224,6 +259,13 @@ async def marketing_attribution_dashboard(
         }
         # Windowed remainder = the unattributed share of THIS window's leads.
         coverage_remainder_pct = round(100 - data["coverage_pct"], 1)
+        # Windowed 4-group breakdown for the bottom line: re-sum the per-buyer outcomes
+        # PLUS the unattributed bucket so the four counts reconcile to total_leads_population
+        # (route-side re-aggregation of already-fetched data only — no service/Odoo/cache).
+        window_groups = _aggregate_outcome_groups(
+            [b["outcomes"] for b in data["buyers"]] + [data["unattributed"]["outcomes"]],
+            data["total_leads_population"],
+        )
 
     # Grand coverage is window-INDEPENDENT: the full-scale all-time attribution
     # INCLUDING the Nov-2025 migration plus the same EXCLUDING it. Called in EVERY
@@ -240,6 +282,10 @@ async def marketing_attribution_dashboard(
         "coverage_remainder_pct": coverage_remainder_pct,
         "grand_coverage": grand_coverage,
     })
+    # Pass the windowed breakdown ONLY when a period is active (no such aggregate exists
+    # on the all-time payload); the template gates the breakdown on win.is_windowed too.
+    if win["is_windowed"]:
+        ctx["window_groups"] = window_groups
     return templates.TemplateResponse(request, "marketing_attribution/dashboard.html", ctx)
 
 
@@ -313,6 +359,7 @@ async def campaign_performance_dashboard(
     if not has_custom and window not in campperf_domain.WINDOW_PRESETS:
         window = campperf_domain.DEFAULT_WINDOW
 
+    window_groups = None
     if window == campperf_domain.WINDOW_ALL and not has_custom:
         data = await get_campaign_performance_overview()
         win = {
@@ -334,6 +381,15 @@ async def campaign_performance_dashboard(
             "end": data["window_end_month"] if data["is_custom_range"] else "",
             "ref_month": data["reference_date"][:7],
         }
+        # Windowed 4-group breakdown for the bottom line: re-sum the per-campaign outcomes
+        # PLUS the data-quality buckets (junk / no-campaign, None-guarded) so the four counts
+        # reconcile to total_leads_population (route-side re-aggregation only — no service).
+        dq = data["data_quality"]
+        window_groups = _aggregate_outcome_groups(
+            [c["outcomes"] for c in data["campaigns"]]
+            + [b["outcomes"] for b in (dq["junk_none"], dq["no_campaign"]) if b is not None],
+            data["total_leads_population"],
+        )
 
     # Grand totals are window-INDEPENDENT: the full-scale all-time funnel INCLUDING
     # the Nov-2025 migration plus the same EXCLUDING it. Called in EVERY branch
@@ -348,6 +404,10 @@ async def campaign_performance_dashboard(
         "win": win,
         "grand_totals": grand_totals,
     })
+    # Pass the windowed breakdown ONLY when a period is active (the all-time payload has
+    # no such aggregate); the template gates the breakdown on win.is_windowed too.
+    if win["is_windowed"]:
+        ctx["window_groups"] = window_groups
     return templates.TemplateResponse(request, "campaign_performance/dashboard.html", ctx)
 
 

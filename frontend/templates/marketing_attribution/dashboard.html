@@ -366,24 +366,47 @@
 
   </div>
 
-  {# ── 4a. WINDOW COVERAGE LINE — follows the period filter, pinned directly ABOVE the
-     all-time block (§4b) so the two read as a pair: THIS period vs. all-time. Reuses §2's
-     windowed fields + idiom (attr.coverage_pct and the attributed/population split) and
-     the existing mktattr_window_coverage_* keys, in the pinned block's line-card styling.
-     Gated on win.is_windowed — on the all-time view the windowed fields are absent from
-     the payload and only the pinned block below shows. #}
+  {# ── 4a. WINDOW TOTAL + 4-GROUP BREAKDOWN — follows the period filter, pinned directly
+     ABOVE the all-time block (§4b) so the two read as a pair: THIS period vs. all-time.
+     BIG number = attr.total_leads_population (windowed total leads); beneath it the 4-group
+     outcome split whose COUNTS reconcile to that total — re-summed route-side (window_groups)
+     over the per-buyer outcomes + the unattributed bucket. coverage_pct kept as a secondary
+     stat. Reuses the per-card legend idiom + the existing mktattr_group_* keys. Gated on
+     win.is_windowed — the windowed fields / window_groups are absent on the all-time view,
+     where only the pinned block below shows. #}
   {% if win.is_windowed %}
   <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
     <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+      {# Header: label + range · BIG windowed total leads (the breakdown below reconciles to it). #}
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("mktattr_window_coverage_label") }}</p>
+          <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("campperf_window_total_leads_label") }}</p>
           <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{{ attr.window_start_month }}{% if attr.window_start_month != attr.window_end_month %} → {{ attr.window_end_month }}{% endif %} &middot; {{ _t("campperf_window_excl_migration") }}</p>
         </div>
         <div class="shrink-0 text-right rtl:text-left">
-          <p class="text-2xl font-bold font-mono tabular-nums text-primary-600 dark:text-primary-400 leading-none">{{ attr.coverage_pct | round(1) }}%</p>
-          <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500 font-mono tabular-nums">{{ "{:,}".format(attr.total_attributed) }} / {{ "{:,}".format(attr.total_leads_population) }} {{ _t("mktattr_leads") }}</p>
+          <p class="text-2xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 leading-none">{{ "{:,}".format(attr.total_leads_population) }}</p>
+          <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500 font-mono tabular-nums">{{ attr.coverage_pct | round(1) }}% &middot; {{ "{:,}".format(attr.total_attributed) }} / {{ "{:,}".format(attr.total_leads_population) }} {{ _t("mktattr_leads") }}</p>
         </div>
+      </div>
+      {# 4-group breakdown — window_groups counts re-summed over buyers + unattributed; reconcile to the total above. #}
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-700/60">
+        {% for o in window_groups %}
+          {% if o.group == "جديد" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("mktattr_group_new") %}
+          {% elif o.group == "مهتم" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("mktattr_group_interested") %}
+          {% elif o.group == "اشترى" %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("mktattr_group_bought") %}
+          {% elif o.group == "بلا نتيجة" %}{% set dot_cls = "bg-neutral-300 dark:bg-neutral-500" %}{% set lbl = _t("mktattr_group_noresult") %}
+          {% else %}{% set dot_cls = "bg-neutral-400" %}{% set lbl = o.group %}{% endif %}
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-sm shrink-0 {{ dot_cls }}"></span>
+              <span class="text-xs text-neutral-500 dark:text-neutral-400 truncate" title="{{ lbl }}">{{ lbl }}</span>
+            </div>
+            <p class="mt-1 ms-4">
+              <span class="text-base font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(o.count) }}</span>
+              <span class="text-xs text-neutral-400 dark:text-neutral-500 ms-1">{{ o.pct | round(1) }}%</span>
+            </p>
+          </div>
+        {% endfor %}
       </div>
     </div>
   </div>
