@@ -233,7 +233,6 @@ async def marketing_attribution_dashboard(
     if not has_custom and window not in campperf_domain.WINDOW_PRESETS:
         window = campperf_domain.DEFAULT_WINDOW
 
-    window_groups = None
     if window == campperf_domain.WINDOW_ALL and not has_custom:
         data = await get_attribution_overview()
         win = {
@@ -243,6 +242,20 @@ async def marketing_attribution_dashboard(
         }
         # Remainder = leads with no media buyer by nature (events/expos/organic).
         coverage_remainder_pct = round(100 - data["attribution_pct"], 1)
+        # All-time top block is POPULATION-basis, but get_attribution_overview only
+        # classifies ATTRIBUTED leads (it has no unattributed group breakdown). So the
+        # all-time funnel + total come from the campaign module's grand-totals INCL line —
+        # the SAME crm.lead population (both total_leads_population are Σ __count over all
+        # leads, _CTX_ALL), an existing cached service, no new Odoo query.
+        grand_totals = await get_campaign_grand_totals()
+        top_groups = grand_totals["incl"]["groups"]
+        top_total = grand_totals["incl"]["total"]
+        if top_total != data["total_leads_population"]:
+            logger.warning(
+                f"All-time buyer top block: grand_totals incl.total {top_total} != "
+                f"overview total_leads_population {data['total_leads_population']} "
+                f"(population drift between modules?)."
+            )
     else:
         try:
             data = await get_attribution_overview_windowed(
@@ -259,13 +272,14 @@ async def marketing_attribution_dashboard(
         }
         # Windowed remainder = the unattributed share of THIS window's leads.
         coverage_remainder_pct = round(100 - data["coverage_pct"], 1)
-        # Windowed 4-group breakdown for the bottom line: re-sum the per-buyer outcomes
-        # PLUS the unattributed bucket so the four counts reconcile to total_leads_population
-        # (route-side re-aggregation of already-fetched data only — no service/Odoo/cache).
-        window_groups = _aggregate_outcome_groups(
+        # Windowed top block: re-sum the per-buyer outcomes PLUS the unattributed bucket so
+        # the four counts reconcile to total_leads_population (population basis, route-side
+        # re-aggregation of already-fetched data only — no service/Odoo/cache).
+        top_groups = _aggregate_outcome_groups(
             [b["outcomes"] for b in data["buyers"]] + [data["unattributed"]["outcomes"]],
             data["total_leads_population"],
         )
+        top_total = data["total_leads_population"]
 
     # Grand coverage is window-INDEPENDENT: the full-scale all-time attribution
     # INCLUDING the Nov-2025 migration plus the same EXCLUDING it. Called in EVERY
@@ -281,11 +295,12 @@ async def marketing_attribution_dashboard(
         "win": win,
         "coverage_remainder_pct": coverage_remainder_pct,
         "grand_coverage": grand_coverage,
+        # Always-on TOP block: the population-basis total + 4-group breakdown for the
+        # active mode (all-time by default, the window when one is active). Computed in
+        # BOTH branches; the template renders it unconditionally.
+        "top_groups": top_groups,
+        "top_total": top_total,
     })
-    # Pass the windowed breakdown ONLY when a period is active (no such aggregate exists
-    # on the all-time payload); the template gates the breakdown on win.is_windowed too.
-    if win["is_windowed"]:
-        ctx["window_groups"] = window_groups
     return templates.TemplateResponse(request, "marketing_attribution/dashboard.html", ctx)
 
 
@@ -359,7 +374,6 @@ async def campaign_performance_dashboard(
     if not has_custom and window not in campperf_domain.WINDOW_PRESETS:
         window = campperf_domain.DEFAULT_WINDOW
 
-    window_groups = None
     if window == campperf_domain.WINDOW_ALL and not has_custom:
         data = await get_campaign_performance_overview()
         win = {
@@ -367,6 +381,18 @@ async def campaign_performance_dashboard(
             "is_custom_range": False, "start": "", "end": "",
             "ref_month": data["reference_date"][:7],
         }
+        # All-time top block: re-aggregate the overview's population buckets — listed
+        # campaigns + the long_tail roll-up + the junk / no-campaign data-quality buckets
+        # (each None-guarded) — so the four counts reconcile to total_leads_population. Pure
+        # re-aggregation of already-fetched data; no new fetch.
+        lt = data["long_tail"]
+        dq = data["data_quality"]
+        top_groups = _aggregate_outcome_groups(
+            [c["outcomes"] for c in data["campaigns"]]
+            + [b["outcomes"] for b in (lt, dq["junk_none"], dq["no_campaign"]) if b is not None],
+            data["total_leads_population"],
+        )
+        top_total = data["total_leads_population"]
     else:
         try:
             data = await get_campaign_performance_windowed(
@@ -381,15 +407,16 @@ async def campaign_performance_dashboard(
             "end": data["window_end_month"] if data["is_custom_range"] else "",
             "ref_month": data["reference_date"][:7],
         }
-        # Windowed 4-group breakdown for the bottom line: re-sum the per-campaign outcomes
-        # PLUS the data-quality buckets (junk / no-campaign, None-guarded) so the four counts
-        # reconcile to total_leads_population (route-side re-aggregation only — no service).
+        # Windowed top block: re-sum the per-campaign outcomes PLUS the data-quality
+        # buckets (junk / no-campaign, None-guarded) so the four counts reconcile to
+        # total_leads_population (population basis, route-side re-aggregation — no service).
         dq = data["data_quality"]
-        window_groups = _aggregate_outcome_groups(
+        top_groups = _aggregate_outcome_groups(
             [c["outcomes"] for c in data["campaigns"]]
             + [b["outcomes"] for b in (dq["junk_none"], dq["no_campaign"]) if b is not None],
             data["total_leads_population"],
         )
+        top_total = data["total_leads_population"]
 
     # Grand totals are window-INDEPENDENT: the full-scale all-time funnel INCLUDING
     # the Nov-2025 migration plus the same EXCLUDING it. Called in EVERY branch
@@ -403,11 +430,12 @@ async def campaign_performance_dashboard(
         "campperf": data,
         "win": win,
         "grand_totals": grand_totals,
+        # Always-on TOP block: the population-basis total + 4-group breakdown for the
+        # active mode (all-time by default, the window when one is active). Computed in
+        # BOTH branches; the template renders it unconditionally.
+        "top_groups": top_groups,
+        "top_total": top_total,
     })
-    # Pass the windowed breakdown ONLY when a period is active (the all-time payload has
-    # no such aggregate); the template gates the breakdown on win.is_windowed too.
-    if win["is_windowed"]:
-        ctx["window_groups"] = window_groups
     return templates.TemplateResponse(request, "campaign_performance/dashboard.html", ctx)
 
 

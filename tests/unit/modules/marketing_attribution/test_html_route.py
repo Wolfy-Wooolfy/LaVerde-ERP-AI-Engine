@@ -106,14 +106,50 @@ _MOCK_GRAND_COVERAGE = {
 }
 
 
+# The buyer ALL-TIME branch reuses the campaign module's get_campaign_grand_totals() for the
+# population-basis top-block funnel (same crm.lead population). incl.total is set to the mock
+# overview's total_leads_population (700) so the route's reconcile check stays quiet; incl.groups
+# sum to incl.total (population basis), using the real GROUP_ORDER strings.
+_MOCK_GRAND_TOTALS = {
+    "incl": {
+        "total": 700,
+        "groups": [
+            {"group": "جديد", "count": 350, "pct": 50.0},
+            {"group": "مهتم", "count": 150, "pct": 21.43},
+            {"group": "اشترى", "count": 50, "pct": 7.14},
+            {"group": "بلا نتيجة", "count": 150, "pct": 21.43},
+        ],
+    },
+    "excl": {
+        "total": 500,
+        "groups": [
+            {"group": "جديد", "count": 250, "pct": 50.0},
+            {"group": "مهتم", "count": 110, "pct": 22.0},
+            {"group": "اشترى", "count": 40, "pct": 8.0},
+            {"group": "بلا نتيجة", "count": 100, "pct": 20.0},
+        ],
+    },
+    "migration_total": 200,
+    "legacy_days": ["2025-11-15", "2025-11-16", "2025-11-26"],
+    "reference_date": "2026-06-18",
+    "as_of": "2026-06-18T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 12,
+}
+
+
 @pytest.fixture(autouse=True)
 def _patch_grand_coverage():
-    """The route calls get_attribution_grand_coverage() in every branch — mock it so no
-    200 test reaches live Odoo. Harmless for the 302/403 tests (the handler body never
-    runs there)."""
+    """The route calls get_attribution_grand_coverage() in every branch, and the all-time
+    branch additionally reuses the campaign module's get_campaign_grand_totals() for the
+    population-basis top block — mock BOTH so no 200 test reaches live Odoo. Harmless for the
+    302/403 tests (the handler body never runs there)."""
     with patch(
         "backend.api.v1.endpoints.dashboard.get_attribution_grand_coverage",
         new=AsyncMock(return_value=_MOCK_GRAND_COVERAGE),
+    ), patch(
+        "backend.api.v1.endpoints.dashboard.get_campaign_grand_totals",
+        new=AsyncMock(return_value=_MOCK_GRAND_TOTALS),
     ):
         yield
 

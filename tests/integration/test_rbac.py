@@ -62,6 +62,22 @@ _GRAND_COVERAGE_MOCK = {
     "rpc_duration_ms": 0,
 }
 
+# The buyer ALL-TIME branch additionally reuses the campaign module's get_campaign_grand_totals()
+# for the population-basis top block, so this RBAC check must mock it too (all-zero, like the
+# coverage mock above — only the gating status matters here).
+_GRAND_TOTALS_MOCK = {
+    "incl": {"total": 0, "groups": [{"group": g, "count": 0, "pct": 0.0}
+                                    for g in ("جديد", "مهتم", "اشترى", "بلا نتيجة")]},
+    "excl": {"total": 0, "groups": [{"group": g, "count": 0, "pct": 0.0}
+                                    for g in ("جديد", "مهتم", "اشترى", "بلا نتيجة")]},
+    "migration_total": 0,
+    "legacy_days": [],
+    "reference_date": "2026-06-14",
+    "as_of": "2026-06-14T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 0,
+}
+
 
 # ── A. API Module Gating ──────────────────────────────────────────────────────
 
@@ -209,6 +225,9 @@ class TestHtmlModuleGating:
         ), patch(
             "backend.api.v1.endpoints.dashboard.get_attribution_grand_coverage",
             new=AsyncMock(return_value=_GRAND_COVERAGE_MOCK),
+        ), patch(
+            "backend.api.v1.endpoints.dashboard.get_campaign_grand_totals",
+            new=AsyncMock(return_value=_GRAND_TOTALS_MOCK),
         ):
             r = mktattr_only_client.get(
                 "/marketing-attribution/dashboard", params={"window": "all"}

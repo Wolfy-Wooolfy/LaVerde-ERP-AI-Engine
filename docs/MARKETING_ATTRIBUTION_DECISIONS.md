@@ -180,3 +180,40 @@ future per-entity data-shape drift surfaces without breaking the page. Reuses th
 Odoo / schema / cache change; no new i18n; the pinned `grand_coverage` / `grand_totals` blocks
 are untouched. Gated on `win.is_windowed` — `window_groups` is computed and passed only in the
 windowed branch.
+
+---
+
+## 2026-06-30 — Totals + outcome breakdown promoted to an always-on TOP block
+
+### D15 — Always-on top block (all-time default, windowed when filtered) on both dashboards
+
+The total + 4-group breakdown (D13/D14) was a bottom block, gated on `win.is_windowed`,
+computed only from the windowed payload. Users want the period/all-time summary FIRST and the
+per-entity detail on scroll, so it is promoted to an ALWAYS-shown block at the TOP of both
+dashboards: all-time figures by default, the selected period's figures when a window is active
+(title + numbers switch on `win.is_windowed`). The bottom `§4a` block is removed (relocated, not
+duplicated); the per-entity cards sit below the top block.
+
+**Rationale.** The breakdown stays POPULATION-basis in BOTH modes, so the four counts always
+reconcile to the displayed big total (windowed total leads, or all-time total leads). Sources by
+branch: windowed = the existing route-side re-aggregation of the windowed per-entity outcomes;
+campaign all-time = re-aggregation of the overview's population buckets INCLUDING the all-time-only
+`long_tail` roll-up (plus the junk / no-campaign data-quality buckets, None-guarded); buyer all-time =
+the campaign module's existing cached `get_campaign_grand_totals()` `incl` line, because
+`get_attribution_overview` only classifies ATTRIBUTED leads (no unattributed group breakdown) — it
+is the SAME `crm.lead` population (both `total_leads_population` are Σ `__count` over all leads with
+`active_test=False`), so it needs NO new Odoo query / service / schema / cache, only an added awaited
+call in the buyer route (a `logger.warning` flags any population drift). The buyer `§2` coverage strip
+is removed as a subset of the new block (coverage % retained as a secondary stat). The pinned grand
+blocks are retained intentionally — the all-time top/bottom overlap is by design: the pinned block is
+the labelled with/without-migration reference, the top block the single live total. The block title is
+mode-dependent; reuses the `mktattr_group_*` group keys plus one new all-time title key
+`campperf_alltime_total_leads_label` (en + ar).
+
+**Scope.** `dashboard.py` (route logic + the buyer route's added cached `get_campaign_grand_totals()`
+call — no new Odoo) + the two templates + the two translation files (one new key). Because the buyer
+all-time branch now calls `get_campaign_grand_totals()`, the buyer HTML-route fixture
+(`tests/unit/modules/marketing_attribution/test_html_route.py`) and the buyer RBAC check
+(`tests/integration/test_rbac.py`) were extended to patch that call (the campaign tests already
+patched it) — legitimate test maintenance for the new dependency, no assertion logic changed. No
+service / schema / cache change.
