@@ -3674,3 +3674,75 @@ tests + verify-script + this entry — single atomic commit on `main`.
 - **This commit:** docs-only backfill — appends this entry to
   `MODULE_2_IMPLEMENTATION_DECISIONS.md`; no code, frontend, backend, schema,
   test, or translation file touched; no tag.
+
+---
+
+## Session 25 — 2026-06-30 — Dynamic Project Resolution (Stage 1): read-only project-name resolver (dormant)
+
+### Decision 25.1 — Add `get_project_name_map()` sourcing names live from `rs.structure.project.code` (active=True, id-asc, 1h cache) — Stage 1, dormant
+
+- **Stage / goal:** First stage of the dynamic-project-resolution refactor. The
+  module currently maps project ids → display names through the **hardcoded**
+  literal `_PROJECT_NAMES = {1: "New Capital", 2: "Cassette", 3: "La puerta"}`
+  in `backend/modules/collections/services/kpi_service.py`, and raises
+  `UnknownProjectError` whenever Odoo returns an id absent from that dict. The
+  refactor replaces that brittle literal with a live, cached lookup so a new
+  Odoo project no longer requires a code change + redeploy. Stage 1 **only adds
+  and tests the new resolver**; later stages wire it in and retire
+  `_PROJECT_NAMES` / `UnknownProjectError`.
+- **What was added:** a single new async function
+  `get_project_name_map(client: Optional[OdooClient] = None) -> dict[int, str]`
+  plus its constants (`_PROJECT_MASTER_MODEL = "rs.structure.project"`,
+  `_CACHE_KEY_PREFIX_PROJECT_MASTER = "project_master"`,
+  `_CACHE_TTL_PROJECT_MASTER = 3600`, `_PROJECT_MASTER_DOMAIN`,
+  `_PROJECT_MASTER_FIELDS`). The diff is **purely additive** (101 insertions, 0
+  deletions; no existing line changed).
+- **Source & cleanliness:** reads the master model `rs.structure.project` and
+  the **`code`** field — the verbatim English name ("New Capital" / "Cassette" /
+  "La puerta") with **no `Project#` prefix** (unlike the many2one `name` field,
+  which carries the prefix the KPIs currently strip). Confirmed by a read-only
+  live probe on 2026-06-30: exactly 3 active projects (ids 1/2/3), 0 archived,
+  0 junk.
+- **Active-only filter:** domain `[("active", "=", True)]` — the future-proof
+  guard that excludes any project archived later, rather than a hardcoded id
+  whitelist.
+- **Ordering:** `order="id asc"` is sent to Odoo **and** the rows are sorted
+  client-side by id before the dict is built, so the returned
+  `{id: name}` dict is deterministically id-ascending even if Odoo ignored the
+  hint (belt-and-suspenders).
+- **Caching:** cache-first via the module cache (`make_key("project_master")`,
+  date-scoped to the Cairo day); on miss, **one** `search_read` RPC, result
+  cached with a **1-hour TTL** (`_CACHE_TTL_PROJECT_MASTER = 3600`) — far longer
+  than the 60s KPI default because the master list changes rarely; the
+  date-scoped key still caps any entry at ≤24h.
+- **Edge cases (defensive, never crashes):** a row whose `code` is falsy
+  (`False`/`None`/`""`) maps to the safe placeholder `f"Project {id}"` (never a
+  blank string); an empty result set returns `{}` (does not raise).
+- **Read-only (sacred):** `search_read` only — never `create`/`write`/`unlink`.
+  Calls `_assert_read_only()` before any RPC (same defense-in-depth guard the
+  KPIs use), and `backend/shared/odoo/client.py`'s `ALLOWED_METHODS` frozenset
+  is **unchanged** (no write method added). No live Odoo call is made during
+  implementation; the tests fully mock Odoo.
+- **Placement & no circular import:** defined in `kpi_service.py` because
+  `drilldown_service.py` already imports from this module one-directionally
+  (`from ...kpi_service import _compute_period_bounds`) and `kpi_service.py`
+  imports nothing from `drilldown_service.py`, so a single definition here is
+  importable by both services with no cycle. A dedicated module was unnecessary.
+- **Dormant — NOT wired in:** Stage 1 leaves the resolver unused by any KPI,
+  drill-down, route, or schema. `_PROJECT_NAMES` and `UnknownProjectError`
+  remain in place and in use; their removal is a later stage.
+- **Tests:** new `tests/unit/modules/collections/test_project_resolver.py` — 12
+  unit tests (Odoo fully mocked, autouse `fresh_cache` fixture mirroring the
+  suite): happy-path id→name map; verbatim model/method/domain/fields assertion;
+  `order="id asc"` kwarg; cache hit (Odoo hit exactly once); 1-hour TTL via a
+  `_cache.set` spy (distinct from the 60s default); blank/falsy `code` →
+  placeholder; empty result → `{}`; contaminated `ALLOWED_METHODS` raises
+  pre-RPC + clean baseline; out-of-order Odoo rows still yield an id-ascending
+  dict; RPC failure → `OdooQueryError` and leaves no cache entry.
+- **Verification (this session):** Collections unit suite **282 passed, 0
+  failed, 0 skipped** (270 pre-existing all still green — proof Stage 1 touched
+  no existing behavior — plus 12 new). Targeted resolver run: 12/12 passed.
+  `git diff` on `kpi_service.py` confirmed purely additive.
+- **This commit:** adds `get_project_name_map` + constants to `kpi_service.py`,
+  the new `test_project_resolver.py`, and this entry — single atomic commit on
+  `main`; not pushed, not tagged (Khaled performs pushes/tags).

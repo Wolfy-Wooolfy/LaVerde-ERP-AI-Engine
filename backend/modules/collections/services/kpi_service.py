@@ -77,6 +77,107 @@ def _assert_read_only() -> None:
         )
 
 
+# ── Dynamic project-name resolver (Stage 1 — dormant, not yet wired in) ──────
+# Read-only resolver that sources project display names LIVE from the project
+# master model rs.structure.project, using the clean `code` field (verbatim
+# English names — e.g. "New Capital" — with NO "Project#" prefix that the
+# many2one `name` field carries). This is the future replacement for the
+# hardcoded _PROJECT_NAMES dict above: in a later stage the project-aware KPIs
+# and drill-downs will resolve names through this map instead of the literal.
+# It is DEFINED AND TESTED HERE BUT NOT YET WIRED INTO ANY KPI/DRILL-DOWN —
+# Stage 1 only adds it; Stage 2 will adopt it. Placed in kpi_service.py because
+# drilldown_service.py already imports from this module (one-directional), so a
+# single definition here is importable by both services with no circular import.
+_PROJECT_MASTER_MODEL = "rs.structure.project"
+_CACHE_KEY_PREFIX_PROJECT_MASTER = "project_master"
+# The master list changes rarely (3 projects today), so cache it for 1 hour —
+# far longer than the 60s KPI default. The date-scoped cache key still caps any
+# entry at the Cairo-day boundary (≤24h backstop).
+_CACHE_TTL_PROJECT_MASTER = 3600  # 1 hour
+# Future-proof guard: only currently-active projects (excludes any archived
+# later). Confirmed correct by the 2026-06-30 read-only probe (3 active, 0
+# archived).
+_PROJECT_MASTER_DOMAIN: list = [("active", "=", True)]
+_PROJECT_MASTER_FIELDS = ["id", "code"]
+
+
+async def get_project_name_map(client: Optional[OdooClient] = None) -> dict[int, str]:
+    """Return a live {project_id: display_name} map from rs.structure.project.
+
+    Stage 1 of the dynamic-project-resolution refactor (DORMANT — not yet wired
+    into any KPI/drill-down). Sources clean English project names from the
+    master model's `code` field rather than the hardcoded _PROJECT_NAMES dict.
+
+    Behaviour:
+        * Cache-first: returns the cached map without touching Odoo on a hit.
+        * On a miss, issues ONE read-only ``search_read`` on
+          ``rs.structure.project`` with domain ``[("active", "=", True)]``,
+          fields ``["id", "code"]`` and ``order="id asc"``, then caches the
+          result for 1 hour (_CACHE_TTL_PROJECT_MASTER).
+        * Strictly read-only — ``search_read`` only; never create/write/unlink.
+
+    Ordering:
+        The returned dict is ALWAYS id-ascending. ``order="id asc"`` is sent to
+        Odoo, and the rows are additionally sorted client-side before the dict
+        is built, so the iteration order is deterministic even if Odoo ignores
+        the ``order`` hint.
+
+    Edge cases (handled defensively — never crashes):
+        * A row whose ``code`` is falsy (``False``/``None``/``""``) maps to the
+          safe placeholder ``f"Project {id}"`` — never a blank string.
+        * An empty result set returns an empty dict ``{}`` (does not raise).
+
+    Args:
+        client: Optional injectable read-only OdooClient (mirrors the KPI
+            convention). When omitted, a client is created and closed here;
+            when injected, it is left open for the caller to manage.
+
+    Returns:
+        dict[int, str]: ``{project_id: display_name}`` in id-ascending order.
+
+    Raises:
+        ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated with a
+            write method (checked before any RPC).
+        OdooQueryError: if the Odoo RPC fails for any reason.
+    """
+    _assert_read_only()
+
+    cache_key = _cache.make_key(_CACHE_KEY_PREFIX_PROJECT_MASTER)
+
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit: {cache_key}")
+        return cached
+
+    logger.info(f"Cache miss: {cache_key} — querying Odoo")
+
+    _client = client if client is not None else OdooClient()
+
+    try:
+        rows = await _client.execute_kw(
+            _PROJECT_MASTER_MODEL,
+            "search_read",
+            args=[_PROJECT_MASTER_DOMAIN, _PROJECT_MASTER_FIELDS],
+            kwargs={"order": "id asc"},
+        )
+    except Exception as exc:
+        raise OdooQueryError(
+            f"search_read on {_PROJECT_MASTER_MODEL} failed: {exc}"
+        ) from exc
+    finally:
+        if client is None:
+            await _client.close()
+
+    name_map: dict[int, str] = {}
+    for row in sorted(rows or [], key=lambda r: int(r["id"])):
+        pid = int(row["id"])
+        code = row.get("code")
+        name_map[pid] = code if code else f"Project {pid}"
+
+    _cache.set(cache_key, name_map, ttl=_CACHE_TTL_PROJECT_MASTER)
+    return name_map
+
+
 def _build_late_domain(today: str) -> list:
     # Immutable — Candidate C, three-clause form validated in
     # MODULE_2_DISCOVERY_PHASE_2.md §3. Do not modify without Khaled's approval.
