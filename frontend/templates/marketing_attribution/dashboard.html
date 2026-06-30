@@ -366,6 +366,29 @@
 
   </div>
 
+  {# ── 4a. WINDOW COVERAGE LINE — follows the period filter, pinned directly ABOVE the
+     all-time block (§4b) so the two read as a pair: THIS period vs. all-time. Reuses §2's
+     windowed fields + idiom (attr.coverage_pct and the attributed/population split) and
+     the existing mktattr_window_coverage_* keys, in the pinned block's line-card styling.
+     Gated on win.is_windowed — on the all-time view the windowed fields are absent from
+     the payload and only the pinned block below shows. #}
+  {% if win.is_windowed %}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
+    <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("mktattr_window_coverage_label") }}</p>
+          <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{{ attr.window_start_month }}{% if attr.window_start_month != attr.window_end_month %} → {{ attr.window_end_month }}{% endif %} &middot; {{ _t("campperf_window_excl_migration") }}</p>
+        </div>
+        <div class="shrink-0 text-right rtl:text-left">
+          <p class="text-2xl font-bold font-mono tabular-nums text-primary-600 dark:text-primary-400 leading-none">{{ attr.coverage_pct | round(1) }}%</p>
+          <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500 font-mono tabular-nums">{{ "{:,}".format(attr.total_attributed) }} / {{ "{:,}".format(attr.total_leads_population) }} {{ _t("mktattr_leads") }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   {# ── 4b. GRAND COVERAGE — PINNED, window-INDEPENDENT (full-scale, always shown) ─
      The buyer-page parallel of the campaign grand-totals footer (f8f27bf). These two
      lines are CONSTANT regardless of the window switcher above: line 1 is the all-time

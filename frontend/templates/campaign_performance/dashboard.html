@@ -374,6 +374,28 @@
     </div>
   </div>
 
+  {# ── 4a. WINDOW TOTAL LEADS — follows the period filter, pinned directly ABOVE the
+     all-time grand-totals block (§4b) so the two read as a pair: THIS period vs. all-time.
+     Renders the windowed lead COUNT (campperf.total_leads_population) only — the campaign
+     page has no coverage metric — in the pinned block's line-card styling. Gated on
+     win.is_windowed — on the all-time view only the pinned block below shows. #}
+  {% if win.is_windowed %}
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
+    <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("campperf_window_total_leads_label") }}</p>
+          <p class="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{{ campperf.window_start_month }}{% if campperf.window_start_month != campperf.window_end_month %} → {{ campperf.window_end_month }}{% endif %} &middot; {{ _t("campperf_window_excl_migration") }}</p>
+        </div>
+        <div class="shrink-0 text-right rtl:text-left">
+          <p class="text-2xl font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100 leading-none">{{ "{:,}".format(campperf.total_leads_population) }}</p>
+          <p class="mt-1 text-xs text-neutral-400 dark:text-neutral-500">{{ _t("mktattr_leads") }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   {# ── 4b. GRAND TOTALS — PINNED, window-INDEPENDENT (full-scale, always shown) ─
      These two lines are CONSTANT regardless of the window switcher above: line 1 is
      the all-time total INCLUDING the Nov-2025 migration (the full population), line 2

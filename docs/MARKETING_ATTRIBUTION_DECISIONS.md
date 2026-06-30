@@ -120,3 +120,32 @@ live `utm.campaign` names carry spaces around the hyphen:
 dominant buyer **"Mahmoud Mohsen" at 100%** — a channel owner, confirming the
 §3.4 intent. `DENYLIST_CAMPAIGNS` was corrected to the exact live names. No other
 config changed; `CONFIRMED_BUYER_CAMPAIGNS` untouched.
+
+---
+
+## 2026-06-30 — Window-following totals line on both attribution dashboards
+
+### D13 — Windowed totals line added beneath the pinned all-time block (frontend-only)
+
+Both attribution dashboards (buyer + campaign) pin an ALL-TIME baseline block at the
+bottom (`grand_coverage` / `grand_totals`) that, by design (the f8f27bf footer), ignores
+the window switcher. Users reading the bottom of the page expected those totals to follow
+the selected period. Fix: a new `{% if win.is_windowed %}`-gated line is rendered directly
+ABOVE each pinned block, showing the SELECTED period's figures, so the two read as a pair
+(this period vs. all-time). The pinned all-time block is retained, unconditional, and
+byte-identical.
+
+**Rationale.** The figures already exist in the windowed top payload each route passes to
+its template — no backend touch. The two pages are asymmetric and each renders its OWN
+natural windowed total: the buyer page renders `attr.coverage_pct` (with the
+`total_attributed` / `total_leads_population` split, reusing the existing
+`mktattr_window_coverage_*` keys already used by the §2 coverage strip); the campaign page
+renders `campperf.total_leads_population` (a lead COUNT — the campaign page has no coverage
+metric, so none was invented). Gated on `win.is_windowed` because on the all-time view the
+windowed fields are not present in the payload.
+
+**Scope.** Frontend-only: two templates (`marketing_attribution/dashboard.html`,
+`campaign_performance/dashboard.html`) plus ONE new i18n key
+`campperf_window_total_leads_label` (en + ar). No backend service, route signature, schema,
+or cache-key change; the pinned `grand_coverage` / `grand_totals` services and blocks are
+untouched.

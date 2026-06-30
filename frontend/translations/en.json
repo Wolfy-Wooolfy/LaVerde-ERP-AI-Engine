@@ -510,6 +510,7 @@
   "campperf_window_excl_migration": "imported historical data excluded",
   "campperf_window_empty": "No campaign had any leads in this window.",
   "campperf_window_footer_note": "Windowed view — the imported historical data (Nov 2025) is excluded. Switch to All-time for the full picture including it.",
+  "campperf_window_total_leads_label": "Total leads — selected period",
   "campperf_grand_title": "Grand totals — all campaigns",
   "campperf_grand_caption": "The full scale, fixed regardless of the time window selected above.",
   "campperf_grand_incl_label": "All-time — including imported historical data",
