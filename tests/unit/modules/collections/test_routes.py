@@ -1032,6 +1032,435 @@ def test_kpi5b_401_when_no_auth() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Drill-down: KPI 2 — Late Uncollected installments (paginated) endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_DRILL_LATE = "/api/v1/collections/drilldown/late"
+
+_MOCK_DRILL_LATE = {
+    "version": "1.0",
+    "data": {
+        "items": [
+            {
+                "record_id": 101,
+                "customer_name": "Ahmed Hassan",
+                "project_id": 1,
+                "project_name_ar": "العاصمة الإدارية",
+                "project_name_en": "New Capital",
+                "installment_type_id": 4,
+                "installment_type_name_ar": "قسط",
+                "installment_type_name_en": "Installment",
+                "date": "2026-03-15",
+                "amount": 250_000.00,
+                "due_amount": 180_000.00,
+                "paid_amount": 70_000.00,
+                "actual_paid_amount": 50_000.00,
+                "pending_cheque": 20_000.00,
+                "payment_state": "partial",
+                "late_amount": 200_000.00,
+            },
+        ],
+    },
+    "meta": {
+        "request_id": "mock-req-late",
+        "as_of": "2026-06-30T10:00:00+00:00",
+        "rpc_duration_ms": 64,
+        "page_size": 50,
+        "total_count": 1,
+        "cursor_current": None,
+        "cursor_next": None,
+        "has_next": False,
+        "filters_applied": {"payment_state": None, "has_pending_cheque": None},
+        "sort_applied": {"sort_by": "due_amount", "sort_dir": "desc"},
+        "data_quality": None,
+    },
+}
+
+_META_KEYS = {
+    "request_id", "as_of", "rpc_duration_ms", "page_size", "total_count",
+    "cursor_current", "cursor_next", "has_next", "filters_applied",
+    "sort_applied", "data_quality",
+}
+
+_INSTALLMENT_ROW_KEYS = {
+    "record_id", "customer_name", "project_id", "project_name_ar",
+    "project_name_en", "installment_type_id", "installment_type_name_ar",
+    "installment_type_name_en", "date", "amount", "due_amount", "paid_amount",
+    "actual_paid_amount", "pending_cheque", "payment_state", "late_amount",
+}
+
+
+# ── Test DL-8a — 200 + strict envelope shape ─────────────────────────────────
+
+
+def test_drill_late_returns_200_and_envelope_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_LATE),
+    ):
+        r = client.get(_URL_DRILL_LATE)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    assert set(body.keys()) == {"version", "data", "meta"}
+    assert body["version"] == "1.0"
+
+    assert set(body["meta"].keys()) == _META_KEYS
+    assert isinstance(body["meta"]["filters_applied"], dict)
+    assert isinstance(body["meta"]["sort_applied"], dict)
+
+    assert set(body["data"].keys()) == {"items"}
+    items = body["data"]["items"]
+    assert isinstance(items, list)
+    assert len(items) >= 1
+    assert set(items[0].keys()) == _INSTALLMENT_ROW_KEYS
+
+
+# ── Test DL-8b — X-Request-ID echo-back + no Cache-Control ────────────────────
+
+
+def test_drill_late_request_id_echoed_and_no_cache_control(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_LATE),
+    ):
+        r = client.get(_URL_DRILL_LATE, headers={"X-Request-ID": "test-rid-late"})
+
+    assert r.status_code == 200
+    assert r.headers["x-request-id"] == "test-rid-late"
+    assert "cache-control" not in r.headers
+
+
+# ── Test DL-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_drill_late_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_late_drilldown",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_DRILL_LATE)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+    assert r.headers.get("x-request-id")
+
+
+# ── Test DL-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_drill_late_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_DRILL_LATE)
+    assert r.status_code == 405
+
+
+# ── Test DL-8e — 401 when unauthenticated ────────────────────────────────────
+
+
+def test_drill_late_401_when_no_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL_DRILL_LATE)  # no session
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Drill-down: KPI 1 — Portfolio customer × project breakdown endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_DRILL_PORTFOLIO = "/api/v1/collections/drilldown/portfolio"
+
+_MOCK_DRILL_PORTFOLIO = {
+    "version": "1.0",
+    "data": {
+        "customers": [
+            {
+                "customer_id": 5001,
+                "customer_name": "Mona Said",
+                "total_amount": 3_200_000.00,
+                "total_paid": 1_100_000.00,
+                "total_due": 2_100_000.00,
+                "total_actual_paid": 950_000.00,
+                "record_count": 12,
+                "project_breakdown": [
+                    {
+                        "project_id": 1,
+                        "project_name_ar": "العاصمة الإدارية",
+                        "project_name_en": "New Capital",
+                        "amount": 3_200_000.00,
+                        "due_amount": 2_100_000.00,
+                        "record_count": 12,
+                    },
+                ],
+            },
+        ],
+    },
+    "meta": {
+        "request_id": "mock-req-portfolio",
+        "as_of": "2026-06-30T10:00:00+00:00",
+        "rpc_duration_ms": 78,
+        "page_size": 50,
+        "total_count": 1,
+        "cursor_current": None,
+        "cursor_next": None,
+        "has_next": False,
+        "filters_applied": {"project_id": None},
+        "sort_applied": {},
+        "data_quality": None,
+    },
+}
+
+_PORTFOLIO_CUSTOMER_KEYS = {
+    "customer_id", "customer_name", "total_amount", "total_paid", "total_due",
+    "total_actual_paid", "record_count", "project_breakdown",
+}
+
+_PORTFOLIO_BREAKDOWN_KEYS = {
+    "project_id", "project_name_ar", "project_name_en",
+    "amount", "due_amount", "record_count",
+}
+
+
+# ── Test DP-8a — 200 + strict envelope shape (incl. nested breakdown) ─────────
+
+
+def test_drill_portfolio_returns_200_and_envelope_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_portfolio_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_PORTFOLIO),
+    ):
+        r = client.get(_URL_DRILL_PORTFOLIO)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    assert set(body.keys()) == {"version", "data", "meta"}
+    assert body["version"] == "1.0"
+
+    assert set(body["meta"].keys()) == _META_KEYS
+    assert isinstance(body["meta"]["filters_applied"], dict)
+    assert isinstance(body["meta"]["sort_applied"], dict)
+
+    assert set(body["data"].keys()) == {"customers"}
+    customers = body["data"]["customers"]
+    assert isinstance(customers, list)
+    assert len(customers) >= 1
+    assert set(customers[0].keys()) == _PORTFOLIO_CUSTOMER_KEYS
+
+    breakdown = customers[0]["project_breakdown"]
+    assert isinstance(breakdown, list)
+    assert len(breakdown) >= 1
+    assert set(breakdown[0].keys()) == _PORTFOLIO_BREAKDOWN_KEYS
+
+
+# ── Test DP-8b — X-Request-ID echo-back + no Cache-Control ────────────────────
+
+
+def test_drill_portfolio_request_id_echoed_and_no_cache_control(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_portfolio_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_PORTFOLIO),
+    ):
+        r = client.get(_URL_DRILL_PORTFOLIO, headers={"X-Request-ID": "test-rid-portfolio"})
+
+    assert r.status_code == 200
+    assert r.headers["x-request-id"] == "test-rid-portfolio"
+    assert "cache-control" not in r.headers
+
+
+# ── Test DP-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_drill_portfolio_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_portfolio_drilldown",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_DRILL_PORTFOLIO)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+    assert r.headers.get("x-request-id")
+
+
+# ── Test DP-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_drill_portfolio_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_DRILL_PORTFOLIO)
+    assert r.status_code == 405
+
+
+# ── Test DP-8e — 401 when unauthenticated ────────────────────────────────────
+
+
+def test_drill_portfolio_401_when_no_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL_DRILL_PORTFOLIO)  # no session
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Drill-down: KPI 5 — Late Uncollected for one project endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_DRILL_PROJECT = "/api/v1/collections/drilldown/project/1"
+
+_MOCK_DRILL_PROJECT = {
+    "version": "1.0",
+    "data": {
+        "project_id": 1,
+        "project_name_ar": "العاصمة الإدارية",
+        "project_name_en": "New Capital",
+        "total_late_uncollected": 164_017_258.40,
+        "total_record_count": 1_472,
+        "items": [
+            {
+                "record_id": 202,
+                "customer_name": "Khaled Omar",
+                "project_id": 1,
+                "project_name_ar": "العاصمة الإدارية",
+                "project_name_en": "New Capital",
+                "installment_type_id": 4,
+                "installment_type_name_ar": "قسط",
+                "installment_type_name_en": "Installment",
+                "date": "2026-02-10",
+                "amount": 300_000.00,
+                "due_amount": 220_000.00,
+                "paid_amount": 80_000.00,
+                "actual_paid_amount": 60_000.00,
+                "pending_cheque": 20_000.00,
+                "payment_state": "partial",
+                "late_amount": 240_000.00,
+            },
+        ],
+    },
+    "meta": {
+        "request_id": "mock-req-project",
+        "as_of": "2026-06-30T10:00:00+00:00",
+        "rpc_duration_ms": 71,
+        "page_size": 50,
+        "total_count": 1,
+        "cursor_current": None,
+        "cursor_next": None,
+        "has_next": False,
+        "filters_applied": {"payment_state": None, "has_pending_cheque": None},
+        "sort_applied": {"sort_by": "due_amount", "sort_dir": "desc"},
+        "data_quality": None,
+    },
+}
+
+_PROJECT_DATA_KEYS = {
+    "project_id", "project_name_ar", "project_name_en",
+    "total_late_uncollected", "total_record_count", "items",
+}
+
+
+# ── Test DPr-8a — 200 + strict envelope shape ────────────────────────────────
+
+
+def test_drill_project_returns_200_and_envelope_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_project_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_PROJECT),
+    ):
+        r = client.get(_URL_DRILL_PROJECT)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    assert set(body.keys()) == {"version", "data", "meta"}
+    assert body["version"] == "1.0"
+
+    assert set(body["meta"].keys()) == _META_KEYS
+    assert isinstance(body["meta"]["filters_applied"], dict)
+    assert isinstance(body["meta"]["sort_applied"], dict)
+
+    assert set(body["data"].keys()) == _PROJECT_DATA_KEYS
+    items = body["data"]["items"]
+    assert isinstance(items, list)
+    assert len(items) >= 1
+    assert set(items[0].keys()) == _INSTALLMENT_ROW_KEYS
+
+
+# ── Test DPr-8b — X-Request-ID echo-back + no Cache-Control ───────────────────
+
+
+def test_drill_project_request_id_echoed_and_no_cache_control(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_project_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_PROJECT),
+    ):
+        r = client.get(_URL_DRILL_PROJECT, headers={"X-Request-ID": "test-rid-project"})
+
+    assert r.status_code == 200
+    assert r.headers["x-request-id"] == "test-rid-project"
+    assert "cache-control" not in r.headers
+
+
+# ── Test DPr-8c — 503 on OdooQueryError ──────────────────────────────────────
+
+
+def test_drill_project_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_project_drilldown",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_DRILL_PROJECT)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+    assert r.headers.get("x-request-id")
+
+
+# ── Test DPr-8d — 405 on POST ─────────────────────────────────────────────────
+
+
+def test_drill_project_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_DRILL_PROJECT)
+    assert r.status_code == 405
+
+
+# ── Test DPr-8e — 401 when unauthenticated ───────────────────────────────────
+
+
+def test_drill_project_401_when_no_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL_DRILL_PROJECT)  # no session
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
+
+
+# ── Test DPr-8f — FastAPI Path-constraint 422 on out-of-range project_id ──────
+
+
+def test_drill_project_invalid_id_returns_422_fastapi_validation(client: TestClient) -> None:
+    # project_id is Path(ge=1, le=3), so FastAPI rejects 9 with its own 422
+    # BEFORE the handler runs — the handler's invalid_param branch is therefore
+    # unreachable via HTTP. No service patch needed.
+    r = client.get("/api/v1/collections/drilldown/project/9")
+
+    assert r.status_code == 422
+    body = r.json()
+    assert "detail" in body   # FastAPI validation shape
+    assert "error" not in body  # NOT the handler's invalid_param shape
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Auth regression — all Collections endpoints must reject unauthenticated callers
 # ══════════════════════════════════════════════════════════════════════════════
 
