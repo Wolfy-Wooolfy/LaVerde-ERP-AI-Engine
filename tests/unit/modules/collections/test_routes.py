@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.deps import get_current_user
 from backend.auth.models import UserRecord
-from backend.core.exceptions import OdooQueryError
+from backend.core.exceptions import OdooQueryError, UnknownProjectError
 from backend.main import app
 from backend.modules.collections.schemas import (
     ExpectedCollectionsForecastResponse,
@@ -729,6 +729,306 @@ def test_kpi7_response_model_validates_success_shape(client: TestClient) -> None
     assert set(validated.buckets.keys()) == {
         "this_month", "this_quarter", "this_half", "this_year"
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 4 — Collection Rate MTD & YTD endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_KPI4 = "/api/v1/collections/kpi/collection-rate"
+
+_MOCK_DATA_KPI4 = {
+    "mtd": {
+        "numerator_egp":    12_500_000.00,
+        "denominator_egp":  20_000_000.00,
+        "rate_percent":     62.5,
+        "period_start":     "2026-06-01",
+        "period_end":       "2026-06-30",
+        "record_count_num": 145,
+        "record_count_den": 230,
+    },
+    "ytd": {
+        "numerator_egp":    310_000_000.00,
+        "denominator_egp":  500_000_000.00,
+        "rate_percent":     62.0,
+        "period_start":     "2026-01-01",
+        "period_end":       "2026-06-30",
+        "record_count_num": 3_120,
+        "record_count_den": 5_010,
+    },
+    "ytd_period_assumption": "calendar_year",
+    "currency":              "EGP",
+    "as_of":                 "2026-06-30T10:00:00+00:00",
+    "cache_status":          "fresh",
+    "rpc_duration_ms":       128,
+}
+
+
+# ── Test K4-8a — 200 + strict key shape ──────────────────────────────────────
+
+
+def test_kpi4_get_returns_200_and_all_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_mtd_ytd",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI4),
+    ):
+        r = client.get(_URL_KPI4)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    assert set(body.keys()) == {
+        "mtd", "ytd", "ytd_period_assumption",
+        "currency", "as_of", "cache_status", "rpc_duration_ms",
+    }
+
+    period_keys = {
+        "numerator_egp", "denominator_egp", "rate_percent",
+        "period_start", "period_end", "record_count_num", "record_count_den",
+    }
+    assert set(body["mtd"].keys()) == period_keys
+    assert set(body["ytd"].keys()) == period_keys
+
+
+# ── Test K4-8b — Response headers ────────────────────────────────────────────
+
+
+def test_kpi4_response_has_cache_control_and_x_cache_status(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_mtd_ytd",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI4),
+    ):
+        r = client.get(_URL_KPI4)
+
+    assert r.status_code == 200
+    assert "private" in r.headers.get("cache-control", "")
+    assert "max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_kpi4_x_cache_status_reflects_cached_when_served_from_cache(
+    client: TestClient,
+) -> None:
+    cached_data = {**_MOCK_DATA_KPI4, "cache_status": "cached", "rpc_duration_ms": 0}
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_mtd_ytd",
+        new=AsyncMock(return_value=cached_data),
+    ):
+        r = client.get(_URL_KPI4)
+
+    assert r.headers.get("x-cache-status") == "cached"
+
+
+# ── Test K4-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_kpi4_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_mtd_ytd",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_KPI4)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+
+
+# ── Test K4-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_kpi4_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_KPI4)
+    assert r.status_code == 405
+
+
+# ── Test K4-8e — 401 when unauthenticated ────────────────────────────────────
+
+
+def test_kpi4_401_when_no_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL_KPI4)  # no session
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KPI 5b — Collection Rate by Project (MTD & YTD) endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_KPI5B = "/api/v1/collections/kpi/collection-rate-by-project"
+
+_MOCK_DATA_KPI5B = {
+    "mtd": {
+        "projects": [
+            {"project_id": 1, "project_name": "New Capital",
+             "numerator_egp": 5_000_000.00, "denominator_egp": 8_000_000.00,
+             "rate_percent": 62.5, "record_count_num": 60, "record_count_den": 95},
+            {"project_id": 2, "project_name": "Cassette",
+             "numerator_egp": 3_000_000.00, "denominator_egp": 6_000_000.00,
+             "rate_percent": 50.0, "record_count_num": 40, "record_count_den": 80},
+            {"project_id": 3, "project_name": "La puerta",
+             "numerator_egp": 0.0, "denominator_egp": 0.0,
+             "rate_percent": None, "record_count_num": 0, "record_count_den": 0},
+        ],
+        "total_numerator_egp":   8_000_000.00,
+        "total_denominator_egp": 14_000_000.00,
+        "total_rate_percent":    57.142857142857146,
+        "period_start":          "2026-06-01",
+        "period_end":            "2026-06-30",
+    },
+    "ytd": {
+        "projects": [
+            {"project_id": 1, "project_name": "New Capital",
+             "numerator_egp": 120_000_000.00, "denominator_egp": 200_000_000.00,
+             "rate_percent": 60.0, "record_count_num": 1_400, "record_count_den": 2_300},
+            {"project_id": 2, "project_name": "Cassette",
+             "numerator_egp": 80_000_000.00, "denominator_egp": 150_000_000.00,
+             "rate_percent": 53.333333333333336, "record_count_num": 900, "record_count_den": 1_500},
+            {"project_id": 3, "project_name": "La puerta",
+             "numerator_egp": 1_500_000.00, "denominator_egp": 3_000_000.00,
+             "rate_percent": 50.0, "record_count_num": 20, "record_count_den": 40},
+        ],
+        "total_numerator_egp":   201_500_000.00,
+        "total_denominator_egp": 353_000_000.00,
+        "total_rate_percent":    57.082152974504246,
+        "period_start":          "2026-01-01",
+        "period_end":            "2026-06-30",
+    },
+    "ytd_period_assumption": "calendar_year",
+    "currency":              "EGP",
+    "as_of":                 "2026-06-30T10:00:00+00:00",
+    "cache_status":          "fresh",
+    "rpc_duration_ms":       212,
+}
+
+
+# ── Test K5b-8a — 200 + strict key shape (3 levels) ──────────────────────────
+
+
+def test_kpi5b_get_returns_200_and_all_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_by_project",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI5B),
+    ):
+        r = client.get(_URL_KPI5B)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    assert set(body.keys()) == {
+        "mtd", "ytd", "ytd_period_assumption",
+        "currency", "as_of", "cache_status", "rpc_duration_ms",
+    }
+
+    period_keys = {
+        "projects", "total_numerator_egp", "total_denominator_egp",
+        "total_rate_percent", "period_start", "period_end",
+    }
+    project_keys = {
+        "project_id", "project_name", "numerator_egp", "denominator_egp",
+        "rate_percent", "record_count_num", "record_count_den",
+    }
+    for period in ("mtd", "ytd"):
+        assert set(body[period].keys()) == period_keys
+        projects = body[period]["projects"]
+        assert isinstance(projects, list)
+        assert len(projects) == 3
+        assert [p["project_id"] for p in projects] == [1, 2, 3]
+        for proj in projects:
+            assert set(proj.keys()) == project_keys
+
+
+# ── Test K5b-8b — Response headers ───────────────────────────────────────────
+
+
+def test_kpi5b_response_has_cache_control_and_x_cache_status(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_by_project",
+        new=AsyncMock(return_value=_MOCK_DATA_KPI5B),
+    ):
+        r = client.get(_URL_KPI5B)
+
+    assert r.status_code == 200
+    assert "private" in r.headers.get("cache-control", "")
+    assert "max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_kpi5b_x_cache_status_reflects_cached_when_served_from_cache(
+    client: TestClient,
+) -> None:
+    cached_data = {**_MOCK_DATA_KPI5B, "cache_status": "cached", "rpc_duration_ms": 0}
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_by_project",
+        new=AsyncMock(return_value=cached_data),
+    ):
+        r = client.get(_URL_KPI5B)
+
+    assert r.headers.get("x-cache-status") == "cached"
+
+
+# ── Test K5b-8c — 503 on OdooQueryError ──────────────────────────────────────
+
+
+def test_kpi5b_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_by_project",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_KPI5B)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+
+
+# ── Test K5b-8d — 405 on POST ─────────────────────────────────────────────────
+
+
+def test_kpi5b_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_KPI5B)
+    assert r.status_code == 405
+
+
+# ── Test K5b-8e — UnknownProjectError maps to 500 (behavior-pinning) ──────────
+
+
+def test_kpi5b_unknown_project_returns_500_internal_error(client: TestClient) -> None:
+    """Pins CURRENT behavior: UnknownProjectError is NOT a subclass of OdooQueryError
+    (both are siblings under LaVerdeERPError), so the handler's 'except OdooQueryError'
+    does NOT catch it; it falls through to 'except Exception' and maps to 500
+    internal_error. This documents existing behavior as-is — not a desired contract.
+    If KPI 5b is later changed to surface a dedicated status for unknown projects,
+    update this test deliberately.
+    """
+    with patch(
+        "backend.api.v1.endpoints.collections.get_collection_rate_by_project",
+        new=AsyncMock(side_effect=UnknownProjectError("unexpected project_id=99")),
+    ):
+        r = client.get(_URL_KPI5B)
+
+    assert r.status_code == 500
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "internal_error"
+    assert isinstance(body["error"]["message"], str)
+
+
+# ── Test K5b-8f — 401 when unauthenticated ───────────────────────────────────
+
+
+def test_kpi5b_401_when_no_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL_KPI5B)  # no session
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
