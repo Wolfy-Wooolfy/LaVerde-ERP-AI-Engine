@@ -1461,6 +1461,326 @@ def test_drill_project_invalid_id_returns_422_fastapi_validation(client: TestCli
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Drill-down: KPI 6 — Collection Trend, installments due in one month endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_DRILL_TREND = "/api/v1/collections/drilldown/trend/2026-03"
+
+_MOCK_DRILL_TREND = {
+    "version": "1.0",
+    "data": {
+        "month": "2026-03",
+        "items": [
+            {
+                "record_id": 303,
+                "customer_name": "Sara Mahmoud",
+                "project_id": 1,
+                "project_name_ar": "العاصمة الإدارية",
+                "project_name_en": "New Capital",
+                "installment_type_id": 4,
+                "installment_type_name_ar": "قسط",
+                "installment_type_name_en": "Installment",
+                "date": "2026-03-20",
+                "amount": 275_000.00,
+                "due_amount": 175_000.00,
+                "paid_amount": 100_000.00,
+                "actual_paid_amount": 90_000.00,
+                "pending_cheque": 10_000.00,
+                "payment_state": "partial",
+                "late_amount": 185_000.00,
+            },
+        ],
+    },
+    "meta": {
+        "request_id": "mock-req-trend",
+        "as_of": "2026-06-30T10:00:00+00:00",
+        "rpc_duration_ms": 58,
+        "page_size": 50,
+        "total_count": 1,
+        "cursor_current": None,
+        "cursor_next": None,
+        "has_next": False,
+        "filters_applied": {"month": "2026-03", "payment_state": None, "has_pending_cheque": None},
+        "sort_applied": {"sort_by": "due_amount", "sort_dir": "desc"},
+        "data_quality": None,
+    },
+}
+
+
+# ── Test DT-8a — 200 + strict envelope shape ─────────────────────────────────
+
+
+def test_drill_trend_returns_200_and_envelope_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_trend_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_TREND),
+    ):
+        r = client.get(_URL_DRILL_TREND)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    assert set(body.keys()) == {"version", "data", "meta"}
+    assert body["version"] == "1.0"
+
+    assert set(body["meta"].keys()) == _META_KEYS
+    assert isinstance(body["meta"]["filters_applied"], dict)
+    assert isinstance(body["meta"]["sort_applied"], dict)
+
+    assert set(body["data"].keys()) == {"month", "items"}
+    items = body["data"]["items"]
+    assert isinstance(items, list)
+    assert len(items) >= 1
+    assert set(items[0].keys()) == _INSTALLMENT_ROW_KEYS
+
+
+# ── Test DT-8b — X-Request-ID echo-back + no Cache-Control ─────────────────────
+
+
+def test_drill_trend_request_id_echoed_and_no_cache_control(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_trend_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_TREND),
+    ):
+        r = client.get(_URL_DRILL_TREND, headers={"X-Request-ID": "test-rid-trend"})
+
+    assert r.status_code == 200
+    assert r.headers["x-request-id"] == "test-rid-trend"
+    assert "cache-control" not in r.headers
+
+
+# ── Test DT-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_drill_trend_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_trend_drilldown",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_DRILL_TREND)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+    assert r.headers.get("x-request-id")
+
+
+# ── Test DT-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_drill_trend_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_DRILL_TREND)
+    assert r.status_code == 405
+
+
+# ── Test DT-8e — 401 when unauthenticated ────────────────────────────────────
+
+
+def test_drill_trend_401_when_no_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL_DRILL_TREND)  # no session
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
+
+
+# ── Test DT-8f — FastAPI Path-regex 422 on malformed month ───────────────────
+
+
+def test_drill_trend_invalid_format_returns_422_fastapi_validation(client: TestClient) -> None:
+    # "2026-1" has a 1-digit month, so it FAILS the Path regex ^\d{4}-\d{2}$ and
+    # FastAPI rejects it with its own 422 BEFORE the handler runs. No service patch.
+    # NB: the request-id middleware sets X-Request-ID on every response (including
+    # FastAPI-generated 422s), so we do NOT assert anything about that header here.
+    r = client.get("/api/v1/collections/drilldown/trend/2026-1")
+
+    assert r.status_code == 422
+    body = r.json()
+    assert "detail" in body   # FastAPI validation shape
+    assert "error" not in body  # NOT the handler's invalid_param shape
+
+
+# ── Test DT-8g — handler invalid_param 422 on regex-valid bad calendar month ──
+
+
+def test_drill_trend_bad_calendar_month_returns_422_invalid_param(client: TestClient) -> None:
+    # "2026-13" PASSES the Path regex ^\d{4}-\d{2}$ but month 13 is an invalid
+    # calendar month, so the REAL service (no patch) raises ValueError at
+    # date.fromisoformat("2026-13-01") — BEFORE any Odoo call, so this is hermetic —
+    # and the handler's except ValueError branch maps it to 422 invalid_param.
+    r = client.get("/api/v1/collections/drilldown/trend/2026-13")
+
+    assert r.status_code == 422
+    body = r.json()
+    assert body["error"]["code"] == "invalid_param"
+    assert isinstance(body["error"]["message"], str)
+    assert "detail" not in body  # NOT the FastAPI validation shape
+    assert r.headers.get("x-request-id")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Drill-down: KPI 7 v2 — Forecast segment (bucket × segment) endpoint tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+_URL_DRILL_FORECAST = "/api/v1/collections/drilldown/forecast/this_month/cleared"
+
+_FORECAST_SEGMENT_ROW_KEYS = _INSTALLMENT_ROW_KEYS | {
+    "partner_id", "unit_id", "unit_name", "segment", "segment_metric",
+}
+
+_FORECAST_DATA_KEYS = {
+    "bucket", "segment", "period_start", "period_end", "segment_total_egp", "items",
+}
+
+_MOCK_DRILL_FORECAST = {
+    "version": "1.0",
+    "data": {
+        "bucket": "this_month",
+        "segment": "cleared",
+        "period_start": "2026-05-01",
+        "period_end": "2026-05-31",
+        "segment_total_egp": 580_500.00,
+        "items": [
+            {
+                # — InstallmentRow base (16) —
+                "record_id": 404,
+                "customer_name": "Omar Fathy",
+                "project_id": 1,
+                "project_name_ar": "العاصمة الإدارية",
+                "project_name_en": "New Capital",
+                "installment_type_id": 4,
+                "installment_type_name_ar": "قسط",
+                "installment_type_name_en": "Installment",
+                "date": "2026-05-12",
+                "amount": 120_000.00,
+                "due_amount": 0.00,
+                "paid_amount": 120_000.00,
+                "actual_paid_amount": 120_000.00,
+                "pending_cheque": 0.00,
+                "payment_state": "paid",
+                "late_amount": 0.00,
+                # — ForecastSegmentRow extras (5) —
+                "partner_id": 7001,
+                "unit_id": 9001,
+                "unit_name": "Unit#AF208-20-601",
+                "segment": "cleared",
+                "segment_metric": 120_000.00,
+            },
+        ],
+    },
+    "meta": {
+        "request_id": "mock-req-forecast",
+        "as_of": "2026-06-30T10:00:00+00:00",
+        "rpc_duration_ms": 92,
+        "page_size": 50,
+        "total_count": 1,
+        "cursor_current": None,
+        "cursor_next": None,
+        "has_next": False,
+        "filters_applied": {"bucket": "this_month", "segment": "cleared", "installment_type_id": None},
+        "sort_applied": {"sort_by": "date", "sort_dir": "desc"},
+        "data_quality": None,
+    },
+}
+
+
+# ── Test DF-8a — 200 + strict envelope shape (21-field row) ───────────────────
+
+
+def test_drill_forecast_returns_200_and_envelope_shape(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_forecast_segment_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_FORECAST),
+    ):
+        r = client.get(_URL_DRILL_FORECAST)
+
+    assert r.status_code == 200
+    body = r.json()
+
+    assert set(body.keys()) == {"version", "data", "meta"}
+    assert body["version"] == "1.0"
+
+    assert set(body["meta"].keys()) == _META_KEYS
+    assert isinstance(body["meta"]["filters_applied"], dict)
+    assert isinstance(body["meta"]["sort_applied"], dict)
+
+    assert set(body["data"].keys()) == _FORECAST_DATA_KEYS
+    items = body["data"]["items"]
+    assert isinstance(items, list)
+    assert len(items) >= 1
+    assert set(items[0].keys()) == _FORECAST_SEGMENT_ROW_KEYS
+
+
+# ── Test DF-8b — X-Request-ID echo-back + no Cache-Control ─────────────────────
+
+
+def test_drill_forecast_request_id_echoed_and_no_cache_control(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_forecast_segment_drilldown",
+        new=AsyncMock(return_value=_MOCK_DRILL_FORECAST),
+    ):
+        r = client.get(_URL_DRILL_FORECAST, headers={"X-Request-ID": "test-rid-forecast"})
+
+    assert r.status_code == 200
+    assert r.headers["x-request-id"] == "test-rid-forecast"
+    assert "cache-control" not in r.headers
+
+
+# ── Test DF-8c — 503 on OdooQueryError ───────────────────────────────────────
+
+
+def test_drill_forecast_odoo_unavailable_returns_503(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.collections.get_forecast_segment_drilldown",
+        new=AsyncMock(side_effect=OdooQueryError("Odoo is down")),
+    ):
+        r = client.get(_URL_DRILL_FORECAST)
+
+    assert r.status_code == 503
+    body = r.json()
+    assert "error" in body
+    assert body["error"]["code"] == "odoo_unavailable"
+    assert isinstance(body["error"]["message"], str)
+    assert r.headers.get("x-request-id")
+
+
+# ── Test DF-8d — 405 on POST ──────────────────────────────────────────────────
+
+
+def test_drill_forecast_post_returns_405(client: TestClient) -> None:
+    r = client.post(_URL_DRILL_FORECAST)
+    assert r.status_code == 405
+
+
+# ── Test DF-8e — 401 when unauthenticated ────────────────────────────────────
+
+
+def test_drill_forecast_401_when_no_auth() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_URL_DRILL_FORECAST)  # no session
+    assert r.status_code == 401, (
+        f"Expected 401 for unauthenticated Collections request, got {r.status_code}"
+    )
+
+
+# ── Test DF-8f — FastAPI Literal-path 422 on out-of-range bucket ──────────────
+
+
+def test_drill_forecast_invalid_bucket_returns_422_fastapi_validation(client: TestClient) -> None:
+    # bucket is a Literal Path param, so FastAPI rejects "banana" with its own 422
+    # BEFORE the handler runs — the handler's invalid_param branch is therefore
+    # unreachable via HTTP, exactly like project/{id}. No service patch needed.
+    r = client.get("/api/v1/collections/drilldown/forecast/banana/cleared")
+
+    assert r.status_code == 422
+    body = r.json()
+    assert "detail" in body   # FastAPI validation shape
+    assert "error" not in body  # NOT the handler's invalid_param shape
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Auth regression — all Collections endpoints must reject unauthenticated callers
 # ══════════════════════════════════════════════════════════════════════════════
 
