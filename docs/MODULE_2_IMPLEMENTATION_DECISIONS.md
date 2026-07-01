@@ -3746,3 +3746,75 @@ tests + verify-script + this entry — single atomic commit on `main`.
 - **This commit:** adds `get_project_name_map` + constants to `kpi_service.py`,
   the new `test_project_resolver.py`, and this entry — single atomic commit on
   `main`; not pushed, not tagged (Khaled performs pushes/tags).
+
+---
+
+### Decision 25.2 — Stage 2 (2026-07-01): wire `get_project_name_map()` into KPI 5 & KPI 5b; dynamic zero-padding over all active projects; crash-safe unlinked handling; live probe supersedes the stale 6.5M figure
+
+- **Stage / goal:** Second stage of the dynamic-project-resolution refactor.
+  KPI 5 (`get_late_uncollected_by_project`) and KPI 5b
+  (`get_collection_rate_by_project`) now source project display names from the
+  live resolver `get_project_name_map()` (Stage 1, Decision 25.1) instead of the
+  hardcoded `_PROJECT_NAMES`, and render **every active project** (dynamic
+  zero-padding over the resolver map — any count, not a fixed 3).
+- **Resolver wiring:** in BOTH KPIs, `name_map = await get_project_name_map(client=_client)`
+  is the FIRST awaited statement INSIDE the existing `try:` block, before the
+  KPI's own `read_group`(s). Passing `client=_client` **reuses the KPI's own
+  client** (no second Odoo connection; the KPI's `finally` still closes a
+  self-created client). Placing it first keeps the `read_group` as the LAST
+  `execute_kw` call, so tests inspecting `call_args` still see it. Cost is
+  negligible: the resolver is cache-first with a 1h TTL shared across both KPIs
+  (≈ one `search_read`/hour), and each KPI's own 60s cache short-circuits before
+  the resolver on a hit.
+- **Dynamic zero-padding:** the fixed `sorted(_PROJECT_NAMES)` loop becomes
+  `sorted(set(name_map) | set(per_project))` (KPI 5) and
+  `sorted(set(name_map) | set(num_map) | set(den_map))` (KPI 5b) — the union of
+  all active projects and any payload id, id-ascending. Per-project dict key
+  sets are UNCHANGED; only the source of ids/names and the count change.
+- **Crash-safety (defensive):** a falsy `project_id` row is SKIPPED (KPI 5 now
+  matches KPI 5b's long-standing skip); an unmapped id is surfaced with the
+  fallback name `f"Project {id}"`. The `if proj_id not in _PROJECT_NAMES: raise
+  UnknownProjectError(...)` block is REMOVED from BOTH KPIs. The
+  `UnknownProjectError` class and `_PROJECT_NAMES` dict are **kept defined**
+  (now unused by these KPIs) for Stage 4 removal — a comment marks this.
+- **LIVE FINDING — supersedes the stale Decision 14.13 figure (READ THIS before
+  resurrecting 6.5M):** a **2026-07-01 read-only probe** (`search_count` /
+  `search_read` only) against production found **ZERO** `project_id=False`
+  installments in KPI 5's late domain (0 of 2,338), **ZERO** in KPI 5b's MTD
+  denominator (0 of 53) and YTD denominator (0 of 2,471), and **ZERO**
+  portfolio-wide (`[("state","=","post"), ("project_id","=",False)]` → 0).
+  Decision 14.13's **185 rows / 6,500,203 EGP** (May 2026) is therefore **now 0**
+  — the data was backfilled/corrected in Odoo since. This matches Khaled's live
+  UI (grouping Installments by Project shows only the 3 project groups, no
+  "None"). The **reservation money (205 rows / 16.5M EGP)** lives entirely in a
+  SEPARATE model `rs.account.payment.reconcile` (`type=advance_payment`,
+  `unit_id=False`, `project_id=False`) that **neither KPI queries**. **Therefore
+  no visible "No Project" bucket is needed — unlinked-project handling is PURELY
+  DEFENSIVE (crash-safety only).** Do NOT reintroduce a bucket or resurrect the
+  6.5M figure on the basis of the stale Decision 14.13.
+- **Out of scope (unchanged):** `_PROJECT_NAMES` / `UnknownProjectError` class
+  (Stage 4 removes), drill-downs (Stage 3), route-layer `ge=1,le=3` (Stage 4),
+  schemas. The drill-down layer's own `_PROJECT_NAMES_EN/_AR` are untouched.
+- **Tests:** `test_kpi_service.py` mock strategy upgraded to a **model/method-aware
+  dispatch** (`_dispatch_one` / `_dispatch_seq` + `_PROJECT_MASTER_ROWS`) that
+  serves the resolver's `search_read` separately from the KPI `read_group`(s),
+  order-insensitively (so one mock client answers both; `_dispatch_seq` also
+  raises embedded exceptions to preserve the mid-sequence RPC-failure test).
+  Call-count assertions bumped (KPI 5: 1→2; KPI 5b: 4→5). The two
+  `UnknownProjectError` tests were converted to graceful-fallback tests
+  (`test_kpi5_unmapped_project_id_falls_back_gracefully`,
+  `test_kpi5b_unmapped_project_id_falls_back_gracefully`). **3 new tests** added:
+  KPI 5 / KPI 5b dynamic padding beyond 3 (resolver returns 4 projects), and
+  KPI 5 resolver-uses-injected-client (no second connection).
+- **Verification (this session):** Collections unit suite **285 passed, 0 failed,
+  0 skipped** (282 pre-existing + 3 new; the two converted tests renamed, not
+  added). `git diff` confirms the only production changes are the two KPI bodies
+  + the `_PROJECT_NAMES` "now unused" comment — no other function touched. No
+  live Odoo calls in the tests (fully mocked); resolver stays `search_read`-only;
+  `ALLOWED_METHODS` unchanged.
+- **This commit:** edits `kpi_service.py` (KPI 5 + KPI 5b bodies) and
+  `test_kpi_service.py` (dispatch helpers, updated fixtures/counts, converted +
+  new tests), plus this entry — single atomic commit on `main`. **Not pushed,
+  not tagged:** a BROWSER verification gate on the Collections dashboard (KPI 5
+  late-by-project + KPI 5b rate-by-project cards, which now render every active
+  project dynamically) is Khaled's step before pushing.

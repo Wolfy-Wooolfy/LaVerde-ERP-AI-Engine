@@ -58,8 +58,9 @@ _UTC_TZ = ZoneInfo("UTC")
 
 # Phase 2 confirmed project IDs and clean display names (MODULE_2_DISCOVERY_PHASE_2.md §6).
 # Odoo returns "Project#New Capital" etc.; we expose clean names to API consumers.
-# If read_group returns an ID not in this dict, UnknownProjectError is raised — a signal
-# that a new Odoo project has appeared and needs a code update here.
+# Stage 2 (Decision 25.2): KPI 5 and KPI 5b now resolve names dynamically via
+# get_project_name_map(), so this dict — and the UnknownProjectError import — are
+# NO LONGER USED by those KPIs. Kept defined for Stage 4, which removes them.
 _PROJECT_NAMES: dict[int, str] = {
     1: "New Capital",
     2: "Cassette",
@@ -548,8 +549,11 @@ async def get_late_uncollected_by_project(client: Optional[OdooClient] = None) -
     Raises:
         ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated with a write method.
         OdooQueryError: if the Odoo RPC fails for any reason.
-        UnknownProjectError: if read_group returns a project_id not in _PROJECT_NAMES,
-            signalling a new Odoo project that requires a code update.
+
+    Stage 2 (Decision 25.2): project names are resolved live via
+    get_project_name_map(); output covers every active project (dynamic
+    zero-padding), and a falsy/unmapped project_id is handled defensively
+    (skip / f"Project {id}" fallback) rather than raising UnknownProjectError.
     """
     _assert_read_only()
 
@@ -568,6 +572,11 @@ async def get_late_uncollected_by_project(client: Optional[OdooClient] = None) -
 
     t0 = time.monotonic()
     try:
+        # Stage 2: resolve live project names first, reusing THIS KPI's client
+        # (so no second Odoo connection is opened; the finally below still closes
+        # a self-created _client). Placed before the read_group so the read_group
+        # stays the last execute_kw call.
+        name_map = await get_project_name_map(client=_client)
         rows = await _client.execute_kw(
             _MODEL,
             "read_group",
@@ -590,39 +599,43 @@ async def get_late_uncollected_by_project(client: Optional[OdooClient] = None) -
 
     # Build per-project lookup from Odoo response.
     # read_group returns project_id as [id, display_name] for many2one fields.
+    # Stage 2: names come from the live resolver (name_map). Rows with a falsy
+    # project_id are SKIPPED defensively (crash-safe — replaces the former
+    # UnknownProjectError raise). A 2026-07-01 read-only probe found ZERO such
+    # rows in this domain and ZERO portfolio-wide, so this branch is dormant in
+    # practice; see Decision 25.2 (supersedes the stale Decision 14.13 figure).
     per_project: dict[int, dict] = {}
     for row in rows:
         proj_raw = row.get("project_id")
+        if not proj_raw:
+            continue
         if isinstance(proj_raw, (list, tuple)) and len(proj_raw) == 2:
             proj_id = int(proj_raw[0])
         else:
-            proj_id = int(proj_raw) if proj_raw else 0
-
-        if proj_id not in _PROJECT_NAMES:
-            raise UnknownProjectError(
-                f"read_group returned unexpected project_id={proj_id}. "
-                "A new Odoo project has appeared. Add it to _PROJECT_NAMES and re-deploy."
-            )
+            proj_id = int(proj_raw)
 
         per_project[proj_id] = {
             "project_id": proj_id,
-            "project_name": _PROJECT_NAMES[proj_id],
+            "project_name": name_map.get(proj_id, f"Project {proj_id}"),
             "late_uncollected": float(row.get("due_amount") or 0.0),
             "record_count": int(row.get("__count") or 0),
         }
 
-    # Build ordered list with zero-padding for any missing project (Decision 3.4).
+    # Dynamic zero-padding (Decision 3.4, generalised in Stage 2): show EVERY
+    # active project from the resolver map, plus any payload id not in the map,
+    # ordered id-ascending — for any project count, not a fixed 3.
     projects = []
-    for pid in sorted(_PROJECT_NAMES):
+    for pid in sorted(set(name_map) | set(per_project)):
         if pid in per_project:
             projects.append(per_project[pid])
         else:
+            pname = name_map.get(pid, f"Project {pid}")
             logger.info(
-                f"Project {pid} ({_PROJECT_NAMES[pid]}) absent from read_group — zero-padding"
+                f"Project {pid} ({pname}) absent from read_group — zero-padding"
             )
             projects.append({
                 "project_id": pid,
-                "project_name": _PROJECT_NAMES[pid],
+                "project_name": pname,
                 "late_uncollected": 0.0,
                 "record_count": 0,
             })
@@ -1079,7 +1092,11 @@ async def get_collection_rate_by_project(client: Optional[OdooClient] = None) ->
     Raises:
         ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
         OdooQueryError: if any of the 4 Odoo RPCs fails.
-        UnknownProjectError: if read_group returns a project_id not in _PROJECT_NAMES.
+
+    Stage 2 (Decision 25.2): project names are resolved live via
+    get_project_name_map(); output covers every active project (dynamic
+    zero-padding), and a falsy/unmapped project_id is handled defensively
+    rather than raising UnknownProjectError.
     """
     _assert_read_only()
 
@@ -1110,6 +1127,12 @@ async def get_collection_rate_by_project(client: Optional[OdooClient] = None) ->
 
     t0 = time.monotonic()
     try:
+        # Stage 2: resolve live project names first, reusing THIS KPI's client
+        # (no second Odoo connection; the finally below still closes a
+        # self-created _client). Placed before the read_groups so a read_group
+        # stays the last execute_kw call.
+        name_map = await get_project_name_map(client=_client)
+
         # Q1 — MTD numerator per project (HEADER, UTC datetime bounds)
         q1_domain: list = [
             ("state", "=", "post"),
@@ -1178,8 +1201,9 @@ async def get_collection_rate_by_project(client: Optional[OdooClient] = None) ->
     def _parse_rows(rows: list) -> dict[int, tuple[float, int]]:
         """Parse groupby-project_id rows → {project_id: (amount, count)}.
 
-        Skips null project_id rows (project_id=False).
-        Raises UnknownProjectError for IDs absent from _PROJECT_NAMES.
+        Skips null project_id rows (project_id=False) defensively. Stage 2
+        removed the former UnknownProjectError raise; names are resolved later
+        in _build_period from name_map with an f"Project {id}" fallback.
         """
         out: dict[int, tuple[float, int]] = {}
         for row in rows:
@@ -1190,11 +1214,6 @@ async def get_collection_rate_by_project(client: Optional[OdooClient] = None) ->
                 proj_id = int(proj_raw[0])
             else:
                 proj_id = int(proj_raw)
-            if proj_id not in _PROJECT_NAMES:
-                raise UnknownProjectError(
-                    f"KPI 5b read_group returned unexpected project_id={proj_id}. "
-                    "A new Odoo project has appeared. Add it to _PROJECT_NAMES and re-deploy."
-                )
             out[proj_id] = (
                 float(row.get("amount") or 0.0),
                 int(row.get("__count") or 0),
@@ -1207,26 +1226,29 @@ async def get_collection_rate_by_project(client: Optional[OdooClient] = None) ->
         period_start: date,
         period_end: date,
     ) -> dict:
+        # Dynamic zero-padding (Stage 2): every active project from name_map,
+        # plus any payload id not in the map, id-ascending — for any count.
         projects = []
-        for pid in sorted(_PROJECT_NAMES.keys()):
+        for pid in sorted(set(name_map) | set(num_map) | set(den_map)):
+            pname = name_map.get(pid, f"Project {pid}")
             num_amt, num_ct = num_map.get(pid, (0.0, 0))
             den_amt, den_ct = den_map.get(pid, (0.0, 0))
             if pid not in num_map:
                 logger.info(
                     "KPI 5b: project %d (%s) absent from numerator read_group — zero-padded",
-                    pid, _PROJECT_NAMES[pid],
+                    pid, pname,
                 )
             if pid not in den_map:
                 logger.info(
                     "KPI 5b: project %d (%s) absent from denominator read_group — zero-padded",
-                    pid, _PROJECT_NAMES[pid],
+                    pid, pname,
                 )
             rate_val: Optional[float] = (
                 None if den_amt == 0.0 else num_amt / den_amt * 100
             )
             projects.append({
                 "project_id":       pid,
-                "project_name":     _PROJECT_NAMES[pid],
+                "project_name":     pname,
                 "numerator_egp":    num_amt,
                 "denominator_egp":  den_amt,
                 "rate_percent":     rate_val,

@@ -63,6 +63,52 @@ def mock_client() -> MagicMock:
     return client
 
 
+# ── Stage 2 shared mock helpers ──────────────────────────────────────────────
+# After Stage 2, the project KPIs (5 / 5b) call get_project_name_map(), which
+# issues an EXTRA execute_kw(rs.structure.project, "search_read"). These
+# dispatch helpers serve that resolver call separately from the KPI's own
+# read_group(s), so one mock client answers BOTH — order-insensitively (keyed
+# on model+method, not call position).
+_PROJECT_MASTER_ROWS = [
+    {"id": 1, "code": "New Capital"},
+    {"id": 2, "code": "Cassette"},
+    {"id": 3, "code": "La puerta"},
+]
+
+
+def _dispatch_one(read_group_payload, master_rows=None):
+    """execute_kw side_effect for single-read_group KPIs (KPI 5)."""
+    rows = _PROJECT_MASTER_ROWS if master_rows is None else master_rows
+
+    def _se(model, method, *args, **kwargs):
+        if model == "rs.structure.project" and method == "search_read":
+            return rows
+        return read_group_payload
+
+    return _se
+
+
+def _dispatch_seq(read_group_seq, master_rows=None):
+    """execute_kw side_effect for multi-read_group KPIs (KPI 5b).
+
+    Serves the resolver's search_read from master_rows WITHOUT consuming the
+    read_group iterator, so the 4 read_groups still receive Q1..Q4 in order
+    regardless of where the resolver call lands.
+    """
+    rows = _PROJECT_MASTER_ROWS if master_rows is None else master_rows
+    it = iter(read_group_seq)
+
+    def _se(model, method, *args, **kwargs):
+        if model == "rs.structure.project" and method == "search_read":
+            return rows
+        nxt = next(it)
+        if isinstance(nxt, BaseException):
+            raise nxt   # mirrors AsyncMock: an exception in the list is raised
+        return nxt
+
+    return _se
+
+
 # ── Test 1 — Domain construction ─────────────────────────────────────────────
 
 
@@ -456,10 +502,11 @@ async def test_kpi1_clean_allowed_methods_does_not_raise(mock_client_kpi1: Magic
 # KPI 5 — Late Uncollected by Project (get_late_uncollected_by_project)
 # ══════════════════════════════════════════════════════════════════════════════
 
-from backend.core.exceptions import UnknownProjectError
+# Stage 2 removed the UnknownProjectError raises from KPI 5/5b and stopped using
+# _PROJECT_NAMES here (names now come from the mocked resolver rows), so those
+# imports were dropped.
 from backend.modules.collections.services.kpi_service import (
     _CACHE_KEY_PREFIX_KPI5,
-    _PROJECT_NAMES,
     get_late_uncollected_by_project,
 )
 
@@ -477,7 +524,8 @@ _EXPECTED_COUNT = 1472 + 488 + 21  # 1981
 @pytest.fixture
 def mock_client_kpi5() -> MagicMock:
     client = MagicMock()
-    client.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI5)
+    # Stage 2: dispatch serves the resolver search_read + the KPI read_group.
+    client.execute_kw = AsyncMock(side_effect=_dispatch_one(_MOCK_RESPONSE_KPI5))
     return client
 
 
@@ -553,7 +601,7 @@ async def test_kpi5_projects_always_ordered_1_2_3_regardless_of_odoo_order(
         {"project_id": [2, "Project#Cassette"],    "due_amount": 151_019_442.00, "__count": 488},
         {"project_id": [1, "Project#New Capital"], "due_amount": 164_017_258.40, "__count": 1472},
     ]
-    mock_client_kpi5.execute_kw = AsyncMock(return_value=reversed_mock)
+    mock_client_kpi5.execute_kw = AsyncMock(side_effect=_dispatch_one(reversed_mock))
 
     result = await get_late_uncollected_by_project(client=mock_client_kpi5)
 
@@ -584,7 +632,7 @@ async def test_kpi5_zero_pads_missing_project_when_read_group_returns_only_2(
         {"project_id": [1, "Project#New Capital"], "due_amount": 164_017_258.40, "__count": 1472},
         {"project_id": [2, "Project#Cassette"],    "due_amount": 151_019_442.00, "__count": 488},
     ]
-    mock_client_kpi5.execute_kw = AsyncMock(return_value=two_project_mock)
+    mock_client_kpi5.execute_kw = AsyncMock(side_effect=_dispatch_one(two_project_mock))
 
     result = await get_late_uncollected_by_project(client=mock_client_kpi5)
 
@@ -619,7 +667,9 @@ async def test_kpi5_second_call_is_served_from_cache(mock_client_kpi5: MagicMock
     result1 = await get_late_uncollected_by_project(client=mock_client_kpi5)
     result2 = await get_late_uncollected_by_project(client=mock_client_kpi5)
 
-    assert mock_client_kpi5.execute_kw.call_count == 1
+    # Stage 2: first call = resolver search_read + KPI read_group (2); second
+    # call served from the KPI cache (0 further). Total 2.
+    assert mock_client_kpi5.execute_kw.call_count == 2
     assert result1["cache_status"] == "fresh"
     assert result2["cache_status"] == "cached"
     assert result2["rpc_duration_ms"] == 0
@@ -637,7 +687,7 @@ async def test_kpi5_cache_key_does_not_collide_with_kpi1_or_kpi2() -> None:
     mock_k1.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI1)
 
     mock_k5 = MagicMock()
-    mock_k5.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI5)
+    mock_k5.execute_kw = AsyncMock(side_effect=_dispatch_one(_MOCK_RESPONSE_KPI5))
 
     r2 = await get_late_uncollected(client=mock_k2)
     r1 = await get_total_portfolio_value(client=mock_k1)
@@ -655,10 +705,10 @@ async def test_kpi5_cache_key_does_not_collide_with_kpi1_or_kpi2() -> None:
     assert r1b["cache_status"] == "cached"
     assert r5b["cache_status"] == "cached"
 
-    # Each Odoo client called exactly once — no cross-key pollution
+    # No cross-key pollution. KPI5 hits Odoo twice (Stage 2 resolver + read_group).
     assert mock_k2.execute_kw.call_count == 1
     assert mock_k1.execute_kw.call_count == 1
-    assert mock_k5.execute_kw.call_count == 1
+    assert mock_k5.execute_kw.call_count == 2  # Stage 2: resolver search_read + read_group
 
 
 # ── Test K5-9 — RPC failure ───────────────────────────────────────────────────
@@ -704,18 +754,72 @@ async def test_kpi5_clean_allowed_methods_does_not_raise(mock_client_kpi5: Magic
     assert result["total_late_uncollected"] >= 0.0
 
 
-# ── Test K5-extra — Unknown project_id raises UnknownProjectError ─────────────
+# ── Test K5-extra — Unmapped project_id falls back gracefully (no raise) ──────
 
 
-async def test_kpi5_unknown_project_id_raises_unknown_project_error(
+async def test_kpi5_unmapped_project_id_falls_back_gracefully(
     mock_client_kpi5: MagicMock,
 ) -> None:
-    mock_client_kpi5.execute_kw = AsyncMock(return_value=[
+    """Stage 2: a payload project_id absent from the resolver map must NOT raise
+    (was UnknownProjectError). It appears with the f"Project {id}" fallback."""
+    # Resolver returns the 3 active projects (default master rows); the KPI's
+    # read_group payload carries an unmapped id 99.
+    mock_client_kpi5.execute_kw = AsyncMock(side_effect=_dispatch_one([
         {"project_id": [99, "Project#Unknown"], "due_amount": 1_000.00, "__count": 1},
-    ])
+    ]))
 
-    with pytest.raises(UnknownProjectError):
-        await get_late_uncollected_by_project(client=mock_client_kpi5)
+    result = await get_late_uncollected_by_project(client=mock_client_kpi5)
+
+    # 3 active (zero-padded) ∪ the unmapped id 99 = 4 entries, id-ascending.
+    assert [p["project_id"] for p in result["projects"]] == [1, 2, 3, 99]
+    by_id = {p["project_id"]: p for p in result["projects"]}
+    assert by_id[99]["project_name"] == "Project 99"
+    assert by_id[99]["late_uncollected"] == pytest.approx(1_000.00)
+    assert by_id[99]["record_count"] == 1
+    # The 3 active projects are zero-padded (absent from the payload).
+    assert by_id[1]["project_name"] == "New Capital"
+    assert by_id[1]["late_uncollected"] == 0.0
+
+
+# ── Test K5-new — Dynamic padding beyond 3: resolver has 4 active projects ────
+
+
+async def test_kpi5_shows_fourth_active_project_zero_padded(
+    mock_client_kpi5: MagicMock,
+) -> None:
+    """Stage 2: output is driven by the resolver map's size, not a fixed 3.
+    Resolver returns 4 active projects; read_group payload has only 3 → the 4th
+    appears zero-padded."""
+    four_master = _PROJECT_MASTER_ROWS + [{"id": 4, "code": "Sky"}]
+    # read_group payload still only 3 projects (Sky has no late records).
+    mock_client_kpi5.execute_kw = AsyncMock(side_effect=_dispatch_one(
+        _MOCK_RESPONSE_KPI5, master_rows=four_master))
+
+    result = await get_late_uncollected_by_project(client=mock_client_kpi5)
+
+    assert [p["project_id"] for p in result["projects"]] == [1, 2, 3, 4]
+    sky = result["projects"][3]
+    assert sky["project_id"] == 4
+    assert sky["project_name"] == "Sky"
+    assert sky["late_uncollected"] == 0.0
+    assert sky["record_count"] == 0
+
+
+# ── Test K5-new — Resolver reuses the KPI's injected client (no 2nd connection) ─
+
+
+async def test_kpi5_resolver_uses_injected_client(mock_client_kpi5: MagicMock) -> None:
+    """Stage 2: the resolver must run on the KPI's own client — proven by the
+    injected mock receiving a ('rs.structure.project','search_read') call."""
+    await get_late_uncollected_by_project(client=mock_client_kpi5)
+
+    calls = mock_client_kpi5.execute_kw.call_args_list
+    models_methods = [(c.args[0], c.args[1]) for c in calls]
+    assert ("rs.structure.project", "search_read") in models_methods, (
+        f"resolver search_read must run on the injected client; saw {models_methods}"
+    )
+    # And the KPI's own read_group is the LAST call (resolver placed first).
+    assert models_methods[-1] == ("rs.installment", "read_group")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -855,7 +959,7 @@ async def test_kpi3_cache_key_does_not_collide_with_kpi1_kpi2_kpi5() -> None:
     mock_k1.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI1)
 
     mock_k5 = MagicMock()
-    mock_k5.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI5)
+    mock_k5.execute_kw = AsyncMock(side_effect=_dispatch_one(_MOCK_RESPONSE_KPI5))
 
     mock_k3 = MagicMock()
     mock_k3.execute_kw = AsyncMock(return_value=_MOCK_RESPONSE_KPI3)
@@ -880,10 +984,10 @@ async def test_kpi3_cache_key_does_not_collide_with_kpi1_kpi2_kpi5() -> None:
     assert r5b["cache_status"] == "cached"
     assert r3b["cache_status"] == "cached"
 
-    # Each Odoo client called exactly once — no cross-key pollution
+    # No cross-key pollution. KPI5 hits Odoo twice (Stage 2 resolver + read_group).
     assert mock_k2.execute_kw.call_count == 1
     assert mock_k1.execute_kw.call_count == 1
-    assert mock_k5.execute_kw.call_count == 1
+    assert mock_k5.execute_kw.call_count == 2  # Stage 2: resolver search_read + read_group
     assert mock_k3.execute_kw.call_count == 1
 
 
@@ -1918,9 +2022,10 @@ _KPI5B_TODAY = "2026-05-17"
 @pytest.fixture
 def mock_client_kpi5b() -> MagicMock:
     client = MagicMock()
-    client.execute_kw = AsyncMock(side_effect=[
+    # Stage 2: dispatch serves the resolver search_read + the 4 read_groups.
+    client.execute_kw = AsyncMock(side_effect=_dispatch_seq([
         _MOCK_KPI5B_Q1, _MOCK_KPI5B_Q2, _MOCK_KPI5B_Q3, _MOCK_KPI5B_Q4,
-    ])
+    ]))
     return client
 
 
@@ -1932,8 +2037,8 @@ async def test_kpi5b_happy_path_full_shape_and_rates(mock_client_kpi5b: MagicMoc
                return_value=_KPI5B_TODAY):
         result = await get_collection_rate_by_project(client=mock_client_kpi5b)
 
-    # Exactly 4 RPCs on first call
-    assert mock_client_kpi5b.execute_kw.call_count == 4
+    # Stage 2: resolver search_read (1) + 4 read_groups = 5 RPCs on first call
+    assert mock_client_kpi5b.execute_kw.call_count == 5
 
     # Top-level keys
     expected_top = {"mtd", "ytd", "ytd_period_assumption", "currency",
@@ -1990,7 +2095,7 @@ async def test_kpi5b_zero_denominator_returns_none_rate() -> None:
     Zero denominator for all projects → total_rate_percent: None.
     """
     mock = MagicMock()
-    mock.execute_kw = AsyncMock(side_effect=[
+    mock.execute_kw = AsyncMock(side_effect=_dispatch_seq([
         # Q1 MTD num: NC has payments
         [{"project_id": [1, "Project#New Capital"], "amount": 1_000.00, "__count": 1}],
         # Q2 MTD den: all zero — no installments due
@@ -1999,7 +2104,7 @@ async def test_kpi5b_zero_denominator_returns_none_rate() -> None:
         [{"project_id": [1, "Project#New Capital"], "amount": 5_000.00, "__count": 2}],
         # Q4 YTD den: all zero
         [],
-    ])
+    ]))
 
     with patch("backend.modules.collections.services.cache.today_str",
                return_value=_KPI5B_TODAY):
@@ -2027,7 +2132,7 @@ async def test_kpi5b_projects_ordered_1_2_3_regardless_of_odoo_order() -> None:
         {"project_id": [1, "Project#New Capital"], "amount": 100.00, "__count": 1},
     ]
     mock = MagicMock()
-    mock.execute_kw = AsyncMock(side_effect=[reversed_q, reversed_q, reversed_q, reversed_q])
+    mock.execute_kw = AsyncMock(side_effect=_dispatch_seq([reversed_q, reversed_q, reversed_q, reversed_q]))
 
     with patch("backend.modules.collections.services.cache.today_str",
                return_value=_KPI5B_TODAY):
@@ -2050,7 +2155,7 @@ async def test_kpi5b_zero_pads_missing_project() -> None:
         {"project_id": [2, "Project#Cassette"],    "amount":  5_000.00, "__count": 3},
     ]
     mock = MagicMock()
-    mock.execute_kw = AsyncMock(side_effect=[two_projs, two_projs, two_projs, two_projs])
+    mock.execute_kw = AsyncMock(side_effect=_dispatch_seq([two_projs, two_projs, two_projs, two_projs]))
 
     with patch("backend.modules.collections.services.cache.today_str",
                return_value=_KPI5B_TODAY):
@@ -2098,8 +2203,8 @@ async def test_kpi5b_second_call_is_served_from_cache(mock_client_kpi5b: MagicMo
         result1 = await get_collection_rate_by_project(client=mock_client_kpi5b)
         result2 = await get_collection_rate_by_project(client=mock_client_kpi5b)
 
-    assert mock_client_kpi5b.execute_kw.call_count == 4, (
-        "execute_kw must be called exactly 4 times total (first call only)"
+    assert mock_client_kpi5b.execute_kw.call_count == 5, (
+        "Stage 2: resolver search_read (1) + 4 read_groups = 5 total (first call only)"
     )
     assert result1["cache_status"] == "fresh"
     assert result2["cache_status"] == "cached"
@@ -2124,11 +2229,12 @@ async def test_kpi5b_rpc_failure_raises_odoo_query_error() -> None:
 async def test_kpi5b_rpc_failure_mid_sequence_raises_odoo_query_error() -> None:
     """Failure on Q3 (after Q1, Q2 succeed) must also raise OdooQueryError."""
     mock = MagicMock()
-    mock.execute_kw = AsyncMock(side_effect=[
+    # Dispatch serves the resolver separately; the 3rd read_group raises.
+    mock.execute_kw = AsyncMock(side_effect=_dispatch_seq([
         _MOCK_KPI5B_Q1,
         _MOCK_KPI5B_Q2,
         RuntimeError("timeout on Q3"),
-    ])
+    ]))
 
     with patch("backend.modules.collections.services.cache.today_str",
                return_value=_KPI5B_TODAY):
@@ -2179,22 +2285,33 @@ async def test_kpi5b_clean_allowed_methods_does_not_raise(mock_client_kpi5b: Mag
     assert result["mtd"]["total_numerator_egp"] >= 0.0
 
 
-# ── Test K5B-10 — UnknownProjectError for unexpected project_id ───────────────
+# ── Test K5B-10 — Unmapped project_id falls back gracefully (no raise) ────────
 
 
-async def test_kpi5b_unknown_project_id_raises_unknown_project_error() -> None:
+async def test_kpi5b_unmapped_project_id_falls_back_gracefully() -> None:
+    """Stage 2: a payload project_id absent from the resolver map must NOT raise
+    (was UnknownProjectError). It appears with the f"Project {id}" fallback."""
+    # Resolver returns the 3 active projects (default master rows); the MTD
+    # numerator (Q1) carries an unmapped id 99.
     mock = MagicMock()
-    mock.execute_kw = AsyncMock(side_effect=[
+    mock.execute_kw = AsyncMock(side_effect=_dispatch_seq([
         [{"project_id": [99, "Project#Unknown"], "amount": 1_000.00, "__count": 1}],
         _MOCK_KPI5B_Q2,
         _MOCK_KPI5B_Q3,
         _MOCK_KPI5B_Q4,
-    ])
+    ]))
 
     with patch("backend.modules.collections.services.cache.today_str",
                return_value=_KPI5B_TODAY):
-        with pytest.raises(UnknownProjectError):
-            await get_collection_rate_by_project(client=mock)
+        result = await get_collection_rate_by_project(client=mock)
+
+    # id 99 appears in MTD (its numerator payload) with the fallback name.
+    mtd_by_id = {p["project_id"]: p for p in result["mtd"]["projects"]}
+    assert 99 in mtd_by_id, "unmapped id 99 must be surfaced, not dropped"
+    assert mtd_by_id[99]["project_name"] == "Project 99"
+    assert mtd_by_id[99]["numerator_egp"] == pytest.approx(1_000.00)
+    # The 3 active projects are still present.
+    assert {1, 2, 3}.issubset(set(mtd_by_id))
 
 
 # ── Test K5B-extra — project_names use clean display names ────────────────────
@@ -2216,6 +2333,36 @@ async def test_kpi5b_project_names_are_clean_without_project_prefix(
             assert proj["project_name"] in {"New Capital", "Cassette", "La puerta"}, (
                 f"unexpected project_name: {proj['project_name']!r}"
             )
+
+
+# ── Test K5B-new — Dynamic padding beyond 3: resolver has 4 active projects ───
+
+
+async def test_kpi5b_shows_fourth_active_project_zero_padded() -> None:
+    """Stage 2: resolver returns 4 active projects; the read_group payloads have
+    only 3 → both mtd and ytd show 4 projects, the 4th zero-padded (rate None)."""
+    four_master = _PROJECT_MASTER_ROWS + [{"id": 4, "code": "Sky"}]
+    mock = MagicMock()
+    mock.execute_kw = AsyncMock(side_effect=_dispatch_seq(
+        [_MOCK_KPI5B_Q1, _MOCK_KPI5B_Q2, _MOCK_KPI5B_Q3, _MOCK_KPI5B_Q4],
+        master_rows=four_master,
+    ))
+
+    with patch("backend.modules.collections.services.cache.today_str",
+               return_value=_KPI5B_TODAY):
+        result = await get_collection_rate_by_project(client=mock)
+
+    for period in ("mtd", "ytd"):
+        ids = [p["project_id"] for p in result[period]["projects"]]
+        assert ids == [1, 2, 3, 4], f"{period}: expected [1,2,3,4], got {ids}"
+        sky = result[period]["projects"][3]
+        assert sky["project_id"] == 4
+        assert sky["project_name"] == "Sky"
+        assert sky["numerator_egp"] == 0.0
+        assert sky["denominator_egp"] == 0.0
+        assert sky["rate_percent"] is None
+        assert sky["record_count_num"] == 0
+        assert sky["record_count_den"] == 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
