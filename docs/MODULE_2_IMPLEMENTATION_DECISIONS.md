@@ -3818,3 +3818,89 @@ tests + verify-script + this entry — single atomic commit on `main`.
   not tagged:** a BROWSER verification gate on the Collections dashboard (KPI 5
   late-by-project + KPI 5b rate-by-project cards, which now render every active
   project dynamically) is Khaled's step before pushing.
+
+### Decision 25.3 — Stage 3 (2026-07-01): wire `get_project_name_map()` into ALL FIVE Collections drill-downs; `project_name_ar == project_name_en == resolver name`; pid=0 stays "" (defensive); dict definitions left for Stage 4
+
+- **Stage / goal:** Third stage of the dynamic-project-resolution refactor. The
+  drill-down layer (`drilldown_service.py`) now sources project display names from
+  the live resolver `get_project_name_map()` (Stage 1, Decision 25.1) instead of
+  the two hardcoded dicts `_PROJECT_NAMES_AR` / `_PROJECT_NAMES_EN`. All five
+  drill-downs emit resolver names: **late** (KPI 2), **forecast-segment** (KPI 7
+  v2), **portfolio** (KPI 1), **project** (KPI 5), **trend** (KPI 6).
+- **Choke point — `_serialize_row(rec, name_map)`:** the shared row serializer
+  (used by late / forecast-segment / project / trend) gains a **REQUIRED**
+  `name_map` positional parameter. Required (not an optional default) is a
+  deliberate choice: it fails loudly if a future caller forgets to thread the map,
+  rather than silently emitting empty names. `_serialize_forecast_segment_row`
+  gains the same required param and passes it straight through. The 0.3 caller-set
+  proof (this session) confirmed the ONLY callers of these two serializers live in
+  `drilldown_service.py` + `test_drilldowns.py`; the identically-named
+  `_serialize_row` in `customer_accounts/services/refunds_detail_service.py` is a
+  provable name collision (its own module-local `def`, no cross-module import or
+  re-export), so the signature change cannot reach it.
+- **Both fields, one value:** the resolver returns ONE name (English `code`). Both
+  schema fields receive the SAME value —
+  `project_name_ar == project_name_en == resolver name` (e.g. "New Capital" in
+  BOTH). No Arabic translation. In `_serialize_row`:
+  `proj_name = name_map.get(pid, f"Project {pid}") if pid else ""`, assigned to
+  both fields. In `get_portfolio_drilldown` the else-branch collapses to
+  `pid_name_ar = pid_name_en = name_map.get(pid, f"Project {pid}")`. In
+  `get_project_drilldown` the top-level block uses
+  `name_map.get(project_id, f"Project {project_id}")` for both.
+- **Defensive pid=0 (row-level analog of Stage 2's skip):** a falsy `project_id`
+  yields `pid=0`, which maps to **`""` for BOTH fields — never "Project 0"** — so
+  the frontend renders its existing "No Project" fallback. This is the row-context
+  equivalent of Stage 2's "skip the falsy row" (a row can't be skipped here, it
+  must still serialize). A positive unmapped id falls back to `f"Project {id}"`.
+- **Resolver wiring (mirrors Stage 2 exactly):** in each of the five functions,
+  `name_map = await get_project_name_map(client=_client)` is placed INSIDE the
+  existing `try:` as the first resolver call — AFTER any `await
+  _client.authenticate()` and BEFORE the data RPCs / branch. For the
+  forecast-segment drill-down it sits before the pending/cleared branch so BOTH
+  the pending (single `search_read`) and cleared/remaining (gather) paths use it.
+  Passing `client=_client` **reuses the drill-down's own client** (no second Odoo
+  connection; the drill-down's `finally` remains the sole closer). Cache-first, 1h
+  TTL shared with the KPIs — no extra RPC on a warm cache.
+- **Left intact for Stage 4 (unchanged):** the `_PROJECT_NAMES_AR` /
+  `_PROJECT_NAMES_EN` **definitions** (now dead — only their usages were
+  replaced), the `_NO_PROJECT_NAME_AR` / `_NO_PROJECT_NAME_EN` sentinels and the
+  `if not project_raw:` portfolio sentinel branch, `_VALID_PROJECT_IDS` + its
+  `get_project_drilldown` guard, the route-layer `ge=1,le=3` constraints, and
+  `schemas.py` (both name fields stay required `str`; "" is schema-valid). After
+  this commit the ONLY source references to `_PROJECT_NAMES_AR/_EN` are their two
+  definition lines.
+- **User-visible change (expected, consistent with Stage 2):** in **Arabic** UI
+  mode the drill-downs now display the English `code` name (e.g. "New Capital")
+  instead of the former Arabic literal ("نيو كابيتال"), because both fields carry
+  the single resolver value. This is intended, not a regression.
+- **Tests (`test_drilldowns.py`):** added an **autouse `fresh_cache`** fixture
+  (`_cache.clear()` around each test) — the file had none because drill-downs
+  don't cache, but the resolver's 1h cache would otherwise leak across tests and
+  make them order-dependent. Added **local** keyed-dispatch helpers `_dispatch_seq`
+  / `_dispatch_const` (+ `_PROJECT_MASTER_ROWS`) that serve the resolver's
+  `search_read` on `rs.structure.project` separately from each test's own data
+  payload, keyed on `(model, method)` (order-insensitive; NOT cross-imported from
+  `test_kpi_service.py`). The call-extraction helpers (`_domain_from_search_count`,
+  `_order_from_search_read`, new `_data_calls`) are now **model-aware** — they
+  select the `rs.installment` call and skip the resolver's `rs.structure.project`
+  `search_read`, so index/count assertions stay independent of the extra call
+  (portfolio read_group guard and forecast pending "one data RPC" assertions
+  reworded accordingly). The 14 direct `_serialize_row(row)` calls and the one
+  direct `_serialize_forecast_segment_row(rec, "pending")` call pass `{}` for the
+  new required arg. **1 new test** —
+  `test_serialize_row_resolver_names_and_pid_zero_blank` — pins: known id → both
+  fields == resolver value; positive unmapped id → `f"Project {id}"`; falsy
+  `project_id` → `""` for both.
+- **Verification (this session):** Collections unit suite **286 passed, 0 failed,
+  0 skipped** (285 baseline + 1 new). READ-ONLY preserved: the only new RPC is the
+  resolver's `search_read`; `ALLOWED_METHODS` untouched; no live Odoo / LLM calls
+  (fully mocked).
+- **This commit:** edits `drilldown_service.py` (import + two serializer
+  signatures + five resolver call-sites + portfolio else-branch + project
+  top-level), `test_drilldowns.py` (fixture, dispatch + model-aware helpers,
+  converted mocks, reworded assertions, new test), plus this entry — single atomic
+  commit on `main`. **Not pushed, not tagged:** a BROWSER verification gate is
+  Khaled's step before pushing (each affected drill-down should render clean codes
+  — New Capital / Cassette / La Puerta — with no prefix and no "Project {id}"
+  fallback, in BOTH language modes; Arabic mode showing the English code is
+  expected).

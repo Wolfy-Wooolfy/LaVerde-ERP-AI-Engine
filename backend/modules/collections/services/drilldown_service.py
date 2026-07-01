@@ -22,7 +22,7 @@ from loguru import logger
 from backend.core.exceptions import OdooQueryError
 from backend.shared.odoo.client import OdooClient
 from backend.modules.collections.services import cache as _cache
-from backend.modules.collections.services.kpi_service import _compute_period_bounds
+from backend.modules.collections.services.kpi_service import _compute_period_bounds, get_project_name_map
 from backend.modules.collections.installment_type_names import get_type_name_ar, get_type_name_en
 
 _MODEL = "rs.installment"
@@ -113,14 +113,15 @@ def _forecast_segment_clause(segment: str) -> Optional[tuple]:
     return None
 
 
-def _serialize_forecast_segment_row(rec: dict, segment: str) -> dict:
+def _serialize_forecast_segment_row(rec: dict, segment: str, name_map: dict[int, str]) -> dict:
     """Serialize one rs.installment row for a forecast SEGMENT drill-down.
 
     Reuses _serialize_row (so the table component renders identically to the other
     drill-downs) and adds the partner id, the unit reference, and the per-row
-    SEGMENT METRIC.
+    SEGMENT METRIC. name_map (Stage 3, Decision 25.3) is threaded straight through
+    to _serialize_row so project names resolve live.
     """
-    row = _serialize_row(rec)
+    row = _serialize_row(rec, name_map)
     partner = rec.get("partner_id")
     unit    = rec.get("unit_id")
     row["partner_id"] = int(partner[0]) if isinstance(partner, (list, tuple)) and partner else 0
@@ -191,7 +192,7 @@ def _normalize_sort(sort_by: str, sort_dir: str) -> tuple[str, str]:
 
 # ── Row serialization ─────────────────────────────────────────────────────────
 
-def _serialize_row(rec: dict) -> dict:
+def _serialize_row(rec: dict, name_map: dict[int, str]) -> dict:
     partner  = rec.get("partner_id")
     project  = rec.get("project_id")
     inst_typ = rec.get("installment_type_id")
@@ -202,12 +203,18 @@ def _serialize_row(rec: dict) -> dict:
     amount   = float(rec.get("amount") or 0.0)
     actual   = float(rec.get("x_studio_actual_paid_amount") or 0.0)
     paid     = float(rec.get("paid_amount") or 0.0)
+    # Stage 3 (Decision 25.3): project names resolved live via get_project_name_map,
+    # threaded in as name_map. BOTH schema fields get the SAME resolver value (English
+    # `code`; no Arabic translation). pid=0 (unassigned project_id) stays "" — never
+    # "Project 0" — so the frontend renders its "No Project" fallback (row-level analog
+    # of Stage 2's defensive skip). Positive unmapped ids fall back to f"Project {id}".
+    proj_name = name_map.get(pid, f"Project {pid}") if pid else ""
     return {
         "record_id":                int(rec["id"]),
         "customer_name":            (partner[1] if isinstance(partner, (list, tuple)) and partner else ""),
         "project_id":               pid,
-        "project_name_ar":          _PROJECT_NAMES_AR.get(pid, ""),
-        "project_name_en":          _PROJECT_NAMES_EN.get(pid, ""),
+        "project_name_ar":          proj_name,
+        "project_name_en":          proj_name,
         "installment_type_id":      type_id,
         "installment_type_name_ar": get_type_name_ar(type_id),
         "installment_type_name_en": get_type_name_en(type_id),
@@ -313,6 +320,9 @@ async def get_late_drilldown(
     t0 = time.monotonic()
     try:
         await _client.authenticate()  # pre-auth before concurrent RPCs
+        # Stage 3 (Decision 25.3): resolve live project names on THIS drilldown's own
+        # client (mirrors Stage 2). Cache-first — no extra RPC on a warm cache.
+        name_map = await get_project_name_map(client=_client)
         total_count, rows = await asyncio.gather(
             _client.execute_kw(_MODEL, "search_count", args=[base_domain]),
             _client.execute_kw(
@@ -332,7 +342,7 @@ async def get_late_drilldown(
 
     has_next = len(rows) > page_size
     rows = rows[:page_size]
-    items = [_serialize_row(r) for r in rows]
+    items = [_serialize_row(r, name_map) for r in rows]
     next_cur = _next_cursor_from_items(items, sort_by, sort_dir) if has_next else None
 
     return {
@@ -439,6 +449,10 @@ async def get_forecast_segment_drilldown(
     order = _odoo_order(sort_by, sort_dir)
     t0 = time.monotonic()
     try:
+        # Stage 3 (Decision 25.3): resolve live project names first on the shared
+        # client, BEFORE the segment branch, so both the pending (single search_read)
+        # and cleared/remaining (gather) paths use it. Cache-first — no RPC on warm cache.
+        name_map = await get_project_name_map(client=_client)
         if segment == "pending":
             # No native domain — fetch the paid>0 superset and filter/paginate in Python.
             superset = base_domain + [("paid_amount", ">", 0)]
@@ -490,7 +504,7 @@ async def get_forecast_segment_drilldown(
         f"metric {total_metric:,.2f} EGP in {rpc_ms}ms"
     )
 
-    items    = [_serialize_forecast_segment_row(r, segment) for r in page_rows]
+    items    = [_serialize_forecast_segment_row(r, segment, name_map) for r in page_rows]
     has_next = (offset + page_size) < total_count
     next_cur = _encode_cursor({"offset": offset + page_size}) if has_next else None
 
@@ -553,6 +567,10 @@ async def get_portfolio_drilldown(
 
     t0 = time.monotonic()
     try:
+        # Stage 3 (Decision 25.3): resolve live project names on the shared client,
+        # inside the try (client still open) and before the aggregation loop below.
+        # Cache-first — no extra RPC on a warm cache.
+        name_map = await get_project_name_map(client=_client)
         rg_rows = await _client.execute_kw(
             _MODEL,
             "read_group",
@@ -603,8 +621,8 @@ async def get_portfolio_drilldown(
             unassigned_inst_amount += float(row.get("amount") or 0.0)
         else:
             pid         = int(project_raw[0]) if isinstance(project_raw, (list, tuple)) else int(project_raw)
-            pid_name_ar = _PROJECT_NAMES_AR.get(pid, "")
-            pid_name_en = _PROJECT_NAMES_EN.get(pid, f"Project {pid}")
+            # Stage 3 (Decision 25.3): both name fields get the SAME live resolver value.
+            pid_name_ar = pid_name_en = name_map.get(pid, f"Project {pid}")
 
         amount     = float(row.get("amount") or 0.0)
         due_amount = float(row.get("due_amount") or 0.0)
@@ -737,6 +755,9 @@ async def get_project_drilldown(
     t0 = time.monotonic()
     try:
         await _client.authenticate()
+        # Stage 3 (Decision 25.3): resolve live project names on this drilldown's own
+        # client. Cache-first — no extra RPC on a warm cache.
+        name_map = await get_project_name_map(client=_client)
         total_count, agg_rows, rows = await asyncio.gather(
             _client.execute_kw(_MODEL, "search_count", args=[base_domain]),
             _client.execute_kw(
@@ -769,15 +790,17 @@ async def get_project_drilldown(
 
     has_next = len(rows) > page_size
     rows = rows[:page_size]
-    items = [_serialize_row(r) for r in rows]
+    items = [_serialize_row(r, name_map) for r in rows]
     next_cur = _next_cursor_from_items(items, sort_by, sort_dir) if has_next else None
 
     return {
         "version": "1.0",
         "data": {
             "project_id":             project_id,
-            "project_name_ar":        _PROJECT_NAMES_AR.get(project_id, ""),
-            "project_name_en":        _PROJECT_NAMES_EN.get(project_id, ""),
+            # Stage 3 (Decision 25.3): top-level name resolved live; both fields share
+            # the SAME resolver value (positive validated id → f"Project {id}" fallback).
+            "project_name_ar":        name_map.get(project_id, f"Project {project_id}"),
+            "project_name_en":        name_map.get(project_id, f"Project {project_id}"),
             "total_late_uncollected": total_late,
             "total_record_count":     int(total_count or 0),
             "items":                  items,
@@ -871,6 +894,9 @@ async def get_trend_drilldown(
     t0 = time.monotonic()
     try:
         await _client.authenticate()
+        # Stage 3 (Decision 25.3): resolve live project names on this drilldown's own
+        # client. Cache-first — no extra RPC on a warm cache.
+        name_map = await get_project_name_map(client=_client)
         total_count, rows = await asyncio.gather(
             _client.execute_kw(_MODEL, "search_count", args=[base_domain]),
             _client.execute_kw(
@@ -890,7 +916,7 @@ async def get_trend_drilldown(
 
     has_next = len(rows) > page_size
     rows = rows[:page_size]
-    items = [_serialize_row(r) for r in rows]
+    items = [_serialize_row(r, name_map) for r in rows]
     next_cur = _next_cursor_from_items(items, sort_by, sort_dir) if has_next else None
 
     return {
