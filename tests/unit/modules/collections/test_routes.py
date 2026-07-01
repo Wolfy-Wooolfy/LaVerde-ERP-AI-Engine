@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.deps import get_current_user
 from backend.auth.models import UserRecord
-from backend.core.exceptions import OdooQueryError, UnknownProjectError
+from backend.core.exceptions import OdooQueryError, ProjectNotFoundError
 from backend.main import app
 from backend.modules.collections.schemas import (
     ExpectedCollectionsForecastResponse,
@@ -996,30 +996,6 @@ def test_kpi5b_post_returns_405(client: TestClient) -> None:
     assert r.status_code == 405
 
 
-# ── Test K5b-8e — UnknownProjectError maps to 500 (behavior-pinning) ──────────
-
-
-def test_kpi5b_unknown_project_returns_500_internal_error(client: TestClient) -> None:
-    """Pins CURRENT behavior: UnknownProjectError is NOT a subclass of OdooQueryError
-    (both are siblings under LaVerdeERPError), so the handler's 'except OdooQueryError'
-    does NOT catch it; it falls through to 'except Exception' and maps to 500
-    internal_error. This documents existing behavior as-is — not a desired contract.
-    If KPI 5b is later changed to surface a dedicated status for unknown projects,
-    update this test deliberately.
-    """
-    with patch(
-        "backend.api.v1.endpoints.collections.get_collection_rate_by_project",
-        new=AsyncMock(side_effect=UnknownProjectError("unexpected project_id=99")),
-    ):
-        r = client.get(_URL_KPI5B)
-
-    assert r.status_code == 500
-    body = r.json()
-    assert "error" in body
-    assert body["error"]["code"] == "internal_error"
-    assert isinstance(body["error"]["message"], str)
-
-
 # ── Test K5b-8f — 401 when unauthenticated ───────────────────────────────────
 
 
@@ -1310,6 +1286,33 @@ def test_drill_portfolio_401_when_no_auth() -> None:
     )
 
 
+# ── Test DP-8f — ?project_id=99 → 200 empty filter (drilldown-404 vs portfolio-200) ──
+
+
+def test_drill_portfolio_unknown_project_id_returns_200_empty_filter(client: TestClient) -> None:
+    # Stage 4 (Decision 25.4): the portfolio project_id is a PURE optional domain filter
+    # (Query ge=1, no le=3, no 404 handling) — an unknown positive id yields a VALID 200
+    # with empty filtered results, NOT a 404. This pins the deliberate asymmetry:
+    # drilldown/project/99 → 404, but drilldown/portfolio?project_id=99 → 200-empty.
+    empty_portfolio = {
+        **_MOCK_DRILL_PORTFOLIO,
+        "data": {"customers": []},
+        "meta": {**_MOCK_DRILL_PORTFOLIO["meta"], "total_count": 0,
+                 "filters_applied": {"project_id": 99}},
+    }
+    with patch(
+        "backend.api.v1.endpoints.collections.get_portfolio_drilldown",
+        new=AsyncMock(return_value=empty_portfolio),
+    ):
+        r = client.get(_URL_DRILL_PORTFOLIO, params={"project_id": 99})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["data"]["customers"] == []
+    assert body["meta"]["total_count"] == 0
+    assert body["meta"]["filters_applied"]["project_id"] == 99
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Drill-down: KPI 5 — Late Uncollected for one project endpoint tests
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1445,19 +1448,42 @@ def test_drill_project_401_when_no_auth() -> None:
     )
 
 
-# ── Test DPr-8f — FastAPI Path-constraint 422 on out-of-range project_id ──────
+# ── Test DPr-8f — out-of-range LOW id → 422 (Path ge=1 survives le=3 removal) ──
 
 
-def test_drill_project_invalid_id_returns_422_fastapi_validation(client: TestClient) -> None:
-    # project_id is Path(ge=1, le=3), so FastAPI rejects 9 with its own 422
-    # BEFORE the handler runs — the handler's invalid_param branch is therefore
-    # unreachable via HTTP. No service patch needed.
-    r = client.get("/api/v1/collections/drilldown/project/9")
+def test_drill_project_low_id_returns_422_fastapi_validation(client: TestClient) -> None:
+    # Stage 4 (Decision 25.4) dropped le=3 but KEPT ge=1, so a 0/negative id is still
+    # malformed → FastAPI rejects it with its own 422 BEFORE the handler runs. The
+    # malformed-id guard survives; no service patch needed.
+    r = client.get("/api/v1/collections/drilldown/project/0")
 
     assert r.status_code == 422
     body = r.json()
     assert "detail" in body   # FastAPI validation shape
     assert "error" not in body  # NOT the handler's invalid_param shape
+
+
+# ── Test DPr-8g — positive-but-unknown id → 404 project_not_found ─────────────
+
+
+def test_drill_project_unknown_id_returns_404_project_not_found(client: TestClient) -> None:
+    # Stage 4 (Decision 25.4): with le=3 gone, an in-range-but-unknown positive id now
+    # flows to the service, whose resolver map is {1,2,3}; project 99 raises
+    # ProjectNotFoundError → the router's 404 branch (project_not_found) — NOT a 503 and
+    # NOT a 200-empty. Mock the service to raise it, exactly as the 503 test mocks
+    # OdooQueryError (route tests mock the service layer).
+    with patch(
+        "backend.api.v1.endpoints.collections.get_project_drilldown",
+        new=AsyncMock(side_effect=ProjectNotFoundError("Project 99 not found.")),
+    ):
+        r = client.get("/api/v1/collections/drilldown/project/99")
+
+    assert r.status_code == 404
+    body = r.json()
+    assert body["error"]["code"] == "project_not_found"
+    assert isinstance(body["error"]["message"], str)
+    assert "detail" not in body  # NOT the FastAPI validation shape
+    assert r.headers.get("x-request-id")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

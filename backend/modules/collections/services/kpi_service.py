@@ -18,7 +18,7 @@ from typing import Optional
 
 from loguru import logger
 
-from backend.core.exceptions import OdooQueryError, ReadOnlyViolationError, UnknownProjectError
+from backend.core.exceptions import OdooQueryError, ReadOnlyViolationError
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 from backend.modules.collections.services import cache as _cache
 
@@ -56,17 +56,6 @@ _ARABIC_MONTHS: dict[int, str] = {
 _LA_VERDE_TZ = ZoneInfo("Africa/Cairo")
 _UTC_TZ = ZoneInfo("UTC")
 
-# Phase 2 confirmed project IDs and clean display names (MODULE_2_DISCOVERY_PHASE_2.md §6).
-# Odoo returns "Project#New Capital" etc.; we expose clean names to API consumers.
-# Stage 2 (Decision 25.2): KPI 5 and KPI 5b now resolve names dynamically via
-# get_project_name_map(), so this dict — and the UnknownProjectError import — are
-# NO LONGER USED by those KPIs. Kept defined for Stage 4, which removes them.
-_PROJECT_NAMES: dict[int, str] = {
-    1: "New Capital",
-    2: "Cassette",
-    3: "La puerta",
-}
-
 
 def _assert_read_only() -> None:
     """Defense-in-depth: abort if any write method has leaked into ALLOWED_METHODS."""
@@ -82,9 +71,9 @@ def _assert_read_only() -> None:
 # Read-only resolver that sources project display names LIVE from the project
 # master model rs.structure.project, using the clean `code` field (verbatim
 # English names — e.g. "New Capital" — with NO "Project#" prefix that the
-# many2one `name` field carries). This is the future replacement for the
-# hardcoded _PROJECT_NAMES dict above: in a later stage the project-aware KPIs
-# and drill-downs will resolve names through this map instead of the literal.
+# many2one `name` field carries). This is the replacement for the former
+# hardcoded project-name dict: the project-aware KPIs and drill-downs resolve
+# names through this map instead of a literal.
 # It is DEFINED AND TESTED HERE BUT NOT YET WIRED INTO ANY KPI/DRILL-DOWN —
 # Stage 1 only adds it; Stage 2 will adopt it. Placed in kpi_service.py because
 # drilldown_service.py already imports from this module (one-directional), so a
@@ -107,7 +96,7 @@ async def get_project_name_map(client: Optional[OdooClient] = None) -> dict[int,
 
     Stage 1 of the dynamic-project-resolution refactor (DORMANT — not yet wired
     into any KPI/drill-down). Sources clean English project names from the
-    master model's `code` field rather than the hardcoded _PROJECT_NAMES dict.
+    master model's `code` field rather than a hardcoded project-name literal.
 
     Behaviour:
         * Cache-first: returns the cached map without touching Odoo on a hit.

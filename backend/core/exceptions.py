@@ -22,10 +22,11 @@ class StageResolutionError(LaVerdeERPError):
     """Raised when stage names cannot be fetched or resolved from Odoo."""
 
 
-class UnknownProjectError(LaVerdeERPError):
-    """Raised when read_group returns a project_id not in _PROJECT_NAMES."""
-
-
 class InventoryScopeNotFoundError(LaVerdeERPError):
     """Raised when a Projects Inventory drill names a (level, parent_id) scope that
     matches no units — an unknown or stale node. The endpoint maps this to HTTP 404."""
+
+
+class ProjectNotFoundError(LaVerdeERPError):
+    """Raised when a project_id is not present in the live project-name resolver map.
+    The endpoint maps this to HTTP 404."""

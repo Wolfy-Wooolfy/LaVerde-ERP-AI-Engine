@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.api.v1.endpoints.collections import _req_id
+from backend.core.exceptions import ProjectNotFoundError
 from backend.modules.collections.installment_type_names import INSTALLMENT_TYPE_NAMES_EN
 from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.services.drilldown_service import (
@@ -620,11 +621,16 @@ async def test_late_drilldown_sort_by_due_amount_sends_due_amount_order(mc: Magi
 # ── Section 5 — Error / validation (7) ───────────────────────────────────────
 
 
-async def test_project_drilldown_invalid_project_id_raises_value_error(mc: MagicMock) -> None:
-    mc.execute_kw = AsyncMock()
-    with pytest.raises(ValueError, match="Invalid project_id"):
+async def test_project_drilldown_unknown_project_id_raises_project_not_found(mc: MagicMock) -> None:
+    # Stage 4 (Decision 25.4): the _VALID_PROJECT_IDS guard is gone. project_id=99 now
+    # flows to the resolver — served master rows {1,2,3} via the keyed dispatch helper —
+    # and is absent from the resolved map → ProjectNotFoundError. The resolver
+    # legitimately issues its rs.structure.project search_read now, so the old
+    # execute_kw.assert_not_called() is removed. The data-model gather is never reached
+    # (the raise fires first), so the empty seq is intentionally unconsumed.
+    mc.execute_kw = AsyncMock(side_effect=_dispatch_seq([]))
+    with pytest.raises(ProjectNotFoundError):
         await get_project_drilldown(request_id="r", project_id=99, client=mc)
-    mc.execute_kw.assert_not_called()
 
 
 async def test_trend_drilldown_invalid_month_format_raises(mc: MagicMock) -> None:

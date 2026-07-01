@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from backend.api.deps import get_current_user
-from backend.core.exceptions import OdooQueryError
+from backend.core.exceptions import OdooQueryError, ProjectNotFoundError
 from backend.core.limiter import limiter
 from backend.modules.collections.schemas import (
     ExpectedCollectionsForecastResponse,
@@ -58,6 +58,7 @@ from backend.modules.collections.services.kpi_service import (
 # Shared error bodies reused across drill-down endpoints.
 _ERR_503 = {"error": {"code": "odoo_unavailable", "message": "Odoo is unavailable or the query failed. Try again shortly."}}
 _ERR_500 = {"error": {"code": "internal_error", "message": "An unexpected error occurred."}}
+_ERR_404 = {"error": {"code": "project_not_found", "message": "Project not found."}}
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -515,7 +516,7 @@ async def drilldown_portfolio(
     response: Response,
     page_size: int = Query(default=50, ge=1, le=200),
     cursor: Optional[str] = Query(default=None),
-    project_id: Optional[int] = Query(default=None, ge=1, le=3, description="Filter to a specific project (1=New Capital, 2=Cassette, 3=La puerta)"),
+    project_id: Optional[int] = Query(default=None, ge=1, description="Filter to a specific project id; unknown → empty filtered result (no 404)"),
     _user: str = Depends(get_current_user),
 ) -> dict | JSONResponse:
     req_id = _req_id(request)
@@ -546,7 +547,7 @@ async def drilldown_portfolio(
 async def drilldown_project(
     request: Request,
     response: Response,
-    project_id: int = Path(ge=1, le=3, description="1=New Capital, 2=Cassette, 3=La puerta"),
+    project_id: int = Path(ge=1, description="Project id; 0/negative → 422, unknown positive → 404"),
     page_size: int = Query(default=50, ge=1, le=200),
     cursor: Optional[str] = Query(default=None),
     sort_by: Literal["date", "amount", "due_amount"] = Query(default="due_amount"),
@@ -573,6 +574,10 @@ async def drilldown_project(
             content={"error": {"code": "invalid_param", "message": str(exc)}},
             headers={"X-Request-ID": req_id},
         )
+    except ProjectNotFoundError:
+        # Stage 4 (Decision 25.4): positive-but-unknown project_id → 404 (mirrors the
+        # projects_inventory InventoryScopeNotFoundError → 404 pattern).
+        return JSONResponse(status_code=404, content=_ERR_404, headers={"X-Request-ID": req_id})
     except OdooQueryError:
         logger.warning("Drilldown project — Odoo query failed", exc_info=True)
         return JSONResponse(status_code=503, content=_ERR_503, headers={"X-Request-ID": req_id})

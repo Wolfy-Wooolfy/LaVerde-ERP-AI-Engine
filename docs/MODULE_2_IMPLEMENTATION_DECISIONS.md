@@ -3904,3 +3904,99 @@ tests + verify-script + this entry — single atomic commit on `main`.
   — New Capital / Cassette / La Puerta — with no prefix and no "Project {id}"
   fallback, in BOTH language modes; Arabic mode showing the English code is
   expected).
+
+### Decision 25.4 — Stage 4 (2026-07-01, FINAL): delete the four dead project-name symbols; add `ProjectNotFoundError` → HTTP 404 (mirrors `projects_inventory`); relax route `le=3` (keep `ge=1`); pin the drilldown-404 vs portfolio-200-empty asymmetry
+
+- **Stage / goal:** Final stage of the dynamic-project-resolution refactor. With
+  the live resolver `get_project_name_map()` (Decision 25.1) now wired into KPI 5 /
+  KPI 5b (Decision 25.2) and all five drill-downs (Decision 25.3), Stage 4 removes
+  the now-dead hardcoded scaffolding and converts an unknown project id from a
+  confusing outcome into a clean, semantically-correct HTTP 404.
+- **Four deletions:**
+  1. `_PROJECT_NAMES` (`kpi_service.py`) — the English dict; its stale
+     "hardcoded / now unused / kept for Stage 4" comment block went with it, and the
+     two remaining `_PROJECT_NAMES`-by-name references in the resolver
+     preamble/docstring were tidied (no dangling "dict above").
+  2. `_PROJECT_NAMES_AR` + `_PROJECT_NAMES_EN` (`drilldown_service.py`) —
+     definitions only (their usages were already replaced in Stage 3). The
+     `_NO_PROJECT_NAME_AR/_EN` sentinels and the `if not project_raw:` portfolio
+     sentinel branch are **untouched**.
+  3. `_VALID_PROJECT_IDS` frozenset **and** its `get_project_drilldown` guard
+     (`if project_id not in _VALID_PROJECT_IDS: raise ValueError(...)`).
+  4. `UnknownProjectError` (`exceptions.py`) + its unused import in
+     `kpi_service.py`.
+  - **Important nuance the discovery corrected:** `UnknownProjectError` was already
+    fully dead in shipping code since Stage 2 (zero `raise`, zero `except`, nothing
+    subclasses it; its only live reference was one synthetic test mock, K5b-8e). And
+    the deleted `get_project_drilldown` guard raised a **`ValueError`** (→ router 422
+    via the existing `except ValueError`), **not** `UnknownProjectError` — the two
+    were never connected. So deleting the class and deleting the guard are
+    independent cleanups, not a rewire.
+- **New `ProjectNotFoundError(LaVerdeERPError)`:** added parallel to
+  `InventoryScopeNotFoundError`. Net effect vs the old symbol: `UnknownProjectError`
+  out, `ProjectNotFoundError` in. It mirrors the sibling `projects_inventory`
+  precedent exactly: a dedicated service exception, caught in the router and returned
+  as `JSONResponse(status_code=404, content=_ERR_404, headers={"X-Request-ID": …})`
+  with an `{"error": {"code": "project_not_found", "message": …}}` body — the
+  collections router's JSONResponse idiom, NOT FastAPI `HTTPException`.
+- **Where the 404 is raised (Decision D3 — never conflate "absent" with "empty"):**
+  in `get_project_drilldown`, immediately AFTER
+  `name_map = await get_project_name_map(client=_client)`,
+  `if project_id not in name_map: raise ProjectNotFoundError(...)`. "Does not exist"
+  (404) and "exists but has zero late installments" (200 with empty items) are
+  distinct states for this board-facing tool and must never collapse into one.
+- **Ordering fix (the subtle trap):** the resolver call and the new raise sit INSIDE
+  the drill-down's `try:` whose `except Exception as exc: raise OdooQueryError(...)
+  from exc` would otherwise rewrap the `ProjectNotFoundError` into a 503. The fix is
+  an explicit `except ProjectNotFoundError: raise` placed **before** the general
+  `except Exception` — so the 404 propagates cleanly instead of masking as 503. The
+  existing `finally` client-close is preserved.
+- **Router branch (Decision D6 preserved):** `drilldown_project` gains
+  `except ProjectNotFoundError: → 404` placed **before** `except OdooQueryError`. The
+  pre-existing `except ValueError → 422` branch is **kept intact** — it still guards
+  other `ValueError`s (e.g. sort normalization) and is an unrelated exception type,
+  so its position relative to the new 404 branch is immaterial.
+- **Route relaxation (Decision D4):** on BOTH the project drill-down `Path` param and
+  the portfolio filter `Query` param, `le=3` is **dropped** and `ge=1` is **kept**.
+  Rationale (the 422-vs-404 split, matching the `projects_inventory` precedent): a
+  `0`/negative id is **malformed** → FastAPI rejects it with its own **422** before
+  the handler runs; a **positive-but-unknown** id is **not-found** → the service now
+  sees it and raises `ProjectNotFoundError` → **404** (drill-down). Descriptions
+  updated to drop the "1/2/3" enumeration (the id space is no longer fixed at three).
+- **Deliberate asymmetry (Decisions D3 vs D5) — drilldown-404 vs portfolio-200:**
+  the drill-down's `project_id` names a single resource, so an unknown id is a 404.
+  The **portfolio** `project_id` is a **pure optional domain filter**: an unknown id
+  yields a valid **200 with empty filtered results**, not a 404. Portfolio
+  intentionally gets **no** 404 handling and its downstream logic is untouched. Both
+  behaviours are now pinned by route tests (`/project/99` → 404 `project_not_found`;
+  `/portfolio?project_id=99` → 200 empty), alongside `/project/0` → 422.
+- **Tests:** `test_routes.py` — deleted the K5b-8e `UnknownProjectError → 500`
+  behaviour-pin (its subject symbol is gone), swapped the import to
+  `ProjectNotFoundError`, split the old DPr-8f (`/project/9` → 422 via `le=3`) into
+  DPr-8f (`/project/0` → 422 via `ge=1`) + DPr-8g (`/project/99` → 404, service
+  mocked to raise `ProjectNotFoundError`), and added DP-8f
+  (`/portfolio?project_id=99` → 200 empty) to pin the asymmetry.
+  `test_drilldowns.py` — rewrote the service-level test to
+  `test_project_drilldown_unknown_project_id_raises_project_not_found`: the keyed
+  dispatch serves resolver master rows `{1,2,3}`, `project_id=99` is absent →
+  `ProjectNotFoundError`; the `execute_kw.assert_not_called()` assertion was removed
+  (the resolver legitimately issues its `search_read` now). The autouse `fresh_cache`
+  fixture (Stage 3) keeps the resolver cache clean per test.
+- **READ-ONLY invariant — untouched:** no `create`/`write`/`unlink`, no addition to
+  `ALLOWED_METHODS`, no new Odoo call type (the resolver's existing `search_read` is
+  the only project-master RPC). This stage only deletes dead literals, adds an
+  exception class + a 404 branch, and relaxes two route validators — zero new Odoo
+  interaction.
+- **Verification (this session):** Collections unit suite **287 passed, 0 failed,
+  0 skipped** (286 baseline − 1 deleted K5b-8e + 1 DPr split + 1 portfolio
+  asymmetry). No live Odoo / LLM calls (fully mocked). `git grep` confirms
+  `_PROJECT_NAMES` / `_PROJECT_NAMES_AR` / `_PROJECT_NAMES_EN` / `_VALID_PROJECT_IDS`
+  / `UnknownProjectError` no longer appear in any shipping-code definition or usage
+  (only historical comments/docs and the out-of-scope independent `scripts/` literals
+  remain).
+- **This commit:** edits `exceptions.py`, `kpi_service.py`, `drilldown_service.py`,
+  `collections.py`, `test_routes.py`, `test_drilldowns.py`, plus this entry — single
+  atomic commit on `main`. **Not pushed, not tagged:** a BROWSER verification gate is
+  Khaled's step (project 1 still opens with clean names — happy-path regression;
+  `/drilldown/project/99` → 404 JSON `project_not_found`, not 503 and not 200;
+  `/drilldown/project/0` → 422).

@@ -19,7 +19,7 @@ from typing import Optional
 
 from loguru import logger
 
-from backend.core.exceptions import OdooQueryError
+from backend.core.exceptions import OdooQueryError, ProjectNotFoundError
 from backend.shared.odoo.client import OdooClient
 from backend.modules.collections.services import cache as _cache
 from backend.modules.collections.services.kpi_service import _compute_period_bounds, get_project_name_map
@@ -27,17 +27,6 @@ from backend.modules.collections.installment_type_names import get_type_name_ar,
 
 _MODEL = "rs.installment"
 _LA_VERDE_TZ = ZoneInfo("Africa/Cairo")
-
-_PROJECT_NAMES_AR: dict[int, str] = {
-    1: "نيو كابيتال",
-    2: "كاسيت",
-    3: "لا بويرتا",
-}
-_PROJECT_NAMES_EN: dict[int, str] = {
-    1: "New Capital",
-    2: "Cassette",
-    3: "La puerta",
-}
 
 # Decision 14.13: sentinel labels for installments with project_id=False in Odoo.
 _NO_PROJECT_NAME_AR = "بدون مشروع"
@@ -57,7 +46,6 @@ _MAX_PAGE_SIZE = 200
 
 _VALID_SORT_FIELDS = frozenset({"date", "amount", "due_amount"})
 _VALID_SORT_DIRS   = frozenset({"asc", "desc"})
-_VALID_PROJECT_IDS = frozenset({1, 2, 3})
 
 # ── KPI 7 v2 segment-aware forecast drill-down (Session 21 / N5) ─────────────
 # Per-installment rows behind ONE (bucket, segment) of the "Dues & Collections —
@@ -714,12 +702,12 @@ async def get_project_drilldown(
     Optional narrowing: payment_state='unpaid'|'partial', has_pending_cheque=True.
     total_late_uncollected = SUM(due_amount) — identity-equal with KPI 5 (Decision 14.2).
     3 concurrent RPCs: search_count, read_group (SUM due_amount), search_read (page).
-    """
-    if project_id not in _VALID_PROJECT_IDS:
-        raise ValueError(
-            f"Invalid project_id: {project_id}. Must be one of {sorted(_VALID_PROJECT_IDS)}."
-        )
 
+    Stage 4 (Decision 25.4): the former _VALID_PROJECT_IDS guard is gone. A
+    positive-but-unknown project_id is resolved against the live name map and, if
+    absent, raises ProjectNotFoundError (→ HTTP 404) rather than a ValueError-→-422
+    or a misleading 200-with-empty-data.
+    """
     _own_client = client is None
     _client = client or OdooClient()
     assert _client.is_read_only  # Rule R10
@@ -758,6 +746,13 @@ async def get_project_drilldown(
         # Stage 3 (Decision 25.3): resolve live project names on this drilldown's own
         # client. Cache-first — no extra RPC on a warm cache.
         name_map = await get_project_name_map(client=_client)
+        # Stage 4 (Decision 25.4): a positive-but-unknown project_id is a clean 404,
+        # NOT a 200 with empty data — "does not exist" must never be conflated with
+        # "exists but empty" for this board-facing tool. The ProjectNotFoundError
+        # re-raise below MUST precede the general `except Exception`, else this raise
+        # would be rewrapped into an OdooQueryError (503) and the 404 lost.
+        if project_id not in name_map:
+            raise ProjectNotFoundError(f"Project {project_id} not found.")
         total_count, agg_rows, rows = await asyncio.gather(
             _client.execute_kw(_MODEL, "search_count", args=[base_domain]),
             _client.execute_kw(
@@ -771,6 +766,8 @@ async def get_project_drilldown(
                 kwargs={"limit": page_size + 1, "order": order},
             ),
         )
+    except ProjectNotFoundError:
+        raise
     except Exception as exc:
         raise OdooQueryError(
             f"Project drill-down (project_id={project_id}) failed: {exc}"
