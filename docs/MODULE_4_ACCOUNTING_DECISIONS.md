@@ -78,11 +78,12 @@ displayed groups in the live chart (probe 2026-07-05):
 | liability_current | خصوم متداولة |
 | liability_non_current | خصوم غير متداولة |
 | equity | حقوق الملكية |
-| equity_unaffected | نتيجة السنة الحالية |
+| equity_unaffected | أرباح (خسائر) غير موزعة |
 
-`equity_unaffected` deliberately says **"نتيجة"** (result), not "أرباح"
-(profit): the current-year line can be a loss — the label must not presume
-profit.
+`equity_unaffected` mirrors Odoo's own term (Unallocated Earnings) and stays
+direction-neutral via the parenthesized **خسائر** — correct whether the
+balance is accumulated profit or loss (renamed in M4.12; original Phase-1
+wording was "نتيجة السنة الحالية").
 
 The service raises `BalanceSheetIntegrityError` — naming every offending
 value — when:
@@ -175,3 +176,21 @@ no-store` (M4.3). Exactly 2 read-only RPCs per request.
 - Error mapping: `OdooQueryError` → 503 `odoo_unavailable`;
   `BalanceSheetIntegrityError` and any unexpected exception → 500
   `internal_error` (house body shapes; offending values go to the log).
+
+## M4.12 — equity_unaffected label renamed (2026-07-05, Phase 2)
+
+`ACCOUNT_TYPE_LABELS_AR["equity_unaffected"]` renamed:
+
+- **Before (Phase 1):** "نتيجة السنة الحالية"
+- **After:** "أرباح (خسائر) غير موزعة"
+
+Rationale: the new wording matches Odoo's own term for this account type
+(**Unallocated Earnings**), so the board sees the same vocabulary in our
+page and in the Odoo Balance Sheet screen during side-by-side verification.
+It remains direction-neutral — the parenthesized **خسائر** makes it correct
+whether finance confirms the current debit balance as accumulated losses or
+flips it during the opening-balance cleanup. The M4.5 label table above is
+current-state reference and was updated in place (it must never contradict
+the code); this dated entry preserves the history. Value-only change: the
+payload **shape** is untouched (M4.10 contract intact), and the fail-loud
+guard (M4.5) is unaffected.

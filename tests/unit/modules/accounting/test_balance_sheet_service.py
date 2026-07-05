@@ -489,8 +489,9 @@ async def test_rpc_failure_raises_odoo_query_error() -> None:
 
 def test_label_map_covers_all_live_displayed_types() -> None:
     """The 11 account_type values present for asset/liability/equity in the
-    live chart (read-only probe, 2026-07-05) — plus the approved neutral
-    wording for equity_unaffected (can be a loss, never presume profit)."""
+    live chart (read-only probe, 2026-07-05) — plus the approved
+    equity_unaffected wording (M4.12): Odoo's own term (Unallocated
+    Earnings), direction-neutral via the parenthesized خسائر."""
     assert set(ACCOUNT_TYPE_LABELS_AR.keys()) == {
         "asset_receivable", "asset_cash", "asset_current", "asset_prepayments",
         "asset_fixed", "asset_non_current",
@@ -499,7 +500,7 @@ def test_label_map_covers_all_live_displayed_types() -> None:
     }
     for account_type, label in ACCOUNT_TYPE_LABELS_AR.items():
         assert isinstance(label, str) and label.strip(), f"{account_type} has an empty label"
-    assert ACCOUNT_TYPE_LABELS_AR["equity_unaffected"] == "نتيجة السنة الحالية"
+    assert ACCOUNT_TYPE_LABELS_AR["equity_unaffected"] == "أرباح (خسائر) غير موزعة"
 
 
 def test_no_write_methods_in_allowed_methods() -> None:

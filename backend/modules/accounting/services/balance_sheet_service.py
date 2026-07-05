@@ -65,9 +65,9 @@ _RESULT_GROUPS = frozenset({"income", "expense"})
 # Arabic labels per account_type (M4.5 — fail-loud: a displayed account whose
 # type is missing here aborts the request, naming every offending value).
 # Covers every account_type present for asset/liability/equity in the live
-# chart (16-pair read-only probe, 2026-07-05). equity_unaffected wording is
-# deliberately neutral ("نتيجة" not "أرباح") — the current-year line can be
-# a loss.
+# chart (16-pair read-only probe, 2026-07-05). equity_unaffected mirrors
+# Odoo's own term (Unallocated Earnings) and is direction-neutral — the
+# parenthesized خسائر covers a debit (loss) balance (M4.12).
 ACCOUNT_TYPE_LABELS_AR: dict[str, str] = {
     "asset_receivable": "ذمم مدينة",
     "asset_cash": "النقدية وما في حكمها",
@@ -79,7 +79,7 @@ ACCOUNT_TYPE_LABELS_AR: dict[str, str] = {
     "liability_current": "خصوم متداولة",
     "liability_non_current": "خصوم غير متداولة",
     "equity": "حقوق الملكية",
-    "equity_unaffected": "نتيجة السنة الحالية",
+    "equity_unaffected": "أرباح (خسائر) غير موزعة",
 }
 
 # |balance| below this is a rounding artifact at 2 decimals — such accounts
