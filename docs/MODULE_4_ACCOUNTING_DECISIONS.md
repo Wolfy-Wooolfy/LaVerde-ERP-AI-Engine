@@ -158,3 +158,20 @@ rpc_duration_ms         int — house-consistent observability field
 
 No `cache_status` field, no `X-Cache-Status` header, `Cache-Control:
 no-store` (M4.3). Exactly 2 read-only RPCs per request.
+
+## M4.11 — Module registration & access (Commit 2 addendum)
+
+- Router gated at include time in `backend/api/v1/router.py` via
+  `require_module_api("accounting")`; each endpoint also depends on
+  `get_current_user` (401 unauthenticated, 403 without the module key).
+- `"accounting"` added to `_VALID_MODULES` in
+  `backend/api/v1/endpoints/settings.py` so admins can grant it via the
+  Settings API. `scripts/manage_users.py` performs no module-id validation
+  (unchanged).
+- Admin users with `modules=["*"]` (Khaled's `admin`) reach the endpoint with
+  no grant step. No HTML route / sidebar entry this phase: browser
+  verification is the raw JSON at `/api/v1/accounting/balance-sheet` after
+  login.
+- Error mapping: `OdooQueryError` → 503 `odoo_unavailable`;
+  `BalanceSheetIntegrityError` and any unexpected exception → 500
+  `internal_error` (house body shapes; offending values go to the log).

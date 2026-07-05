@@ -4,6 +4,7 @@ from backend.api.deps import require_admin_api, require_module_api
 from backend.api.v1.endpoints import data_quality, followup, health, summary
 from backend.api.v1.endpoints.ai import router as ai_router
 from backend.api.v1.endpoints.chat import router as chat_router
+from backend.api.v1.endpoints.accounting import router as accounting_router
 from backend.api.v1.endpoints.campaign_performance import router as campaign_performance_router
 from backend.api.v1.endpoints.collections import router as collections_router
 from backend.api.v1.endpoints.customer_accounts import router as customer_accounts_router
@@ -63,6 +64,12 @@ api_v1_router.include_router(
 api_v1_router.include_router(
     projects_inventory_router,
     dependencies=[Depends(require_module_api("projects_inventory"))],
+)
+
+# ── accounting ────────────────────────────────────────────────────────────────
+api_v1_router.include_router(
+    accounting_router,
+    dependencies=[Depends(require_module_api("accounting"))],
 )
 
 # ── settings (admin-only) ─────────────────────────────────────────────────────

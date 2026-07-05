@@ -16,7 +16,7 @@ from backend.core.responses import error_response
 
 router = APIRouter(tags=["settings"])
 
-_VALID_MODULES: frozenset[str] = frozenset({"crm", "hr", "collections", "customer_accounts", "marketing_attribution", "campaign_performance", "projects_inventory", "*"})
+_VALID_MODULES: frozenset[str] = frozenset({"crm", "hr", "collections", "customer_accounts", "accounting", "marketing_attribution", "campaign_performance", "projects_inventory", "*"})
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9._@\-]{2,64}$")
 _MIN_PASSWORD_LEN = 8
 
