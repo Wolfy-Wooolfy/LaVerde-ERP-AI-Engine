@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% from "components/_skeleton.html" import kpi_skeleton, table_skeleton %}
+
+{% block title %}{{ _t("bs_title") }} — LaVerde ERP AI Engine{% endblock %}
+
+{% block page_title %}{{ _t("bs_title") }}{% endblock %}
+
+{% block content %}
+<div id="bs-page" x-data="balanceSheetPage()">
+
+  {# ── Page header ─────────────────────────────────────────────────────────── #}
+  <header class="flex items-center justify-between mb-6">
+    <div>
+      <h1 id="bs-page-title"
+          class="text-2xl font-medium text-neutral-900 dark:text-neutral-100">
+        {{ _t("bs_title") }}
+      </h1>
+      <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">
+        {{ _t("bs_currency_note") }}
+      </p>
+    </div>
+    <button id="bs-refresh-btn"
+      @click="load()"
+      :disabled="loading"
+      class="btn btn-secondary btn-sm shrink-0">
+      <svg class="w-3.5 h-3.5" :class="loading && 'animate-spin-slow'"
+           fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      {{ _t("Refresh") }}
+    </button>
+  </header>
+
+  {# ── Error state (message + retry, mirrors the collections error banner) ──── #}
+  <template x-if="error">
+    <div id="bs-error-banner"
+         class="mb-6 flex items-center gap-2 px-4 py-3 rounded-xl
+                bg-danger-50 dark:bg-danger-950/30
+                border border-danger-200 dark:border-danger-800
+                text-sm text-danger-700 dark:text-danger-300">
+      <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+      <span>{{ _t("bs_error") }}</span>
+      <button @click="load()"
+              class="ms-2 underline text-danger-600 dark:text-danger-400 text-xs">
+        {{ _t("bs_try_again") }}
+      </button>
+    </div>
+  </template>
+
+  {# ── Loading skeleton (initial load only — house macros) ──────────────────── #}
+  <div x-show="loading && !data">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {{ kpi_skeleton() }}
+      {{ kpi_skeleton() }}
+      {{ kpi_skeleton() }}
+    </div>
+    <div class="mt-6 rounded-xl border border-neutral-200 dark:border-neutral-800
+                bg-white dark:bg-neutral-900 p-5">
+      {{ table_skeleton(rows=8, cols=3) }}
+    </div>
+  </div>
+
+  <template x-if="data">
+    <div>
+
+      {# ── Data-entry banner (payload banner_ar, collections markup) ────────── #}
+      <div id="bs-data-entry-notice"
+           class="mb-2 flex items-center gap-2 px-4 py-3 rounded-xl
+                  bg-warning-50 dark:bg-warning-950/30
+                  border border-warning-200 dark:border-warning-800
+                  text-sm text-warning-700 dark:text-warning-300">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <span x-text="data.banner_ar"></span>
+      </div>
+
+      {# ── Last-updated line ─────────────────────────────────────────────────── #}
+      <p class="mb-6 text-xs text-neutral-500 dark:text-neutral-400">
+        {{ _t("bs_last_updated") }}
+        <span x-text="fmtGeneratedAt(data.generated_at)"></span>
+      </p>
+
+      {# ── Three summary cards (payload order: assets / liabilities / equity) ── #}
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <template x-for="section in data.sections" :key="section.group">
+          <div class="kpi-card border border-neutral-200 dark:border-neutral-700">
+            <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide"
+               x-text="section.label_ar"></p>
+            <p class="text-2xl lg:text-3xl font-bold tabular mt-2"
+               :class="section.total < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-900 dark:text-neutral-100'">
+              <span dir="ltr" x-text="fmt(section.total)"></span>
+              <span class="text-sm font-medium text-neutral-400 dark:text-neutral-500">{{ _t("bs_egp") }}</span>
+            </p>
+          </div>
+        </template>
+      </div>
+
+      {# ── Detailed statement: section → subgroup (collapsible) → accounts ───── #}
+      <template x-for="section in data.sections" :key="section.group">
+        <section class="mt-6 rounded-xl border border-neutral-200 dark:border-neutral-800
+                        bg-white dark:bg-neutral-900 overflow-hidden">
+
+          {# Section header row #}
+          <header class="flex items-center justify-between px-4 py-3
+                         bg-neutral-50 dark:bg-neutral-800/60
+                         border-b border-neutral-200 dark:border-neutral-800">
+            <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100"
+                x-text="section.label_ar"></h2>
+            <span class="text-sm font-bold tabular"
+                  :class="section.total < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-900 dark:text-neutral-100'"
+                  dir="ltr" x-text="fmt(section.total)"></span>
+          </header>
+
+          {# Subgroups — collapsed by default; click toggles the account rows #}
+          <template x-for="sg in section.subgroups" :key="sg.account_type">
+            <div class="border-b border-neutral-100 dark:border-neutral-800 last:border-b-0">
+              <button @click="toggle(section.group + ':' + sg.account_type)"
+                      class="w-full flex items-center justify-between px-4 py-2.5
+                             hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
+                <span class="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+                  <svg class="w-3.5 h-3.5 shrink-0 text-neutral-400 transition-transform duration-150"
+                       :class="isOpen(section.group + ':' + sg.account_type) ? 'rotate-0' : '-rotate-90 rtl:rotate-90'"
+                       fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                  </svg>
+                  <span x-text="sg.label_ar"></span>
+                </span>
+                <span class="text-sm font-semibold tabular"
+                      :class="sg.total < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-800 dark:text-neutral-200'"
+                      dir="ltr" x-text="fmt(sg.total)"></span>
+              </button>
+
+              {# Account rows: code (LTR, monospace) · name · balance #}
+              <div x-show="isOpen(section.group + ':' + sg.account_type)">
+                <template x-for="acc in sg.accounts" :key="acc.code">
+                  <div class="flex items-center justify-between gap-4 ps-10 pe-4 py-1.5 text-sm
+                              border-t border-neutral-100 dark:border-neutral-800/60">
+                    <span class="flex items-center gap-3 min-w-0">
+                      <span class="font-mono text-xs text-neutral-400 dark:text-neutral-500 shrink-0"
+                            dir="ltr" x-text="acc.code"></span>
+                      <span class="truncate text-neutral-600 dark:text-neutral-400"
+                            x-text="acc.name"></span>
+                    </span>
+                    <span class="tabular shrink-0"
+                          :class="acc.balance < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-800 dark:text-neutral-200'"
+                          dir="ltr" x-text="fmt(acc.balance)"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          {# Equity only: synthetic unallocated-result row + inclusive total.
+             Rendered ONLY when unallocated_result ≠ 0 — invisible today, appears
+             automatically once operational entries start posting (M4.13). #}
+          <template x-if="section.group === 'equity' && data.totals.unallocated_result !== 0">
+            <div>
+              <div class="flex items-center justify-between px-4 py-2.5 text-sm
+                          border-t border-neutral-100 dark:border-neutral-800">
+                <span class="ps-6 text-neutral-700 dark:text-neutral-300">
+                  {{ _t("bs_synth_result_row") }}
+                </span>
+                <span class="tabular"
+                      :class="data.totals.unallocated_result < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-800 dark:text-neutral-200'"
+                      dir="ltr" x-text="fmt(data.totals.unallocated_result)"></span>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3 text-sm font-bold
+                          border-t-2 border-neutral-300 dark:border-neutral-600">
+                <span class="text-neutral-900 dark:text-neutral-100">
+                  {{ _t("bs_equity_incl_result") }}
+                </span>
+                <span class="tabular"
+                      :class="(data.totals.equity + data.totals.unallocated_result) < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-900 dark:text-neutral-100'"
+                      dir="ltr" x-text="fmt(data.totals.equity + data.totals.unallocated_result)"></span>
+              </div>
+            </div>
+          </template>
+
+        </section>
+      </template>
+
+      {# ── Equation footer strip ─────────────────────────────────────────────── #}
+      <div id="bs-equation-strip"
+           class="mt-6 rounded-xl border border-neutral-200 dark:border-neutral-800
+                  bg-white dark:bg-neutral-900 px-4 py-4
+                  flex flex-wrap items-center gap-x-8 gap-y-3">
+        <div>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">{{ _t("bs_eq_assets") }}</p>
+          <p class="text-sm font-semibold tabular mt-0.5"
+             :class="data.totals.assets < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-900 dark:text-neutral-100'">
+            <span dir="ltr" x-text="fmt(data.totals.assets)"></span>
+            <span class="text-xs font-medium text-neutral-400 dark:text-neutral-500">{{ _t("bs_egp") }}</span>
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">{{ _t("bs_eq_rhs") }}</p>
+          <p class="text-sm font-semibold tabular mt-0.5"
+             :class="data.totals.liabilities_plus_equity_plus_result < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-900 dark:text-neutral-100'">
+            <span dir="ltr" x-text="fmt(data.totals.liabilities_plus_equity_plus_result)"></span>
+            <span class="text-xs font-medium text-neutral-400 dark:text-neutral-500">{{ _t("bs_egp") }}</span>
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-neutral-500 dark:text-neutral-400">{{ _t("bs_eq_diff") }}</p>
+          <p class="text-sm font-semibold tabular mt-0.5"
+             :class="data.totals.difference < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-neutral-900 dark:text-neutral-100'">
+            <span dir="ltr" x-text="fmt(data.totals.difference)"></span>
+            <span class="text-xs font-medium text-neutral-400 dark:text-neutral-500">{{ _t("bs_egp") }}</span>
+          </p>
+        </div>
+        <span class="ms-auto">
+          <span x-show="data.totals.balanced" class="badge-success">{{ _t("bs_balanced") }}</span>
+          <span x-show="!data.totals.balanced" class="badge-danger">{{ _t("bs_unbalanced") }}</span>
+        </span>
+      </div>
+
+      {# ── Off-balance note — only when count > 0 (today: 0 → nothing) ───────── #}
+      <template x-if="data.excluded_off_balance && data.excluded_off_balance.count > 0">
+        <p class="mt-3 text-xs text-neutral-400 dark:text-neutral-500">
+          {{ _t("bs_excluded_prefix") }}
+          <span x-text="data.excluded_off_balance.count"></span>
+          {{ _t("bs_excluded_total") }}
+          <span dir="ltr" x-text="fmt(data.excluded_off_balance.total)"></span>
+        </p>
+      </template>
+
+    </div>
+  </template>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/accounting_balance_sheet.js"></script>
+{% endblock %}

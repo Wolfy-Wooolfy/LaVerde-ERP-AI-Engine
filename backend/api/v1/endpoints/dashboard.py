@@ -577,6 +577,26 @@ async def projects_inventory_data_quality(
 
 
 @router.get(
+    "/accounting/balance-sheet",
+    response_class=HTMLResponse,
+    summary="Accounting — Balance Sheet (HTML)",
+    dependencies=[Depends(require_module_html("accounting"))],
+)
+async def accounting_balance_sheet(
+    request: Request,
+    user: str = Depends(get_current_user_html),
+) -> HTMLResponse:
+    # Shell only (Module 4 Phase 2, M4.13): ALL figures arrive client-side
+    # from GET /api/v1/accounting/balance-sheet (live, no-store — M4.3) via
+    # the house crmApi fetch wrapper. This route performs ZERO Odoo calls;
+    # the statement is being edited in place by finance, so nothing here may
+    # cache or precompute a figure.
+    ctx = _base_ctx(request, user)
+    ctx["page"] = "accounting_balance_sheet"
+    return templates.TemplateResponse(request, "accounting/balance_sheet.html", ctx)
+
+
+@router.get(
     "/settings",
     response_class=HTMLResponse,
     summary="Settings — User Management (admin only)",

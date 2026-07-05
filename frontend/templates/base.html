@@ -306,19 +306,22 @@
       </a>
       {% endif %}
 
-      {% if '*' in am %}
-      <!-- Accounting — Coming Soon -->
-      <div class="sidebar-link opacity-40 cursor-not-allowed select-none"
-           title="{{ _t('Coming soon') }}">
+      {% if 'accounting' in am or '*' in am %}
+      <!-- Accounting · Balance Sheet — Active -->
+      <a href="/accounting/balance-sheet"
+        class="sidebar-link {% if page == 'accounting_balance_sheet' %}active{% endif %}"
+        title="{{ _t('bs_title') }}">
         <svg class="sidebar-link-icon shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
         <span x-show="!sidebarCollapsed" class="truncate flex items-center gap-2">
-          Accounting
-          <span class="text-[10px] bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-600 px-1.5 py-0.5 rounded font-medium">Soon</span>
+          {{ _t("nav_balance_sheet") }}
+          <span class="text-[10px] bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-1.5 py-0.5 rounded font-medium">✓</span>
         </span>
-      </div>
+      </a>
+      {% endif %}
 
+      {% if '*' in am %}
       <!-- Project Mgmt — Coming Soon -->
       <div class="sidebar-link opacity-40 cursor-not-allowed select-none"
            title="{{ _t('Coming soon') }}">
@@ -448,6 +451,12 @@
       <a href="/projects-inventory/pricing-outliers" class="sidebar-link {% if page == 'projects_inventory_pricing_outliers' %}active{% endif %}">
         <svg class="sidebar-link-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
         {{ _t("po_title") }}
+      </a>
+      {% endif %}
+      {% if 'accounting' in am or '*' in am %}
+      <a href="/accounting/balance-sheet" class="sidebar-link {% if page == 'accounting_balance_sheet' %}active{% endif %}">
+        <svg class="sidebar-link-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        {{ _t("nav_balance_sheet") }}
       </a>
       {% endif %}
       {% if 'hr' in am or '*' in am %}

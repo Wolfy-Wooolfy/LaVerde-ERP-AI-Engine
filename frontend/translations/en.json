@@ -684,5 +684,22 @@
   "dq_d_note_meter": "For these rows the meter price equals the list price/m² — correct the meter price (or the unit's total price) in Odoo.",
   "dq_d_note_impossible": "Rows flagged “Possible area error” have an extreme list price/m² — almost always a unit-area entry error (e.g. area entered as 1). Check the area first.",
   "dq_d_unevaluable": "priced units could not be evaluated (no comparable peer group or unit-type baseline).",
-  "No data": "No data"
+  "No data": "No data",
+
+  "nav_balance_sheet": "Balance Sheet",
+  "bs_title": "Balance Sheet",
+  "bs_currency_note": "All amounts in Egyptian pounds (EGP)",
+  "bs_egp": "EGP",
+  "bs_last_updated": "Last updated:",
+  "bs_error": "Failed to load the balance sheet",
+  "bs_try_again": "Try again",
+  "bs_eq_assets": "Assets",
+  "bs_eq_rhs": "Liabilities + Equity + Result",
+  "bs_eq_diff": "Difference",
+  "bs_balanced": "Balanced",
+  "bs_unbalanced": "Unbalanced",
+  "bs_synth_result_row": "Current-period result (not yet carried over)",
+  "bs_equity_incl_result": "Total equity including period result",
+  "bs_excluded_prefix": "Off-balance accounts excluded from totals:",
+  "bs_excluded_total": "with a total of"
 }

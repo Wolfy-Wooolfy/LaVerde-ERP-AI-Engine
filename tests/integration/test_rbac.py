@@ -241,6 +241,20 @@ class TestHtmlModuleGating:
         )
         assert r.status_code == 403
 
+    def test_accounting_html_forbidden_for_hr_only(self, hr_only_client):
+        r = hr_only_client.get(
+            "/accounting/balance-sheet", headers={"Accept": "text/html"}
+        )
+        assert r.status_code == 403
+        assert "text/html" in r.headers.get("content-type", "")
+
+    def test_accounting_html_allowed_for_admin(self, authed_client):
+        # Shell route — zero Odoo calls, so a plain 200 assertion is safe
+        # (no environmental skip needed, unlike the Odoo-backed dashboards).
+        r = authed_client.get("/accounting/balance-sheet")
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("content-type", "")
+
     def test_admin_accesses_all_html_modules(self, authed_client):
         for path in [
             "/dashboard",
@@ -248,6 +262,7 @@ class TestHtmlModuleGating:
             "/marketing-attribution/dashboard",
             "/collections/dashboard",
             "/customer-accounts/dashboard",
+            "/accounting/balance-sheet",
         ]:
             try:
                 r = authed_client.get(path)
@@ -302,6 +317,18 @@ class TestSidebarFiltering:
         r = coll_ca_client.get("/collections/dashboard")
         assert r.status_code == 200
         assert 'href="/hr/dashboard"' not in r.text
+
+    def test_admin_sidebar_shows_accounting_link(self, authed_client):
+        # Asserted on the accounting page itself: a shell route with zero
+        # Odoo calls, so no environmental skip is possible here.
+        r = authed_client.get("/accounting/balance-sheet")
+        assert r.status_code == 200
+        assert 'href="/accounting/balance-sheet"' in r.text
+
+    def test_coll_ca_sidebar_hides_accounting_link(self, coll_ca_client):
+        r = coll_ca_client.get("/collections/dashboard")
+        assert r.status_code == 200
+        assert 'href="/accounting/balance-sheet"' not in r.text
 
     def test_admin_sidebar_shows_all_modules(self, authed_client):
         try:

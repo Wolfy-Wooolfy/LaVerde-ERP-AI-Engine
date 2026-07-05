@@ -194,3 +194,58 @@ current-state reference and was updated in place (it must never contradict
 the code); this dated entry preserves the history. Value-only change: the
 payload **shape** is untouched (M4.10 contract intact), and the fail-loud
 guard (M4.5) is unaffected.
+
+## M4.13 — Frontend page + sidebar link (2026-07-05, Phase 2)
+
+`GET /accounting/balance-sheet` (HTML, `require_module_html("accounting")`,
+`page="accounting_balance_sheet"`) renders
+`frontend/templates/accounting/balance_sheet.html`. The route serves the
+**shell only** — zero Odoo calls, zero service calls; every figure arrives
+client-side from the Phase-1 API. Unauthenticated → 302 `/login?next=…`;
+without the module key → 403 (exactly the collections HTML behavior).
+
+- **Fetch pattern (approved recon amendment):** no inline "Alpine fetch"
+  exists anywhere in the house — collections fetches via a vanilla JS module
+  through `window.crmApi`. This page uses the faithful hybrid: an Alpine
+  component `balanceSheetPage()` defined in
+  `frontend/static/js/accounting_balance_sheet.js` (the `crmApp()` /
+  `chatDrawer()` precedent), fetching once on init via
+  `window.crmApi.get()` (same-origin cookie, built-in 503/network retry),
+  rendering the section → subgroup → account tree with `x-for`. The topbar
+  refresh button is rebound to the page's refetch, collections-style.
+- **No cache, no polling:** the statement is edited live by finance and the
+  API is `Cache-Control: no-store` (M4.3) — the page keeps no cache, no
+  local/sessionStorage, no auto-refresh interval; manual refresh only.
+  Every load/refresh refetches by design.
+- **Synthetic equity rows:** when `totals.unallocated_result != 0` the
+  equity section appends a non-expandable row "نتيجة الفترة الحالية (غير
+  مرحّلة)" plus a bold "إجمالي حقوق الملكية شامل نتيجة الفترة" =
+  `equity + unallocated_result` — computed client-side from `totals` only
+  (no payload change). This makes the section foot to Odoo's EQUITY total
+  once operational entries start posting (Odoo folds the period result into
+  Equity — M4.4 presentation note); while the value is 0.00 (today) neither
+  row renders, so the page is clean now and adapts automatically later.
+- **Number formatting (approved):** local formatter — Western digits,
+  thousands separators, exactly 2 decimals
+  (`toLocaleString('en-EG', {min/maximumFractionDigits: 2})`), negatives
+  keep the minus sign. `CollectionsFormatters.formatEGP` is deliberately NOT
+  used: under the `ar` locale it emits Arabic-Indic digits. Currency
+  presentation: "ج.م" (via `_t("bs_egp")`; en: "EGP") on the three summary
+  cards and the equation footer; bare grouped numbers in the detail tree
+  rows (statement style, matching Odoo's own screen); one muted line under
+  the title: "جميع المبالغ بالجنيه المصري (EGP)". `generated_at` renders
+  with Latin digits in both locales (`ar-EG-u-nu-latn` under Arabic).
+- **Sidebar = ONE link:** the desktop "Accounting — Coming Soon" placeholder
+  became the live link in place (position-preserving; gate
+  `'accounting' in am or '*' in am`); the mobile drawer gained the same
+  single link after the projects-inventory links. Nothing else moved —
+  sidebar grouping remains a separately deferred task.
+- **Tailwind rebuild:** `frontend/static/css/app.css` regenerated with the
+  EXISTING `npm run build:css` (house convention — the compiled CSS ships in
+  feature commits; the content scan covers templates + static JS). No build
+  step was added.
+- **Tests:** `tests/unit/modules/accounting/test_html_routes.py` (302 with
+  `next`, 403 without the module, 200 shell + mount markers + Arabic/RTL
+  render, sidebar active-state) and accounting rows in
+  `tests/integration/test_rbac.py` sections B and C — all against Odoo-free
+  pages, so the 4-skip environmental signature cannot grow.
