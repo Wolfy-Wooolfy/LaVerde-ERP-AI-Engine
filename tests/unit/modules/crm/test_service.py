@@ -216,6 +216,87 @@ async def test_missing_salesperson_details_empty_is_clean(mock_client: MagicMock
     assert total == 0
 
 
+# ── contact resolution fallback (DQ detail rows) ─────────────────────────────
+# Order: contact_name → partner_id[1] → partner_name → email_from → "".
+# Live data (2026-07-06): contact_name empty on 74/152 no-stage leads while
+# partner_id is populated on all 152 — without the fallback the UI renders a
+# false "No contact" badge for every one of those rows.
+
+
+def _dq_lead(**overrides: object) -> dict:
+    """Minimal search_read row for the fallback tests; contact fields empty."""
+    base: dict = {
+        "id": 500,
+        "name": "Fallback Opp",
+        "contact_name": False,
+        "partner_id": False,
+        "partner_name": False,
+        "email_from": False,
+        "user_id": [10, "Ahmed"],
+        "team_id": [1, "Alpha"],
+        "stage_id": False,
+        "source_id": False,
+        "create_date": "2026-01-01 00:00:00",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_contact_falls_back_to_partner_display_name(mock_client: MagicMock) -> None:
+    """contact_name=False + partner_id=[id, name] → partner display name (main fix)."""
+    mock_client.execute_kw.side_effect = [
+        [_dq_lead(partner_id=[7, "Acme Ltd"])],
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, _ = await svc.missing_stage_details()
+    assert rows[0].contact_name == "Acme Ltd"
+
+
+async def test_contact_name_wins_over_partner(mock_client: MagicMock) -> None:
+    """A populated contact_name is returned as-is even when partner_id is set."""
+    mock_client.execute_kw.side_effect = [
+        [_dq_lead(contact_name="Real Person", partner_id=[9, "Other Co"])],
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, _ = await svc.missing_stage_details()
+    assert rows[0].contact_name == "Real Person"
+
+
+async def test_contact_falls_back_to_partner_name_text(mock_client: MagicMock) -> None:
+    """contact_name and partner_id both empty → partner_name (text) is used."""
+    mock_client.execute_kw.side_effect = [
+        [_dq_lead(partner_name="Beta Co")],
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, _ = await svc.missing_stage_details()
+    assert rows[0].contact_name == "Beta Co"
+
+
+async def test_contact_falls_back_to_email_last(mock_client: MagicMock) -> None:
+    """All name fields empty → email_from is the last resort."""
+    mock_client.execute_kw.side_effect = [
+        [_dq_lead(email_from="lead@example.com")],
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, _ = await svc.missing_stage_details()
+    assert rows[0].contact_name == "lead@example.com"
+
+
+async def test_contact_all_sources_empty_is_blank(mock_client: MagicMock) -> None:
+    """Genuinely contactless row → "" (the UI badge remains correct for these)."""
+    mock_client.execute_kw.side_effect = [
+        [_dq_lead()],
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, _ = await svc.missing_stage_details()
+    assert rows[0].contact_name == ""
+
+
 async def test_data_quality_summary_counts_use_list_domains(mock_client: MagicMock) -> None:
     """Card counts and detail lists must share the exact same domains (N4 identity rule)."""
     mock_client.execute_kw.return_value = [{"__count": 0}]

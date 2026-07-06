@@ -378,6 +378,9 @@ class CrmService:
                         "id",
                         "name",
                         "contact_name",
+                        "partner_id",
+                        "partner_name",
+                        "email_from",
                         "user_id",
                         "team_id",
                         "stage_id",
@@ -405,11 +408,29 @@ class CrmService:
             team = row.get("team_id")
             stage = row.get("stage_id")
             source = row.get("source_id")
+            # Contact resolution order: contact_name (free text) → partner_id
+            # display name (the authoritative linked contact Odoo shows on the
+            # lead form) → partner_name (text) → email_from → "".  contact_name
+            # alone is empty on ~half the DQ rows while partner_id is populated,
+            # so without the fallback the UI shows a false "No contact" badge.
+            partner = row.get("partner_id")
+            partner_display = (
+                partner[1]
+                if isinstance(partner, (list, tuple)) and len(partner) >= 2
+                else ""
+            )
+            contact = (
+                row.get("contact_name")
+                or partner_display
+                or row.get("partner_name")
+                or row.get("email_from")
+                or ""
+            )
             result.append(
                 MissingContactRow(
                     lead_id=row["id"],
                     opportunity_name=row.get("name") or "",
-                    contact_name=row.get("contact_name") or "",
+                    contact_name=contact,
                     salesperson_id=user[0] if user else None,
                     salesperson_name=user[1] if user else "Unassigned",
                     team_id=team[0] if team else None,
