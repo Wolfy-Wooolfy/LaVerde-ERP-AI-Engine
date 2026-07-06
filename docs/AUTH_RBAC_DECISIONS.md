@@ -126,10 +126,13 @@ removed in Commit 2. Both `/login` and `/logout` are standalone HTML routes (not
 
 ### A2.D5 — SESSION_SECRET Handling
 
-`SESSION_SECRET: str = ""` in `Settings`. Empty string allowed in `development`/`staging`
-with a logger.warning (dev default passed to middleware). Required + ≥ 32 chars in
-`production` — fail-fast at `Settings` instantiation so the process never starts.
+`SESSION_SECRET: str = ""` in `Settings`. Required + ≥ 32 chars in **every**
+environment — fail-fast at `Settings` instantiation so the process never starts with
+a missing or weak secret. (Amended 2026-07-06 — see H.D1. The original A2 decision
+allowed an empty value outside `production` with a logger.warning and an insecure
+constant fallback in the middleware call; both are removed.)
 Never committed; `.env.example` has an empty placeholder with a generation command.
+The session cookie is named `laverde_session` (H.D1), not Starlette's default `session`.
 
 ### A2.D6 — Basic Auth Retirement
 
@@ -350,3 +353,45 @@ Violation → 422 `INVALID_USERNAME`.
 message, details=None) -> JSONResponse`. Imported by `main.py` (via private `_error_response`
 wrapper that delegates to it) and directly by `settings.py`. Eliminates the circular-import
 risk of importing the private `_error_response` from `main.py` into `settings.py`.
+
+---
+
+## H — Pre-Launch Deployment Hardening
+
+**Item 1 implemented:** 2026-07-06 (session secret). Items 2–4 — default admin
+password, /docs exposure in prod, CORS_ORIGINS lockdown — are later phases.
+
+### H.D1 — SESSION_SECRET fail-loud everywhere + dedicated cookie name (2026-07-06)
+
+**Diagnostic verdict that preceded this change.** A live browser test (login →
+restart via `scripts/start_server.bat` → hard refresh) proved server restarts do
+NOT invalidate sessions. The reported everyone-logged-out symptom was natural
+`max_age=28800` idle expiry — the last login was ~3 days before the logout — that
+happened to coincide with a restart. No signing bug existed; the hypothesis of a
+per-process regenerated secret was refuted (the secret loads from `.env` via
+pydantic-settings and no code path generates one). This change is pure hardening.
+
+**Changes:**
+- `backend/core/config.py` — `validate_session_secret` raises `ValueError` in ALL
+  environments when `SESSION_SECRET` is empty or < 32 chars (A2.D5 originally
+  allowed empty outside production). Generation hint kept in the error message.
+- `backend/main.py` — `SessionMiddleware(secret_key=settings.SESSION_SECRET)`;
+  the `or "dev-insecure-change-me-in-env"` fallback is removed (the server binds
+  `0.0.0.0`, so the publicly-known constant was LAN-forgeable in dev). Cookie
+  renamed `session` → `laverde_session`: Starlette's default name is shared by
+  every localhost app (cookies are host-scoped, not port-scoped), and the
+  distinct name makes ours identifiable in devtools.
+- `scripts/manage_users.py` — CLI import placeholder lengthened to ≥ 32 chars
+  (the old 31-char value would fail the new validator).
+- `.env` untouched; the existing valid secret was NOT rotated.
+
+**One-time effect:** the cookie rename forces exactly one re-login per browser;
+after that, restarts provably keep sessions alive. `max_age` stays 28800 (8 h) —
+deliberate for a board tool. Cookie params after this change: name
+`laverde_session`, HttpOnly, `SameSite=lax`, `max_age=28800`, `Secure` iff
+production (A2.D2 otherwise unchanged).
+
+**Tests:** `test_development_allows_empty_session_secret` flipped to three cases
+(empty → raises; < 32 → raises; ≥ 32 → passes); the cookie-name assertion in
+`tests/unit/auth/test_auth_routes.py` updated to `laverde_session`. Gate:
+1524 passed / 4 skipped / 29 deselected (baseline 1522 @ 98f49e7 + 2 net-new).
