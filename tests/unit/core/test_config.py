@@ -101,8 +101,23 @@ def test_production_accepts_session_secret_32_chars() -> None:
     assert s.SESSION_SECRET == secret
 
 
-def test_development_allows_empty_session_secret() -> None:
+def test_development_raises_when_session_secret_empty() -> None:
     from backend.core.config import Settings
 
-    s = Settings(**_BASE_SETTINGS, ENVIRONMENT="development", SESSION_SECRET="")
-    assert s.SESSION_SECRET == ""
+    with pytest.raises(ValidationError):
+        Settings(**_BASE_SETTINGS, ENVIRONMENT="development", SESSION_SECRET="")
+
+
+def test_development_raises_when_session_secret_too_short() -> None:
+    from backend.core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(**_BASE_SETTINGS, ENVIRONMENT="development", SESSION_SECRET="tooshort")
+
+
+def test_development_accepts_session_secret_32_chars() -> None:
+    from backend.core.config import Settings
+
+    secret = "a" * 32
+    s = Settings(**_BASE_SETTINGS, ENVIRONMENT="development", SESSION_SECRET=secret)
+    assert s.SESSION_SECRET == secret

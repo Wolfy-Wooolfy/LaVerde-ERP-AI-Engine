@@ -124,7 +124,7 @@ def test_post_login_sets_session_cookie() -> None:
             data={"username": "testadmin", "password": "testpass", "next": "/dashboard"},
         )
     assert r.status_code == 303
-    assert "session" in r.cookies
+    assert "laverde_session" in r.cookies
 
 
 # ── Test 9 — GET /logout → 303 to /login ────────────────────────────────────

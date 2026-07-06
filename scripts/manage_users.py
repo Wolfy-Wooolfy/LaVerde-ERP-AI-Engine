@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 os.environ.setdefault("USER_DB_PATH", "data/users.db")
-os.environ.setdefault("SESSION_SECRET", "dev-placeholder-not-used-by-cli")
+os.environ.setdefault("SESSION_SECRET", "cli-import-placeholder-not-a-real-secret")
 
 from backend.auth.password import hash_password
 from backend.auth.repository import SQLiteUserRepository

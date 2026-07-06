@@ -118,19 +118,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_session_secret(self) -> "Settings":
-        if self.ENVIRONMENT == "production":
-            if not self.SESSION_SECRET:
-                raise ValueError(
-                    "SESSION_SECRET is required in production. "
-                    "Generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
-                )
-            if len(self.SESSION_SECRET) < 32:
-                raise ValueError("SESSION_SECRET must be at least 32 characters in production.")
-        elif not self.SESSION_SECRET:
-            logger.warning(
-                "SESSION_SECRET is not set — sessions will use an insecure dev default. "
-                "Set SESSION_SECRET in .env before deploying."
+        # Fail-loud in EVERY environment (hardening 2026-07-06): the server binds
+        # 0.0.0.0, so a guessable session-signing key is LAN-forgeable even in dev.
+        if not self.SESSION_SECRET:
+            raise ValueError(
+                "SESSION_SECRET is required. "
+                "Generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
+        if len(self.SESSION_SECRET) < 32:
+            raise ValueError("SESSION_SECRET must be at least 32 characters.")
         return self
 
     @model_validator(mode="after")

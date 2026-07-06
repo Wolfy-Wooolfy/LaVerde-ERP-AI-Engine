@@ -171,7 +171,8 @@ app.add_middleware(
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=settings.SESSION_SECRET or "dev-insecure-change-me-in-env",
+    secret_key=settings.SESSION_SECRET,  # validated non-empty ≥32 chars at Settings init
+    session_cookie="laverde_session",  # distinct name: "session" is shared by every localhost app
     max_age=settings.SESSION_COOKIE_MAX_AGE,
     https_only=(settings.ENVIRONMENT == "production"),
     same_site="lax",
