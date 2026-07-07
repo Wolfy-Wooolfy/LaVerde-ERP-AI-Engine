@@ -81,6 +81,7 @@ def override_crm_service() -> None:
     mock_svc.missing_contact_response = AsyncMock(return_value=_build_mock_paginated())
     mock_svc.missing_stage_response = AsyncMock(return_value=_build_mock_paginated())
     mock_svc.missing_salesperson_response = AsyncMock(return_value=_build_mock_paginated())
+    mock_svc.missing_linked_contact_response = AsyncMock(return_value=_build_mock_paginated())
     app.dependency_overrides[get_crm_service] = lambda: mock_svc
     yield
     app.dependency_overrides.clear()
@@ -220,6 +221,32 @@ def test_missing_salesperson_pagination_params(authed_client: TestClient) -> Non
 
 def test_missing_salesperson_invalid_page_size(authed_client: TestClient) -> None:
     r = authed_client.get("/api/v1/data-quality/missing-salesperson?page_size=999")
+    assert r.status_code == 422  # Pydantic validation
+
+
+# ── /api/v1/data-quality/missing-linked-contact (paginated, hub Tab 1) ───────
+
+
+def test_missing_linked_contact_requires_auth(client: TestClient) -> None:
+    r = client.get("/api/v1/data-quality/missing-linked-contact")
+    assert r.status_code == 401
+
+
+def test_missing_linked_contact_with_auth(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-linked-contact")
+    assert r.status_code == 200
+    body = r.json()
+    assert "data" in body
+    assert "pagination" in body
+
+
+def test_missing_linked_contact_pagination_params(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-linked-contact?page=2&page_size=25")
+    assert r.status_code == 200
+
+
+def test_missing_linked_contact_invalid_page_size(authed_client: TestClient) -> None:
+    r = authed_client.get("/api/v1/data-quality/missing-linked-contact?page_size=999")
     assert r.status_code == 422  # Pydantic validation
 
 
