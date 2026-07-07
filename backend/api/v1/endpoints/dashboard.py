@@ -612,151 +612,94 @@ async def settings_page(
     return templates.TemplateResponse(request, "settings.html", ctx)
 
 
+# ── Data Quality hub ──────────────────────────────────────────────────────────
+
+# The four hub tabs are independent lists (tiny cross-tab overlap), each fetched in
+# full and rendered server-side — no pagination (see build brief). _DQ_HUB_LIMIT is
+# a safety cap well above today's largest list (~456); the true __count is always the
+# headline, and the template's "showing first N of M" note discloses truncation if it
+# ever fires — so a tab's headline stays the true domain count (N4) regardless.
+_DQ_HUB_TABS = ("linked-contact", "phone", "stage", "salesperson")
+_DQ_HUB_LIMIT = 1000
+
+
 @router.get(
-    "/data-quality/missing-contact",
+    "/data-quality",
     response_class=HTMLResponse,
-    summary="Missing contact details page (HTML)",
+    summary="Data Quality hub — 4 tabs (HTML)",
     dependencies=[Depends(require_module_html("crm"))],
 )
-async def missing_contact_page(
+async def data_quality_hub(
     request: Request,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-    team_id: int | None = Query(None),
-    salesperson_id: int | None = Query(None),
-    sort: str = Query("create_date desc"),
+    tab: str = Query("linked-contact"),
     user: str = Depends(get_current_user_html),
     service: CrmService = Depends(get_crm_service),
 ) -> HTMLResponse:
-    rows, total = await service.missing_contact_details(
-        page=page,
-        page_size=page_size,
-        team_id=team_id,
-        salesperson_id=salesperson_id,
-        sort=sort,
-    )
-    from math import ceil
+    # Read-only: fetch the four DQ detail lists concurrently. Each list uses its
+    # VERBATIM card domain, so every tab's headline __count == its list by
+    # construction (N4). ?tab= selects the initial tab (validated; default Tab 1).
+    initial_tab = tab if tab in _DQ_HUB_TABS else "linked-contact"
 
-    pag = {
-        "page": page,
-        "page_size": page_size,
-        "total": total,
-        "total_pages": max(1, ceil(total / page_size)),
-        "has_prev": page > 1,
-        "has_next": page * page_size < total,
-    }
+    (
+        (linked_rows, linked_total),
+        (phone_rows, phone_total),
+        (stage_rows, stage_total),
+        (sp_rows, sp_total),
+    ) = await asyncio.gather(
+        service.missing_linked_contact_details(page=1, page_size=_DQ_HUB_LIMIT),
+        service.missing_contact_details(page=1, page_size=_DQ_HUB_LIMIT),
+        service.missing_stage_details(page=1, page_size=_DQ_HUB_LIMIT),
+        service.missing_salesperson_details(page=1, page_size=_DQ_HUB_LIMIT),
+    )
+
     ctx = _base_ctx(request, user)
     ctx.update(
         {
-            "page": "missing_contact",
-            "rows": rows,
-            "pag": pag,
+            "page": "data_quality",
+            "initial_tab": initial_tab,
             "odoo_url": settings.ODOO_URL.rstrip("/"),
-            "filters": {
-                "team_id": team_id,
-                "salesperson_id": salesperson_id,
-                "sort": sort,
+            "dq": {
+                "linked_contact": {"rows": linked_rows, "total": linked_total},
+                "phone": {"rows": phone_rows, "total": phone_total},
+                "stage": {"rows": stage_rows, "total": stage_total},
+                "salesperson": {"rows": sp_rows, "total": sp_total},
             },
         }
     )
-    return templates.TemplateResponse(request, "missing_contact.html", ctx)
+    return templates.TemplateResponse(request, "data_quality.html", ctx)
+
+
+# ── Legacy DQ detail routes → 302 redirect to the hub tabs (still crm-gated) ──
+
+
+@router.get(
+    "/data-quality/missing-contact",
+    include_in_schema=False,
+    dependencies=[Depends(require_module_html("crm"))],
+)
+async def missing_contact_redirect(
+    user: str = Depends(get_current_user_html),
+) -> RedirectResponse:
+    return RedirectResponse("/data-quality?tab=phone", status_code=302)
 
 
 @router.get(
     "/data-quality/missing-stage",
-    response_class=HTMLResponse,
-    summary="Missing stage details page (HTML)",
+    include_in_schema=False,
     dependencies=[Depends(require_module_html("crm"))],
 )
-async def missing_stage_page(
-    request: Request,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-    team_id: int | None = Query(None),
-    salesperson_id: int | None = Query(None),
-    sort: str = Query("create_date desc"),
+async def missing_stage_redirect(
     user: str = Depends(get_current_user_html),
-    service: CrmService = Depends(get_crm_service),
-) -> HTMLResponse:
-    rows, total = await service.missing_stage_details(
-        page=page,
-        page_size=page_size,
-        team_id=team_id,
-        salesperson_id=salesperson_id,
-        sort=sort,
-    )
-    from math import ceil
-
-    pag = {
-        "page": page,
-        "page_size": page_size,
-        "total": total,
-        "total_pages": max(1, ceil(total / page_size)),
-        "has_prev": page > 1,
-        "has_next": page * page_size < total,
-    }
-    ctx = _base_ctx(request, user)
-    ctx.update(
-        {
-            "page": "missing_stage",
-            "rows": rows,
-            "pag": pag,
-            "odoo_url": settings.ODOO_URL.rstrip("/"),
-            "filters": {
-                "team_id": team_id,
-                "salesperson_id": salesperson_id,
-                "sort": sort,
-            },
-        }
-    )
-    return templates.TemplateResponse(request, "missing_stage.html", ctx)
+) -> RedirectResponse:
+    return RedirectResponse("/data-quality?tab=stage", status_code=302)
 
 
 @router.get(
     "/data-quality/missing-salesperson",
-    response_class=HTMLResponse,
-    summary="Missing salesperson details page (HTML)",
+    include_in_schema=False,
     dependencies=[Depends(require_module_html("crm"))],
 )
-async def missing_salesperson_page(
-    request: Request,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-    team_id: int | None = Query(None),
-    salesperson_id: int | None = Query(None),
-    sort: str = Query("create_date desc"),
+async def missing_salesperson_redirect(
     user: str = Depends(get_current_user_html),
-    service: CrmService = Depends(get_crm_service),
-) -> HTMLResponse:
-    rows, total = await service.missing_salesperson_details(
-        page=page,
-        page_size=page_size,
-        team_id=team_id,
-        salesperson_id=salesperson_id,
-        sort=sort,
-    )
-    from math import ceil
-
-    pag = {
-        "page": page,
-        "page_size": page_size,
-        "total": total,
-        "total_pages": max(1, ceil(total / page_size)),
-        "has_prev": page > 1,
-        "has_next": page * page_size < total,
-    }
-    ctx = _base_ctx(request, user)
-    ctx.update(
-        {
-            "page": "missing_salesperson",
-            "rows": rows,
-            "pag": pag,
-            "odoo_url": settings.ODOO_URL.rstrip("/"),
-            "filters": {
-                "team_id": team_id,
-                "salesperson_id": salesperson_id,
-                "sort": sort,
-            },
-        }
-    )
-    return templates.TemplateResponse(request, "missing_salesperson.html", ctx)
+) -> RedirectResponse:
+    return RedirectResponse("/data-quality?tab=salesperson", status_code=302)

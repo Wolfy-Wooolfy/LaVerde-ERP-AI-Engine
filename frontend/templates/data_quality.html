@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "components/_badge.html" import badge %}
+{% from "components/_dq_table.html" import dq_table with context %}
+
+{% block title %}{{ _t("Data Quality") }} — LaVerde ERP AI Engine{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-1.5 text-sm min-w-0" aria-label="Breadcrumb">
+  <a href="/dashboard" class="text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
+    CRM
+  </a>
+  <svg class="w-3.5 h-3.5 text-neutral-400 shrink-0 rtl:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+  </svg>
+  <span class="text-neutral-900 dark:text-neutral-100 font-medium truncate">{{ _t("Data Quality") }}</span>
+</nav>
+{% endblock %}
+
+{% block page_title %}{{ _t("Data Quality") }}{% endblock %}
+
+{% block content %}
+<!-- ── Page header ──────────────────────────────────────────────────────────── -->
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{{ _t("Data Quality") }}</h1>
+  <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{{ _t("dq_hub_subtitle") }}</p>
+</div>
+
+{# Four independent DQ lists. Each tab's headline count is the true __count of its
+   verbatim card domain (N4); rows are the full server-rendered list (no pagination),
+   capped at the fetch limit — the `capped` note discloses truncation if it ever fires. #}
+{% set tabs = [
+  {"key": "linked-contact", "label": _t("dq_tab_linked_contact"), "data": dq.linked_contact, "table_id": "dqLinkedContactTable", "contact_mode": "linked",  "show_salesperson": true,  "show_stage": true,  "empty_subtitle": _t("dq_empty_linked_contact")},
+  {"key": "phone",          "label": _t("dq_tab_phone"),          "data": dq.phone,          "table_id": "dqPhoneTable",         "contact_mode": "default", "show_salesperson": true,  "show_stage": true,  "empty_subtitle": _t("dq_empty_phone")},
+  {"key": "stage",          "label": _t("dq_tab_stage"),          "data": dq.stage,          "table_id": "dqStageTable",         "contact_mode": "default", "show_salesperson": true,  "show_stage": false, "empty_subtitle": _t("dq_empty_stage")},
+  {"key": "salesperson",    "label": _t("dq_tab_salesperson"),    "data": dq.salesperson,    "table_id": "dqSalespersonTable",   "contact_mode": "default", "show_salesperson": false, "show_stage": true,  "empty_subtitle": _t("dq_empty_salesperson")},
+] %}
+
+<div class="chart-panel" x-data="{ tab: '{{ initial_tab }}' }">
+
+  <!-- Tabs -->
+  <div class="flex gap-1 border-b border-neutral-200 dark:border-neutral-700 mb-4 -mx-5 px-5 overflow-x-auto scrollbar-hide">
+    {% for t in tabs %}
+    <button @click="tab = '{{ t.key }}'"
+      :class="tab === '{{ t.key }}'
+        ? 'border-b-2 border-primary-600 text-primary-600 dark:text-primary-400 font-semibold'
+        : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border-b-2 border-transparent'"
+      class="px-4 py-3 text-sm whitespace-nowrap transition-colors duration-150 flex items-center gap-2">
+      {{ t.label }}
+      <span class="text-[10px] px-1.5 py-0.5 rounded font-semibold tabular {{ 'bg-danger-100 dark:bg-danger-900/40 text-danger-700 dark:text-danger-300' if t.data.total > 0 else 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500' }}">
+        {{ t.data.total }}
+      </span>
+    </button>
+    {% endfor %}
+  </div>
+
+  <!-- Panels — the server-selected initial tab renders uncloaked (correct panel
+       shown even before Alpine boots); the rest are x-cloaked until Alpine runs. -->
+  {% for t in tabs %}
+  {% set capped = t.data.total > (t.data.rows | length) %}
+  <div x-show="tab === '{{ t.key }}'" {% if t.key != initial_tab %}x-cloak{% endif %}>
+
+    <!-- Per-tab header: count + optional truncation note + search + export -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+      <div class="flex items-center gap-2 flex-wrap">
+        {{ badge(t.data.total ~ " " ~ _t("results"), "neutral") }}
+        {% if capped %}
+        <span class="text-xs text-warning-600 dark:text-warning-400">
+          {{ _t("dq_showing_first") }} {{ t.data.rows | length }} {{ _t("dq_of") }} {{ t.data.total }}
+        </span>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <div class="relative">
+          <svg class="absolute left-3 rtl:left-auto rtl:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/>
+          </svg>
+          <input type="text" placeholder="{{ _t('Search') }}..."
+            class="form-input pl-9 rtl:pl-3 rtl:pr-9 w-44 text-sm"
+            aria-label="{{ _t('Search') }}"
+            onkeyup="filterDqTable('{{ t.table_id }}', this.value)">
+        </div>
+        <button onclick="exportTableCSV('{{ t.table_id }}')" class="btn btn-secondary btn-sm">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          {{ _t("Export CSV") }}
+        </button>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+      {{ dq_table(t.data.rows, t.table_id, odoo_url,
+                  empty_subtitle=t.empty_subtitle,
+                  contact_mode=t.contact_mode,
+                  show_salesperson=t.show_salesperson,
+                  show_stage=t.show_stage) }}
+    </div>
+
+  </div>
+  {% endfor %}
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Lightweight per-table client-side filter over the FULL rendered list — the hub
+  // renders every DQ row (no pagination), so both search and CSV export cover the
+  // whole set (unlike the old per-page 50-row lists).
+  window.filterDqTable = function(tableId, query) {
+    var q = (query || '').toLowerCase();
+    var table = document.getElementById(tableId);
+    if (!table) return;
+    table.querySelectorAll('tbody tr').forEach(function(row) {
+      row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  };
+});
+</script>
+{% endblock %}

@@ -182,7 +182,7 @@ class TestHtmlModuleGating:
 
     def test_crm_data_quality_forbidden_for_hr_only(self, hr_only_client):
         r = hr_only_client.get(
-            "/data-quality/missing-contact", headers={"Accept": "text/html"}
+            "/data-quality", headers={"Accept": "text/html"}
         )
         assert r.status_code == 403
 

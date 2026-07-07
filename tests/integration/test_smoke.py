@@ -52,7 +52,11 @@ def _mock_summary() -> SummaryResponse:
 def override_crm_service() -> None:
     mock_svc = MagicMock()
     mock_svc.summary = AsyncMock(return_value=_mock_summary())
+    # The /data-quality hub fetches all four detail lists concurrently.
     mock_svc.missing_contact_details = AsyncMock(return_value=([], 0))
+    mock_svc.missing_stage_details = AsyncMock(return_value=([], 0))
+    mock_svc.missing_salesperson_details = AsyncMock(return_value=([], 0))
+    mock_svc.missing_linked_contact_details = AsyncMock(return_value=([], 0))
     app.dependency_overrides[get_crm_service] = lambda: mock_svc
     yield
     app.dependency_overrides.clear()
@@ -105,38 +109,87 @@ def test_dashboard_vendor_scripts_referenced(authed_client: TestClient) -> None:
     assert "/static/vendor/jquery.min.js" in body
 
 
-# ── Missing contacts page ──────────────────────────────────────────────────────
+# ── Data Quality hub ────────────────────────────────────────────────────────────
 
 
-def test_missing_contact_loads(authed_client: TestClient) -> None:
-    r = authed_client.get("/data-quality/missing-contact")
+def test_data_quality_hub_loads(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality")
     assert r.status_code == 200
 
 
-def test_missing_contact_has_title(authed_client: TestClient) -> None:
-    r = authed_client.get("/data-quality/missing-contact")
+def test_data_quality_hub_has_title(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality")
     assert r.status_code == 200
-    assert b"Missing" in r.content
+    assert b"Data Quality" in r.content
 
 
-def test_missing_contact_empty_state(authed_client: TestClient) -> None:
-    # With 0 rows, should show the empty state, not an error
-    r = authed_client.get("/data-quality/missing-contact")
+def test_data_quality_hub_empty_state(authed_client: TestClient) -> None:
+    # With 0 rows in every tab, each tab shows the empty state, not an error
+    r = authed_client.get("/data-quality")
     assert r.status_code == 200
     assert b"No records found" in r.content
 
 
-def test_missing_contact_no_cdn_references(authed_client: TestClient) -> None:
-    r = authed_client.get("/data-quality/missing-contact")
+def test_data_quality_hub_no_cdn_references(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality")
     body = r.text
     assert "cdn.jsdelivr.net" not in body
     assert "cdn.datatables.net" not in body
     assert "fonts.googleapis.com" not in body
 
 
-def test_missing_contact_pagination_params(authed_client: TestClient) -> None:
-    r = authed_client.get("/data-quality/missing-contact?page=2&page_size=25")
+def test_data_quality_hub_tab_param(authed_client: TestClient) -> None:
+    r = authed_client.get("/data-quality?tab=stage")
     assert r.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "old_path,expected_tab",
+    [
+        ("/data-quality/missing-contact", "phone"),
+        ("/data-quality/missing-stage", "stage"),
+        ("/data-quality/missing-salesperson", "salesperson"),
+    ],
+)
+def test_legacy_dq_pages_redirect_to_hub(
+    authed_client: TestClient, old_path: str, expected_tab: str
+) -> None:
+    r = authed_client.get(old_path, follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"] == f"/data-quality?tab={expected_tab}"
+
+
+def test_data_quality_hub_linked_contact_badge_renders(authed_client: TestClient) -> None:
+    """A partner-less lead on Tab 1 shows the 'No linked contact' badge even though
+    the display fallback filled a contact name — proves the populated-row path."""
+    from backend.modules.crm.schemas import MissingContactRow
+
+    row = MissingContactRow(
+        lead_id=777,
+        opportunity_name="Unlinked Opp",
+        contact_name="Walk-in Visitor",
+        salesperson_id=None,
+        salesperson_name="Unassigned",
+        team_id=None,
+        team_name="Unassigned Team",
+        stage_id=None,
+        stage_name="No Stage",
+        source_id=None,
+        source_name="No Source",
+        create_date="2026-06-03 11:00:00",
+        partner_id=None,
+    )
+    mock_svc = MagicMock()
+    mock_svc.missing_linked_contact_details = AsyncMock(return_value=([row], 1))
+    mock_svc.missing_contact_details = AsyncMock(return_value=([], 0))
+    mock_svc.missing_stage_details = AsyncMock(return_value=([], 0))
+    mock_svc.missing_salesperson_details = AsyncMock(return_value=([], 0))
+    app.dependency_overrides[get_crm_service] = lambda: mock_svc
+
+    r = authed_client.get("/data-quality")
+    assert r.status_code == 200
+    assert "No linked contact" in r.text  # badge fires on the partner-less row
+    assert "Walk-in Visitor" in r.text  # fallback-resolved name still shown
 
 
 # ── CSP header ────────────────────────────────────────────────────────────────

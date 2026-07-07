@@ -1,0 +1,121 @@
+{# _dq_table.html — shared Data-Quality detail table for the /data-quality hub.
+
+   Collapses the three legacy detail templates (missing_contact / missing_stage /
+   missing_salesperson) into ONE macro so the four hub tabs share one layout and
+   nothing about tabs 2-4 regresses.
+
+   Params:
+     rows            list[MissingContactRow]
+     table_id        unique table id (for exportTableCSV + the inline filter)
+     odoo_url        base Odoo URL for the "View in Odoo" deep-link
+     empty_subtitle  message under "No records found" when rows is empty
+     contact_mode    'linked'  → show the resolved contact name AND an always-on
+                                 "No linked contact" badge, driven by row.partner_id
+                                 being None (hub Tab 1 — the display fallback can
+                                 still fill a name, so the badge tells the truth);
+                     'default' → legacy "No contact"-if-empty behavior (tabs 2-4).
+     show_salesperson  drop the Salesperson column (false on the salesperson tab)
+     show_stage        drop the Stage column (false on the stage tab)
+
+   Imported `with context` so `_t` (the request-locale translator) is in scope.
+   Tables carry data-dt-init="true" to OPT OUT of the global DataTables auto-init
+   (tables.js binds every table[id]); the hub renders the full list with no
+   pagination, plus a lightweight inline filter (filterDqTable) and CSV export. #}
+
+{% from "components/_empty_state.html" import empty_state %}
+
+{% macro dq_table(rows, table_id, odoo_url, empty_subtitle="", contact_mode="default", show_salesperson=true, show_stage=true) %}
+{% if rows %}
+<div class="overflow-x-auto">
+  <table id="{{ table_id }}" data-dt-init="true" class="w-full text-sm">
+    <thead>
+      <tr class="bg-neutral-50 dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-700">
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide w-20">{{ _t("Lead ID") }}</th>
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Opportunity") }}</th>
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{{ _t("Contact Name") }}</th>
+        {% if show_salesperson %}
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide hidden md:table-cell">{{ _t("Salesperson") }}</th>
+        {% endif %}
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide hidden lg:table-cell">{{ _t("Team") }}</th>
+        {% if show_stage %}
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide hidden lg:table-cell">{{ _t("Stage") }}</th>
+        {% endif %}
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide hidden xl:table-cell">{{ _t("Source") }}</th>
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide hidden xl:table-cell">{{ _t("Created") }}</th>
+        <th class="px-4 py-3.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide w-24">{{ _t("Action") }}</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-neutral-100 dark:divide-neutral-700/50">
+      {% for row in rows %}
+      <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors group">
+        <td class="px-4 py-3 font-mono text-xs text-neutral-400 dark:text-neutral-500">{{ row.lead_id }}</td>
+        <td class="px-4 py-3 text-neutral-900 dark:text-neutral-100 font-medium max-w-[200px]">
+          <span class="block truncate" title="{{ row.opportunity_name }}">{{ row.opportunity_name or '—' }}</span>
+        </td>
+        <td class="px-4 py-3 text-neutral-700 dark:text-neutral-300 max-w-[160px]">
+          {% if contact_mode == 'linked' %}
+          <span class="block truncate" title="{{ row.contact_name }}">{{ row.contact_name or '—' }}</span>
+          {% if row.partner_id is none %}
+          <span class="badge badge-warning mt-1 inline-block">{{ _t("No linked contact") }}</span>
+          {% endif %}
+          {% else %}
+          <span class="block truncate" title="{{ row.contact_name }}">
+            {% if row.contact_name %}
+              {{ row.contact_name }}
+            {% else %}
+              <span class="badge badge-danger">No contact</span>
+            {% endif %}
+          </span>
+          {% endif %}
+        </td>
+        {% if show_salesperson %}
+        <td class="px-4 py-3 text-neutral-700 dark:text-neutral-300 hidden md:table-cell">
+          {% if row.salesperson_name %}
+            {{ row.salesperson_name }}
+          {% else %}
+            <span class="badge badge-warning">Unassigned</span>
+          {% endif %}
+        </td>
+        {% endif %}
+        <td class="px-4 py-3 text-neutral-700 dark:text-neutral-300 hidden lg:table-cell">
+          {{ row.team_name or '—' }}
+        </td>
+        {% if show_stage %}
+        <td class="px-4 py-3 hidden lg:table-cell">
+          {% if row.stage_name %}
+          <span class="badge badge-info">{{ row.stage_name }}</span>
+          {% else %}
+          <span class="badge badge-warning">No stage</span>
+          {% endif %}
+        </td>
+        {% endif %}
+        <td class="px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs hidden xl:table-cell">
+          {{ row.source_name or '—' }}
+        </td>
+        <td class="px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs font-mono hidden xl:table-cell">
+          {{ row.create_date[:10] if row.create_date else '—' }}
+        </td>
+        <td class="px-4 py-3">
+          <a href="{{ odoo_url }}/web#id={{ row.lead_id }}&model=crm.lead&view_type=form"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-ghost btn-sm text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-950/30 opacity-0 group-hover:opacity-100 transition-opacity"
+            title="{{ _t('View in Odoo') }}"
+            aria-label="{{ _t('View in Odoo') }}">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            </svg>
+            <span class="sr-only">{{ _t("View in Odoo") }}</span>
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="py-16">
+  {{ empty_state(_t("No records found"), empty_subtitle, icon="inbox") }}
+</div>
+{% endif %}
+{% endmacro %}
