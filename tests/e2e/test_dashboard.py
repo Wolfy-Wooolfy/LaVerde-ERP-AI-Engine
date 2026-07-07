@@ -85,27 +85,29 @@ def test_tabs_work(page: "Page") -> None:
         assert page.locator("#teamTable").count() > 0
 
 
-# ── Missing Contacts page ─────────────────────────────────────────────────────
+# ── Data Quality hub ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.e2e
-def test_missing_contacts_page_loads(page: "Page") -> None:
+def test_data_quality_hub_page_loads(page: "Page") -> None:
     authenticate(page)
-    page.goto(f"{BASE_URL}/data-quality/missing-contact")
-    expect(page).to_have_title(re.compile("Missing"))
+    page.goto(f"{BASE_URL}/data-quality")
+    expect(page).to_have_title(re.compile("Data Quality"))
     expect(page.locator("h1")).to_be_visible()
 
 
 @pytest.mark.e2e
-def test_missing_contacts_table_visible(page: "Page") -> None:
+def test_data_quality_hub_table_visible(page: "Page") -> None:
     authenticate(page)
-    page.goto(f"{BASE_URL}/data-quality/missing-contact")
-    table = page.locator("#contactsTable")
+    page.goto(f"{BASE_URL}/data-quality")
+    page.wait_for_timeout(500)  # let Alpine activate the default (linked-contact) tab
+    # The default tab is linked-contact; its table is uncloaked/visible when it has rows.
+    table = page.locator("#dqLinkedContactTable")
     if table.count() > 0:
         expect(table).to_be_visible()
     else:
-        # Empty state should be shown
-        expect(page.locator(".flex-col.items-center")).to_be_visible()
+        # Empty environment → the hub still renders its "No records found" empty state
+        assert page.get_by_text("No records found").count() > 0
 
 
 # ── Theme toggle ──────────────────────────────────────────────────────────────

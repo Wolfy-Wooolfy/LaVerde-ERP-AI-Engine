@@ -95,11 +95,7 @@
       {% set am = allowed_modules %}
 
       {% if 'crm' in am or '*' in am %}
-      <!-- Data Quality section -->
-      <p x-show="!sidebarCollapsed" class="px-3 pb-1 pt-3 text-[10px] font-semibold text-neutral-400 dark:text-neutral-600 uppercase tracking-widest">
-        {{ _t("Data Quality") }}
-      </p>
-
+      <!-- Data Quality — CRM data-hygiene hub (single entry point) -->
       <a href="/data-quality"
         class="sidebar-link {% if page == 'data_quality' %}active{% endif %}"
         title="{{ _t('Data Quality') }}">

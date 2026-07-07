@@ -153,7 +153,7 @@ def test_language_switch_sets_cookie(auth_page: Page) -> None:
 @pytest.mark.e2e
 def test_view_in_odoo_link_correct(auth_page: Page) -> None:
     """Every row's 'View in Odoo' link must point to the real Odoo deep-link."""
-    auth_page.goto(f"{BASE_URL}/data-quality/missing-contact")
+    auth_page.goto(f"{BASE_URL}/data-quality")
     auth_page.wait_for_timeout(1000)
 
     link = auth_page.locator('a[title="View in Odoo"], a[title="عرض في Odoo"]').first

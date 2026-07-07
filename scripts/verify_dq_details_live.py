@@ -21,8 +21,9 @@ FAIL (structural). missing-salesperson == 0 is a valid PASS path (clean
 empty envelope asserted).
 
 Plus:
-  - HTTP 200 on both JSON endpoints AND both HTML pages
-    (/data-quality/missing-stage, /data-quality/missing-salesperson).
+  - HTTP 200 on both JSON endpoints AND both hub HTML pages
+    (/data-quality?tab=stage, /data-quality?tab=salesperson — the legacy
+    /data-quality/missing-{stage,salesperson} URLs now 302 to these).
   - Page-1 pagination sanity: page == 1, page_size echoed, total_pages ==
     ceil(total / page_size), has_prev == False, has_next == (total >
     page_size), len(data) == min(page_size, total), row shape keys.
@@ -111,14 +112,14 @@ _ISSUES = (
         "key": "missing_stage",
         "card_field": "missing_stage_count",
         "endpoint": "/api/v1/data-quality/missing-stage",
-        "page": "/data-quality/missing-stage",
+        "page": "/data-quality?tab=stage",
         "domain_builder": build_missing_stage_domain,
     },
     {
         "key": "missing_salesperson",
         "card_field": "missing_salesperson_count",
         "endpoint": "/api/v1/data-quality/missing-salesperson",
-        "page": "/data-quality/missing-salesperson",
+        "page": "/data-quality?tab=salesperson",
         "domain_builder": build_missing_salesperson_domain,
     },
 )
