@@ -91,6 +91,10 @@ class MissingContactRow(BaseModel):
     source_id: Optional[int]
     source_name: str
     create_date: str
+    # Truthful "linked contact" flag: the Odoo partner_id, or None when the lead
+    # has no linked contact. Drives the hub's Tab-1 "No linked contact" badge —
+    # needed because contact_name may still be filled by the display fallback.
+    partner_id: Optional[int] = None
 
 
 class DataQualityMissingContactResponse(BaseModel):

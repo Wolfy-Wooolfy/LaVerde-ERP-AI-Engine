@@ -68,3 +68,17 @@ def build_missing_salesperson_domain() -> list:
     /data-quality/missing-salesperson list — identity card == list by construction.
     """
     return list(BASE_DOMAIN) + [["user_id", "=", False]]
+
+
+def build_missing_linked_contact_domain() -> list:
+    """Return a domain that matches leads with no linked contact (partner_id).
+
+    Single source for BOTH the hub tab headline count and the
+    /data-quality?tab=linked-contact list — identity count == list by construction.
+
+    partner_id (not contact_name) is the truthful "missing linked contact" signal:
+    the shipped contact-name fallback (contact_name → partner display → partner_name
+    → email) can fill a display name from free text / email even when partner_id is
+    empty, so a contact_name check would mislabel real, unlinked leads.
+    """
+    return list(BASE_DOMAIN) + [["partner_id", "=", False]]

@@ -14,6 +14,7 @@ from backend.shared.odoo.client import OdooClient
 from backend.modules.crm.domain import (
     BASE_DOMAIN,
     build_missing_contact_domain,
+    build_missing_linked_contact_domain,
     build_missing_salesperson_domain,
     build_missing_stage_domain,
     get_closed_excluded_stage_ids,
@@ -350,6 +351,31 @@ class CrmService:
             sort=sort,
         )
 
+    async def missing_linked_contact_details(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> tuple[list[MissingContactRow], int]:
+        """Return paginated missing-linked-contact rows and the total count.
+
+        Domain is build_missing_linked_contact_domain() (partner_id = False) — the
+        VERBATIM domain behind the hub Tab-1 count (identity count == list by
+        construction). Every row here has partner_id empty by definition, so the
+        row's partner_id is None and the "No linked contact" badge fires — even
+        when contact_name is populated by the display fallback.
+        """
+        return await self._dq_lead_details(
+            build_missing_linked_contact_domain(),
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
+        )
+
     async def _dq_lead_details(
         self,
         domain: list,
@@ -419,6 +445,13 @@ class CrmService:
                 if isinstance(partner, (list, tuple)) and len(partner) >= 2
                 else ""
             )
+            # The linked-contact id, or None when partner_id is empty. Read from the
+            # same tuple used for the fallback above; drives the hub Tab-1 badge.
+            partner_id_val = (
+                partner[0]
+                if isinstance(partner, (list, tuple)) and len(partner) >= 1
+                else None
+            )
             contact = (
                 row.get("contact_name")
                 or partner_display
@@ -440,6 +473,7 @@ class CrmService:
                     source_id=source[0] if source else None,
                     source_name=source[1] if source else "No Source",
                     create_date=row.get("create_date") or "",
+                    partner_id=partner_id_val,
                 )
             )
         return result, total
@@ -564,6 +598,23 @@ class CrmService:
         sort: str = "create_date desc",
     ) -> PaginatedMissingContactResponse:
         rows, total = await self.missing_salesperson_details(
+            page=page,
+            page_size=page_size,
+            team_id=team_id,
+            salesperson_id=salesperson_id,
+            sort=sort,
+        )
+        return self._paginated_dq_response(rows, total, page, page_size)
+
+    async def missing_linked_contact_response(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        team_id: Optional[int] = None,
+        salesperson_id: Optional[int] = None,
+        sort: str = "create_date desc",
+    ) -> PaginatedMissingContactResponse:
+        rows, total = await self.missing_linked_contact_details(
             page=page,
             page_size=page_size,
             team_id=team_id,

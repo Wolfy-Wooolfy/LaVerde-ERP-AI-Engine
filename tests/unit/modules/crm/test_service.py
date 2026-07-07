@@ -11,6 +11,7 @@ from backend.core.cache import clear_cache, init_cache
 from backend.modules.crm.domain import (
     BASE_DOMAIN,
     build_missing_contact_domain,
+    build_missing_linked_contact_domain,
     build_missing_salesperson_domain,
     build_missing_stage_domain,
 )
@@ -214,6 +215,89 @@ async def test_missing_salesperson_details_empty_is_clean(mock_client: MagicMock
     rows, total = await svc.missing_salesperson_details()
     assert rows == []
     assert total == 0
+
+
+# ── missing_linked_contact_details (hub Tab 1, N4) ───────────────────────────
+
+
+async def test_missing_linked_contact_details_uses_domain(mock_client: MagicMock) -> None:
+    """List domain must be VERBATIM the tab headline-count domain (N4 identity rule)."""
+    mock_client.execute_kw.side_effect = [[], [{"__count": 0}]]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_linked_contact_details()
+    assert rows == []
+    assert total == 0
+    expected = BASE_DOMAIN + [["partner_id", "=", False]]
+    assert build_missing_linked_contact_domain() == expected
+    search_domain = mock_client.execute_kw.call_args_list[0].kwargs["args"][0]
+    count_domain = mock_client.execute_kw.call_args_list[1].kwargs["args"][0]
+    assert search_domain == expected, f"search_read domain diverged: {search_domain}"
+    assert count_domain == expected, f"read_group domain diverged: {count_domain}"
+
+
+async def test_missing_linked_contact_details_maps_fields(mock_client: MagicMock) -> None:
+    """partner_id is False by definition here → row.partner_id is None (badge driver),
+    yet contact_name still resolves via the display fallback — the exact reason Tab 1
+    needs its own indicator."""
+    mock_client.execute_kw.side_effect = [
+        [
+            {
+                "id": 303,
+                "name": "Unlinked Opp",
+                "contact_name": "Walk-in Visitor",
+                "partner_id": False,
+                "partner_name": False,
+                "email_from": False,
+                "user_id": [10, "Ahmed"],
+                "team_id": [1, "Alpha"],
+                "stage_id": [28, "New Lead"],
+                "source_id": False,
+                "create_date": "2026-06-03 11:00:00",
+            }
+        ],
+        [{"__count": 456}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_linked_contact_details()
+    assert total == 456
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.lead_id == 303
+    assert row.partner_id is None  # drives the "No linked contact" badge
+    assert row.contact_name == "Walk-in Visitor"  # fallback keeps a display name
+    assert row.salesperson_name == "Ahmed"
+
+
+async def test_missing_linked_contact_details_empty_is_clean(mock_client: MagicMock) -> None:
+    """The empty path must be well-formed."""
+    mock_client.execute_kw.side_effect = [[], [{"__count": 0}]]
+    svc = CrmService(client=mock_client)
+    rows, total = await svc.missing_linked_contact_details()
+    assert rows == []
+    assert total == 0
+
+
+async def test_row_partner_id_populated_when_partner_linked(mock_client: MagicMock) -> None:
+    """When a partner IS linked, row.partner_id carries its id so the badge stays off."""
+    mock_client.execute_kw.side_effect = [
+        [
+            {
+                "id": 404,
+                "name": "Linked Opp",
+                "contact_name": "Real Person",
+                "partner_id": [7, "Acme Ltd"],
+                "user_id": [10, "Ahmed"],
+                "team_id": [1, "Alpha"],
+                "stage_id": False,
+                "source_id": False,
+                "create_date": "2026-01-01 00:00:00",
+            }
+        ],
+        [{"__count": 1}],
+    ]
+    svc = CrmService(client=mock_client)
+    rows, _ = await svc.missing_stage_details()
+    assert rows[0].partner_id == 7
 
 
 # ── contact resolution fallback (DQ detail rows) ─────────────────────────────
