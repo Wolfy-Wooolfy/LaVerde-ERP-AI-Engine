@@ -29,7 +29,7 @@
   "Data Quality Issues": "مشاكل جودة البيانات",
   "data_quality_tooltip": "يشمل الفرص في مرحلة 'New X' (بانتظار التصنيف) + الفرص التي تفتقر إلى مرحلة أو بيانات تواصل أو موظف مبيعات",
   "Missing Contact Info": "بيانات تواصل مفقودة",
-  "Missing Salesperson": "بائع مفقود",
+  "Missing Salesperson": "موظف مبيعات مفقود",
   "Missing Stage": "مرحلة مفقودة",
   "New X Leads": "فرص جديدة غير مصنفة",
   "Active Today": "نشطة اليوم",

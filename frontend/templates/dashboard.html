@@ -80,7 +80,7 @@
     variant="warning",
     icon="phone",
     sparkline_metric="missing_contact",
-    href="/data-quality/missing-contact"
+    href="/data-quality?tab=phone"
   ) }}
 
   {{ kpi_card(
@@ -88,7 +88,8 @@
     value=data_quality.missing_salesperson_count,
     variant="warning",
     icon="user-x",
-    sparkline_metric="missing_salesperson"
+    sparkline_metric="missing_salesperson",
+    href="/data-quality?tab=salesperson"
   ) }}
 
   {{ kpi_card(
@@ -514,9 +515,9 @@
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
     {% for label, value, variant, href in [
         (_t("New X Leads"),         data_quality.new_x_count,               "warning", None),
-        (_t("Missing Stage"),       data_quality.missing_stage_count,       "warning", "/data-quality/missing-stage"),
-        (_t("Missing Contact Info"),data_quality.missing_contact_count,     "danger",  "/data-quality/missing-contact"),
-        (_t("Missing Salesperson"), data_quality.missing_salesperson_count, "warning", "/data-quality/missing-salesperson"),
+        (_t("Missing Stage"),       data_quality.missing_stage_count,       "warning", "/data-quality?tab=stage"),
+        (_t("Missing Contact Info"),data_quality.missing_contact_count,     "danger",  "/data-quality?tab=phone"),
+        (_t("Missing Salesperson"), data_quality.missing_salesperson_count, "warning", "/data-quality?tab=salesperson"),
     ] %}
     <div class="flex flex-col gap-1 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
       <p class="text-xs text-neutral-500 dark:text-neutral-400">{{ label }}</p>
