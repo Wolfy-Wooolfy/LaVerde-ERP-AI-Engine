@@ -3,6 +3,8 @@ from typing import Any, Optional
 
 from cachetools import TTLCache
 
+from backend.core.cache_context import is_cache_bypass
+
 _lock = threading.Lock()
 _cache: TTLCache = TTLCache(maxsize=128, ttl=60)  # re-initialised at app startup
 
@@ -15,6 +17,8 @@ def init_cache(ttl: int, maxsize: int = 128) -> None:
 
 
 def get_cached(key: str) -> Optional[Any]:
+    if is_cache_bypass():
+        return None
     with _lock:
         return _cache.get(key)
 

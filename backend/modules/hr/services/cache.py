@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from backend.core.cache_context import is_cache_bypass
+
 _lock = threading.Lock()
 _store: dict[str, tuple[Any, float, int]] = {}
 
@@ -33,6 +35,8 @@ def make_key(name: str) -> str:
 
 
 def get(key: str) -> Optional[Any]:
+    if is_cache_bypass():
+        return None
     with _lock:
         entry = _store.get(key)
         if entry is None:

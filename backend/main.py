@@ -25,6 +25,7 @@ from backend.api.v1.endpoints.auth import router as auth_router
 from backend.api.v1.endpoints.dashboard import router as dashboard_router
 from backend.api.v1.router import api_v1_router
 from backend.core.cache import init_cache
+from backend.core.cache_context import reset_cache_bypass, set_cache_bypass
 from backend.core.config import settings
 from backend.core.exceptions import (
     LaVerdeERPError,
@@ -203,13 +204,22 @@ async def request_id_middleware(request: Request, call_next: object) -> Response
     rid = (request.headers.get("X-Request-ID") or "").strip()
     request_id = rid if rid else uuid.uuid4().hex
     request.state.request_id = request_id
+    # Per-request cache-bypass signal: a manual ?refresh=1 on a GET forces every
+    # in-memory KPI cache read to miss (fresh Odoo fetch); write-back is preserved.
+    # Set BEFORE call_next so the downstream endpoint's task inherits the value;
+    # reset in finally so it can never leak to the next request on the loop.
+    bypass = request.method == "GET" and request.query_params.get("refresh") == "1"
+    token = set_cache_bypass(bypass)
     start = time.monotonic()
-    response: Response = await call_next(request)  # type: ignore[operator]
-    duration_ms = int((time.monotonic() - start) * 1000)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Response-Time"] = f"{duration_ms}ms"
-    metrics.record_api_request(duration_ms, response.status_code)
-    return response
+    try:
+        response: Response = await call_next(request)  # type: ignore[operator]
+        duration_ms = int((time.monotonic() - start) * 1000)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Response-Time"] = f"{duration_ms}ms"
+        metrics.record_api_request(duration_ms, response.status_code)
+        return response
+    finally:
+        reset_cache_bypass(token)
 
 
 # ── Error response builder ────────────────────────────────────────────────────
