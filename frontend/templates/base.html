@@ -98,11 +98,11 @@
       <!-- Data Quality — CRM data-hygiene hub (single entry point) -->
       <a href="/data-quality"
         class="sidebar-link {% if page == 'data_quality' %}active{% endif %}"
-        title="{{ _t('Data Quality') }}">
+        title="{{ _t('nav_crm_data_quality') }}">
         <svg class="sidebar-link-icon shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
-        <span x-show="!sidebarCollapsed" class="truncate">{{ _t("Data Quality") }}</span>
+        <span x-show="!sidebarCollapsed" class="truncate">{{ _t("nav_crm_data_quality") }}</span>
       </a>
       {% endif %}
 
@@ -419,7 +419,7 @@
       </a>
       <a href="/data-quality" class="sidebar-link {% if page == 'data_quality' %}active{% endif %}">
         <svg class="sidebar-link-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        {{ _t("Data Quality") }}
+        {{ _t("nav_crm_data_quality") }}
       </a>
       {% endif %}
       {% if 'collections' in am or '*' in am %}

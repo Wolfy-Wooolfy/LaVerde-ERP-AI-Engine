@@ -11,6 +11,7 @@
   "Missing Contacts": "Missing Contacts",
   "Sales Pipeline": "Sales Pipeline",
   "Data Quality": "Data Quality",
+  "nav_crm_data_quality": "CRM Data Quality",
   "Reports": "Reports",
   "Settings": "Settings",
   "Overview": "Overview",
@@ -656,7 +657,7 @@
   "po_footnote_list_error": "Units with an implausible list price (far above peers' realized price) are excluded from this section — a list-price data error, not a real discount.",
   "po_footnote_readonly": "Read-only analytics from Odoo — corrections are made in Odoo.",
 
-  "nav_projinv_data_quality": "Data Quality",
+  "nav_projinv_data_quality": "Inventory Data Quality",
   "dq_title": "Inventory Data Quality",
   "dq_subtitle": "Read-only data-entry review across all projects",
   "dq_total_issues": "Total issues",
