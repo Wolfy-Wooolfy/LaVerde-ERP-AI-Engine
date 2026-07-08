@@ -68,13 +68,36 @@ async def test_summary_parallel_speedup_vs_sequential() -> None:
 
 
 async def test_cached_summary_is_instant() -> None:
-    """Second call hits cache and returns in <10ms."""
-    svc = CrmService(client=_slow_client())
+    """Second call is served from cache: it makes zero additional backing calls.
 
-    await svc.summary()  # warm cache
+    Verified deterministically via the backing-client call count (miss-then-hit),
+    not wall-clock timing. The first summary() is a cache MISS that invokes the
+    backing client; the second is a cache HIT that must invoke it zero more times
+    and return the identical cached object.
+    """
+    # _slow_client()'s execute_kw is a plain async function (no MagicMock/AsyncMock
+    # call tracking), so wrap it locally with a counter — leaves _slow_client()
+    # untouched for the other tests that share it.
+    client = _slow_client()
+    backing = client.execute_kw
+    call_count = 0
 
-    start = time.monotonic()
-    await svc.summary()  # from cache
-    elapsed_ms = (time.monotonic() - start) * 1000
+    async def counting_execute(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal call_count
+        call_count += 1
+        return await backing(*args, **kwargs)
 
-    assert elapsed_ms < 10, f"Cached summary took {elapsed_ms:.1f}ms — expected <10ms"
+    client.execute_kw = counting_execute
+    svc = CrmService(client=client)
+
+    first = await svc.summary()  # cache MISS — invokes the backing client
+    assert call_count > 0, "warmup call should hit the backing client on a cache miss"
+
+    calls_after_warmup = call_count
+    second = await svc.summary()  # cache HIT — must not touch the backing client
+
+    assert call_count == calls_after_warmup, (
+        f"cached call made {call_count - calls_after_warmup} extra backing call(s) — "
+        "expected 0 (should be served entirely from cache)"
+    )
+    assert second == first, "cached call should return the same object as the first call"
