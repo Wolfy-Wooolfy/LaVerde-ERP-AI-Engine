@@ -1,14 +1,14 @@
-# OPEN BACKLOG — LaVerde-ERP-AI-Engine (living list, updated 2026-07-08)
+# OPEN BACKLOG — LaVerde-ERP-AI-Engine (living list, updated 2026-07-09)
 
 This file is the single source of truth for OPEN work items. A new chat
 session has no memory of past conversations — start here. Verify each item
 against live disk/repo state before acting (memory and this file can drift).
 
 ## Git state at last update
-- origin/main == 58a1db7. Recent tags: sidebar-reorg-complete,
+- origin/main == 79e9b15. Recent tags: sidebar-reorg-complete,
   dq-hub-complete, module4-phase2-complete, module4-phase1-complete,
   hardening-1-session-secret.
-- Test gate baseline: 1541 passed / 4 pre-existing environmental skips
+- Test gate baseline: 1547 passed / 4 pre-existing environmental skips
   (3 in tests/integration/test_rbac.py, 1 in tests/integration/
   test_settings_api.py, firing when Odoo is unreachable) / 29 deselected.
 
@@ -67,6 +67,43 @@ is thin. Not blocking day-to-day; revisit before any board launch.
 ## 7. Minor deferred UI item
 Redirect / (root) to the login page — currently returns 404. Frontend-only,
 ~2 min. Bundle with any future frontend touch.
+
+## 8. stage_resolver uptime-<1h latent bug (MEDIUM — real but narrow)
+backend/modules/crm/stage_resolver.py computes cache staleness as
+time.monotonic() - _loaded_at > 3600, and a never-loaded resolver is
+initialized to _loaded_at = 0.0. On Windows time.monotonic() counts from
+system boot, so during the FIRST HOUR after a machine reboot a freshly
+created resolver evaluates as "not stale" and serves its EMPTY cache
+without ever fetching stage names from Odoo. Production impact: if the
+FastAPI app is (re)started within 1h of machine boot, CRM stage names
+render as "Stage 28"-style numeric fallbacks instead of real names until
+uptime passes 1h. Same root cause as the known test flake: the
+test_stage_resolver.py tests fail when the full suite runs within 1h of
+boot and pass otherwise (diagnosed by timestamp correlation; see the
+79e9b15 commit message). One-line fix when scheduled: initialize
+_loaded_at: float | None = None and treat None as an explicit
+never-loaded/needs-load state, instead of relying on the 0.0 sentinel
+against a boot-relative clock. Medium priority — real but narrow; only
+affects app starts within 1h of a reboot.
+
+## 9. Manual refresh on SSR pages — dashboard-refresh Phase 3 (MEDIUM-HIGH)
+Context: request-scoped cache-bypass is live (manual ?refresh=1 GET skips
+the in-memory cache — 9ec37cd) and automatic refresh is slowed to 1h
+(79e9b15). The 4 client-fetch dashboards (CRM, Collections, Customer
+Accounts, Balance Sheet) already have working manual refresh buttons. The
+gap: the global topbar Refresh button in base.html is hard-wired to
+crmRefresh() (CRM data only). On the 10 SSR pages (HR; Projects-Inventory
+Dashboard, Value & Area, Pricing Outliers, Data Quality; Marketing
+Attribution Dashboard + Timeline; Campaign Performance Dashboard +
+Timeline; CRM Data Quality hub) that button fetches CRM data, updates
+nothing on-screen, AND still shows a false "Data refreshed" toast — a
+real UX bug, not just a missing feature. Agreed Phase 3 approach: on SSR
+pages the manual refresh triggers a full page reload carrying ?refresh=1
+(the cache-bypass middleware already honors it, so the reload renders
+fresh Odoo data) instead of calling the CRM-only crmRefresh(). Exclude
+pages with no live Odoo data (Settings, Login, 403, no_modules).
+Medium-high priority — includes fixing the false-success toast /
+wrong-data bug on 10 pages.
 
 ---
 
