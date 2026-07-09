@@ -437,10 +437,10 @@
     if (banner) banner.classList.add('hidden');
   }
 
-  // D2.9 — 60s auto-refresh with Visibility API pause
+  // D2.9 — 1h auto-refresh with Visibility API pause
   function startAutoRefresh() {
     if (_autoRefreshInterval) return;
-    _autoRefreshInterval = setInterval(fetchAllKPIs, 60000);
+    _autoRefreshInterval = setInterval(fetchAllKPIs, 3600000);
   }
 
   function stopAutoRefresh() {

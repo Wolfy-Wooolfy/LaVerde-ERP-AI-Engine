@@ -22,8 +22,8 @@ document.addEventListener('alpine:init', () => {
         if (this.theme === 'system') this.applyTheme();
       });
 
-      // Auto-refresh every 60s
-      setInterval(() => this.autoRefresh(), 60_000);
+      // Auto-refresh every 1h
+      setInterval(() => this.autoRefresh(), 3_600_000);
     },
 
     applyTheme() {

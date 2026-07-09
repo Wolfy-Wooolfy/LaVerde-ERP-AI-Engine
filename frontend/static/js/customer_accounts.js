@@ -216,11 +216,11 @@
     });
   }
 
-  // ── Auto-refresh (60s, paused when tab is hidden) ────────────────────────
+  // ── Auto-refresh (1h, paused when tab is hidden) ─────────────────────────
 
   function startAutoRefresh() {
     if (_autoRefreshInterval) return;
-    _autoRefreshInterval = setInterval(fetchAllKPIs, 60000);
+    _autoRefreshInterval = setInterval(fetchAllKPIs, 3600000);
   }
 
   function stopAutoRefresh() {
