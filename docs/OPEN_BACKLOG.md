@@ -5,7 +5,7 @@ session has no memory of past conversations — start here. Verify each item
 against live disk/repo state before acting (memory and this file can drift).
 
 ## Git state at last update
-- origin/main == 79e9b15. Recent tags: sidebar-reorg-complete,
+- origin/main == cfc99c6. Recent tags: sidebar-reorg-complete,
   dq-hub-complete, module4-phase2-complete, module4-phase1-complete,
   hardening-1-session-secret.
 - Test gate baseline: 1547 passed / 4 pre-existing environmental skips
@@ -44,12 +44,12 @@ completeness + all-user pricing → needs per-tab gating). Deferred; do only
 if Khaled wants inventory consolidation. NOTE: Pricing Outliers is board
 intelligence, NOT data hygiene — if merged, keep that distinction clear.
 
-## 4. Flaky test: test_cached_summary_is_instant (SMALL, low-risk)
-A performance test asserting a cached response is under ~10ms. It has
-false-failed 3 times under back-to-back suite runs / memory pressure, then
-passed cleanly on rerun. Not a regression — a timing flake. Fix: raise the
-threshold or mark it non-flaky / de-time it. Small, isolated, zero product
-risk. Do a quick read of the test first to pick the cleanest fix.
+## 4. Flaky test: test_cached_summary_is_instant — DONE (6867bdb)
+Was: a performance test asserting a cached response is under ~10ms; it
+false-failed 3 times under back-to-back suite runs / memory pressure (the
+timing assertion was tighter than an OS scheduler quantum), then passed
+cleanly on rerun. Fixed in 6867bdb by replacing the wall-clock timing
+assertion with a deterministic cache-hit call-count check.
 
 ## 5. Collections AI Chat (DEFERRED — explicitly last)
 The one genuinely missing Collections capability: an AI chat over the
@@ -87,11 +87,15 @@ against a boot-relative clock. Medium priority — real but narrow; only
 affects app starts within 1h of a reboot.
 
 ## 9. Manual refresh on SSR pages — dashboard-refresh Phase 3 (MEDIUM-HIGH)
-Context: request-scoped cache-bypass is live (manual ?refresh=1 GET skips
-the in-memory cache — 9ec37cd) and automatic refresh is slowed to 1h
-(79e9b15). The 4 client-fetch dashboards (CRM, Collections, Customer
-Accounts, Balance Sheet) already have working manual refresh buttons. The
-gap: the global topbar Refresh button in base.html is hard-wired to
+Predecessor phases are both DONE:
+- Phase 1 DONE (79e9b15): automatic KPI refresh slowed from 60s to 1h to
+  reduce Odoo load.
+- Phase 2 DONE (9ec37cd): request-scoped cache-bypass — manual ?refresh=1
+  GET skips the in-memory cache so on-demand refresh returns fresh Odoo
+  data; write-back preserved; covers the existing manual refresh buttons
+  on all 4 client-fetch dashboards (CRM, Collections, Customer Accounts,
+  Balance Sheet).
+The gap: the global topbar Refresh button in base.html is hard-wired to
 crmRefresh() (CRM data only). On the 10 SSR pages (HR; Projects-Inventory
 Dashboard, Value & Area, Pricing Outliers, Data Quality; Marketing
 Attribution Dashboard + Timeline; Campaign Performance Dashboard +
