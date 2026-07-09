@@ -108,15 +108,13 @@ CONTRACT_STATE_FIELD = "state"
 # A cancelled contract carries no committed value — excluded from the realized join.
 CONTRACT_CANCEL_STATE = "cancel"
 
-# The unit states that count as SOLD for the value join (the LOCKED contracted bucket:
-# contracted + delivered). Realized value is summed only over units in these states.
-SOLD_STATES: frozenset[str] = frozenset(
-    s for s, b in STATE_TO_BUCKET.items() if b == SOLD_BUCKET
-)
-# The single state that counts as AVAILABLE for list-value/area (the available bucket).
-AVAILABLE_STATES: frozenset[str] = frozenset(
-    s for s, b in STATE_TO_BUCKET.items() if b == BUCKET_AVAILABLE
-)
+# The unit states that count as SOLD for the value join (contracted + delivered) and
+# the single state that counts as AVAILABLE for list-value/area. These are explicit
+# unit-STATE-based semantics for the Value / Pricing-Outliers / Data-Quality slices,
+# intentionally INDEPENDENT of the board buckets: they are FROZEN as literals so the
+# board bucket model can evolve without moving those populations.
+SOLD_STATES: frozenset[str] = frozenset({"contracted", "delivered"})
+AVAILABLE_STATES: frozenset[str] = frozenset({"available"})
 
 
 # ── Slice 2.5 — Pricing Outliers (LOCKED) ─────────────────────────────────────
