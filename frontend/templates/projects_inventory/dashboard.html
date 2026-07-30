@@ -254,7 +254,155 @@
     </div>
   </div>
 
-  {# ── 5. FOOTNOTE — read-only + scope ─────────────────────────────────────── #}
+  {# ── 5. CONTRACTS PIPELINE ───────────────────────────────────────────────── #}
+  {# The CONTRACT axis, below the whole portfolio area: the same non-cancel rs.contract
+     population the unit board classifies, grouped by the stage it sits in instead of
+     folded onto units. draft = nobody owns it yet (warning dot); legal/finance/
+     engineering = a named desk owns it (sky dot, the same hue as the board's
+     `under_review` bucket); confirm + delivered have LEFT the funnel and are counts
+     only — the payload carries no rows for them. #}
+
+  {# Days-in-stage escalation — DISPLAY ONLY, named constants, never inline magic
+     numbers. neutral < 30d · warning 30–90d · danger > 90d. These change no count;
+     the service owns days_in_stage and this only chooses a badge. #}
+  {% set PIPELINE_DAYS_WARN = 30 %}
+  {% set PIPELINE_DAYS_DANGER = 90 %}
+
+  {# Desk label comes from the LOCALIZED map keyed on the technical `stage`, never
+     from the service's English `stage_label` — that field is the API's wording, not
+     the board's. An unmapped stage falls back to stage_label, then the raw stage. #}
+  {% set PIPELINE_STAGE_LABEL = {
+    "legal":       _t("projinv_pipeline_stage_legal"),
+    "finance":     _t("projinv_pipeline_stage_finance"),
+    "engineering": _t("projinv_pipeline_stage_engineering")
+  } %}
+
+  <div class="bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-card px-6 py-5">
+
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
+      <div class="min-w-0">
+        <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{{ _t("projinv_pipeline_title") }}</h2>
+        <p class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">{{ _t("projinv_pipeline_subtitle") }}</p>
+      </div>
+      {% if pipeline is not none %}
+      <p class="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">
+        <span class="text-base font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(pipeline.total_non_cancel) }}</span>
+        {{ _t("projinv_pipeline_contracts") }}
+      </p>
+      {% endif %}
+    </div>
+
+    {% if pipeline is none %}
+      {# Graceful degradation: the contract axis failed, the unit board above did not.
+         This ONE section says so and the rest of the page is untouched. #}
+      <div class="rounded-lg border border-danger-200 dark:border-danger-800 bg-danger-50 dark:bg-danger-900/20 px-4 py-3 text-sm text-danger-700 dark:text-danger-400">
+        {{ _t("projinv_pipeline_error") }}
+      </div>
+    {% else %}
+
+      {# ── Awaiting action — draft contracts, oldest first (service-sorted) ──── #}
+      <div class="mb-5">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-2 h-2 rounded-sm shrink-0 bg-warning-400 dark:bg-warning-500"></span>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">{{ _t("projinv_pipeline_awaiting") }}</h3>
+          <span class="badge badge-neutral font-mono tabular-nums">{{ "{:,}".format(pipeline.awaiting_action_count) }}</span>
+        </div>
+        {% if pipeline.awaiting_action %}
+        {# EVERY row is rendered — the list is never truncated. It scrolls inside a
+           capped body so a 30-row funnel cannot push the rest of the board offscreen. #}
+        <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+          <div class="max-h-80 overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-neutral-50 dark:bg-neutral-900/40 text-xs text-neutral-500 dark:text-neutral-400">
+                  <th class="text-start font-medium px-3 py-2">{{ _t("projinv_pipeline_col_contract") }}</th>
+                  <th class="text-start font-medium px-3 py-2">{{ _t("projinv_pipeline_col_unit") }}</th>
+                  <th class="text-end font-medium px-3 py-2">{{ _t("projinv_pipeline_col_days") }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100 dark:divide-neutral-700">
+                {% for e in pipeline.awaiting_action %}
+                {% set days_cls = "badge-danger" if e.days_in_stage > PIPELINE_DAYS_DANGER else ("badge-warning" if e.days_in_stage >= PIPELINE_DAYS_WARN else "badge-neutral") %}
+                <tr>
+                  <td class="px-3 py-2 font-mono text-neutral-900 dark:text-neutral-100 whitespace-nowrap">{{ e.name }}</td>
+                  <td class="px-3 py-2 text-neutral-600 dark:text-neutral-300 truncate max-w-xs" title="{{ e.unit_name }}">{{ e.unit_name }}</td>
+                  <td class="px-3 py-2 text-end whitespace-nowrap">
+                    <span class="{{ days_cls }} font-mono tabular-nums">{{ e.days_in_stage }}{{ _t("projinv_pipeline_days_short") }}</span>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-xs text-neutral-400 dark:text-neutral-500">{{ _t("projinv_pipeline_empty") }}</p>
+        {% endif %}
+      </div>
+
+      {# ── Under review — a named desk owns each row ─────────────────────────── #}
+      <div class="mb-5">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-2 h-2 rounded-sm shrink-0 bg-sky-500 dark:bg-sky-600"></span>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-300">{{ _t("projinv_pipeline_group_under_review") }}</h3>
+          <span class="badge badge-neutral font-mono tabular-nums">{{ "{:,}".format(pipeline.under_review_count) }}</span>
+        </div>
+        {% if pipeline.under_review %}
+        <div class="rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+          <div class="max-h-80 overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-neutral-50 dark:bg-neutral-900/40 text-xs text-neutral-500 dark:text-neutral-400">
+                  <th class="text-start font-medium px-3 py-2">{{ _t("projinv_pipeline_col_contract") }}</th>
+                  <th class="text-start font-medium px-3 py-2">{{ _t("projinv_pipeline_col_unit") }}</th>
+                  <th class="text-start font-medium px-3 py-2">{{ _t("projinv_pipeline_col_stage") }}</th>
+                  <th class="text-end font-medium px-3 py-2">{{ _t("projinv_pipeline_col_days") }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100 dark:divide-neutral-700">
+                {% for e in pipeline.under_review %}
+                {% set days_cls = "badge-danger" if e.days_in_stage > PIPELINE_DAYS_DANGER else ("badge-warning" if e.days_in_stage >= PIPELINE_DAYS_WARN else "badge-neutral") %}
+                <tr>
+                  <td class="px-3 py-2 font-mono text-neutral-900 dark:text-neutral-100 whitespace-nowrap">{{ e.name }}</td>
+                  <td class="px-3 py-2 text-neutral-600 dark:text-neutral-300 truncate max-w-xs" title="{{ e.unit_name }}">{{ e.unit_name }}</td>
+                  <td class="px-3 py-2 whitespace-nowrap">
+                    <span class="badge bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400">{{ PIPELINE_STAGE_LABEL.get(e.stage) or e.stage_label or e.stage or "—" }}</span>
+                  </td>
+                  <td class="px-3 py-2 text-end whitespace-nowrap">
+                    <span class="{{ days_cls }} font-mono tabular-nums">{{ e.days_in_stage }}{{ _t("projinv_pipeline_days_short") }}</span>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-xs text-neutral-400 dark:text-neutral-500">{{ _t("projinv_pipeline_empty") }}</p>
+        {% endif %}
+      </div>
+
+      {# ── Out of the funnel — counts only, so they are chips, not tables ────── #}
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="inline-flex items-center gap-2 rounded-full border border-success-200 dark:border-success-800 bg-success-50 dark:bg-success-900/20 px-3 py-1">
+          <span class="w-2 h-2 rounded-sm shrink-0 bg-success-500 dark:bg-success-600"></span>
+          <span class="text-xs text-neutral-600 dark:text-neutral-300">{{ _t("projinv_pipeline_confirmed") }}</span>
+          <span class="text-sm font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(pipeline.confirmed_count) }}</span>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-success-300 dark:border-success-700 bg-success-50 dark:bg-success-900/20 px-3 py-1">
+          <span class="w-2 h-2 rounded-sm shrink-0 bg-success-700 dark:bg-success-800"></span>
+          <span class="text-xs text-neutral-600 dark:text-neutral-300">{{ _t("projinv_pipeline_delivered") }}</span>
+          <span class="text-sm font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(pipeline.delivered_count) }}</span>
+        </span>
+      </div>
+
+      <p class="mt-4 text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed">
+        {{ _t("projinv_pipeline_footnote") }}
+      </p>
+    {% endif %}
+  </div>
+
+  {# ── 6. FOOTNOTE — read-only + scope ─────────────────────────────────────── #}
   <p class="text-xs text-neutral-400 dark:text-neutral-500 leading-relaxed">
     {{ _t("projinv_footnote") }}
   </p>

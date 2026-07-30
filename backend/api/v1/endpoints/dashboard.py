@@ -41,6 +41,9 @@ from backend.modules.marketing_attribution.services.buyer_timeline_service impor
 from backend.modules.projects_inventory.services.inventory_service import (
     get_inventory_overview,
 )
+from backend.modules.projects_inventory.services.pipeline_service import (
+    get_contracts_pipeline,
+)
 from backend.modules.projects_inventory.services.value_service import (
     get_value_area_overview,
 )
@@ -499,10 +502,26 @@ async def projects_inventory_dashboard(
     # Server-side render of the inventory-by-status board (Slice 1: counts only —
     # overall + per project). Read-only; the service owns all bucketing/reconciliation.
     data = await get_inventory_overview()
+
+    # The contracts pipeline is an ADDITIVE section on the same page, and it reads a
+    # DIFFERENT axis (rs.contract + chatter) from the unit board above it. So it
+    # degrades on its own: any failure renders an inline error card in that one
+    # section and the rest of the board still renders. The unit axis stays strict —
+    # if get_inventory_overview() fails the page is genuinely empty and still 500s.
+    pipeline = None
+    try:
+        pipeline = await get_contracts_pipeline()
+    except Exception:
+        logger.warning(
+            "Projects inventory page — contracts pipeline unavailable; rendering the "
+            "board without it.", exc_info=True,
+        )
+
     ctx = _base_ctx(request, user)
     ctx.update({
         "page": "projects_inventory_dashboard",
         "inv": data,
+        "pipeline": pipeline,
     })
     return templates.TemplateResponse(request, "projects_inventory/dashboard.html", ctx)
 

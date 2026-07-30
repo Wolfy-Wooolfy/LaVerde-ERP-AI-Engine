@@ -87,6 +87,46 @@ _MOCK_DATA = {
 }
 
 
+# Contracts pipeline payload for the SSR section. C00255 mirrors the live outlier —
+# a finance-desk contract sitting 199 days — so the danger badge is exercised, and the
+# two draft rows straddle the 30-day warning boundary (95 danger / 12 neutral).
+# Σ groups == total_non_cancel (2 + 1 + 1401 + 0 = 1404).
+_MOCK_PIPELINE = {
+    "awaiting_action": [
+        {"contract_id": 901, "name": "C00901", "unit_id": 3608, "unit_name": "AF208-6-501",
+         "days_in_stage": 95, "stage": None, "stage_label": None},
+        {"contract_id": 902, "name": "C00902", "unit_id": 3609, "unit_name": "AF208-6-502",
+         "days_in_stage": 12, "stage": None, "stage_label": None},
+    ],
+    "awaiting_action_count": 2,
+    "under_review": [
+        {"contract_id": 255, "name": "C00255", "unit_id": 4170,
+         "unit_name": "Unit#BF170-10-702", "days_in_stage": 199,
+         "stage": "finance", "stage_label": "Finance Review"},
+    ],
+    "under_review_count": 1,
+    "confirmed_count": 1401,
+    "delivered_count": 0,
+    "total_non_cancel": 1404,
+    "reference_date": "2026-07-30",
+    "as_of": "2026-07-30T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 140,
+}
+
+
+def _patch_board(overview=_MOCK_DATA, pipeline=_MOCK_PIPELINE):
+    """Patch BOTH services the projects-inventory page calls. The page renders the unit
+    board and the contracts pipeline from two independent services, so a test that
+    patches only one would let the other reach for a live Odoo connection."""
+    return (
+        patch("backend.api.v1.endpoints.dashboard.get_inventory_overview",
+              new=AsyncMock(return_value=overview)),
+        patch("backend.api.v1.endpoints.dashboard.get_contracts_pipeline",
+              new=AsyncMock(return_value=pipeline)),
+    )
+
+
 def _client_with(record: UserRecord) -> TestClient:
     app.dependency_overrides[get_current_user_html] = lambda: record.username
     mock_repo = MagicMock()
@@ -133,10 +173,8 @@ def test_200_with_scoped_module_grant() -> None:
     """A non-admin user granted the module gets the rendered page with the key labels."""
     c = _client_with(_SCOPED_RECORD)
     try:
-        with patch(
-            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
-            new=AsyncMock(return_value=_MOCK_DATA),
-        ):
+        _ov, _pl = _patch_board()
+        with _ov, _pl:
             r = c.get(_URL)
         assert r.status_code == 200
         assert "text/html" in r.headers.get("content-type", "")
@@ -170,10 +208,8 @@ def test_six_buckets_render_with_distinct_colours() -> None:
     the old three-branch chain used to mislabel, so they are asserted explicitly."""
     c = _client_with(_SCOPED_RECORD)
     try:
-        with patch(
-            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
-            new=AsyncMock(return_value=_MOCK_DATA),
-        ):
+        _ov, _pl = _patch_board()
+        with _ov, _pl:
             r = c.get(_URL)
         assert r.status_code == 200
         body = r.text
@@ -219,10 +255,8 @@ def test_unknown_bucket_key_renders_grey_with_raw_key() -> None:
     }
     c = _client_with(_SCOPED_RECORD)
     try:
-        with patch(
-            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
-            new=AsyncMock(return_value=payload),
-        ):
+        _ov, _pl = _patch_board(overview=payload)
+        with _ov, _pl:
             r = c.get(_URL)
         assert r.status_code == 200
         body = r.text
@@ -235,6 +269,160 @@ def test_unknown_bucket_key_renders_grey_with_raw_key() -> None:
         _cleanup()
 
 
+# ── Contracts pipeline section (SSR, below the portfolio area) ─────────────────
+
+
+def test_pipeline_section_renders() -> None:
+    """The section renders its header with total_non_cancel, both group tables with
+    their rows, and the two out-of-funnel count chips."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        _ov, _pl = _patch_board()
+        with _ov, _pl:
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        # Header + the population it covers.
+        assert "Contracts Pipeline" in body
+        assert "1,404" in body
+        # Content order (S2): header → awaiting action → under review → count chips.
+        # The under-review group is anchored on its unique row, because its heading
+        # text collides with the `under_review` BUCKET label further up the page.
+        assert "Awaiting Action" in body
+        assert (
+            body.index("Contracts Pipeline")
+            < body.index("Awaiting Action")
+            < body.index("C00255")
+            < body.index("Confirmed")
+        )
+        # The pipeline sits BELOW the whole portfolio area, not above it.
+        assert body.index("By project") < body.index("Contracts Pipeline")
+        # Every awaiting-action row is rendered (never truncated) inside a capped,
+        # scrollable body.
+        assert "C00901" in body
+        assert "C00902" in body
+        assert "AF208-6-501" in body
+        assert "max-h-80" in body
+        assert "overflow-y-auto" in body
+        # Column headers.
+        assert "Days in stage" in body
+        assert "Contract" in body
+    finally:
+        _cleanup()
+
+
+def test_pipeline_under_review_row_shows_desk_label_and_danger_badge() -> None:
+    """The 199-day finance row is the one that must visually alarm: it carries the
+    localized desk label and the DANGER badge (> 90 days), not warning or neutral."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        _ov, _pl = _patch_board()
+        with _ov, _pl:
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        assert "C00255" in body
+        assert "Unit#BF170-10-702" in body
+        # Desk label comes from the localized stage map, keyed on the technical stage.
+        assert "Finance Review" in body
+        # 199 > PIPELINE_DAYS_DANGER (90) → danger.
+        assert '<span class="badge-danger font-mono tabular-nums">199d</span>' in body
+        # The escalation boundaries: 95d is also danger, 12d is neutral.
+        assert '<span class="badge-danger font-mono tabular-nums">95d</span>' in body
+        assert '<span class="badge-neutral font-mono tabular-nums">12d</span>' in body
+    finally:
+        _cleanup()
+
+
+def test_pipeline_count_chips_render() -> None:
+    """confirm + delivered have left the funnel, so they render as count chips with no
+    row list of their own."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        _ov, _pl = _patch_board()
+        with _ov, _pl:
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        _COUNT = ('<span class="text-sm font-bold font-mono tabular-nums '
+                  'text-neutral-900 dark:text-neutral-100">{}</span>')
+        assert "Confirmed" in body
+        assert _COUNT.format("1,401") in body
+        # The delivered chip renders its zero rather than disappearing.
+        assert "Delivered" in body
+        assert _COUNT.format("0") in body
+        # Chip order, scoped to the section — "Delivered" is also a BUCKET label
+        # further up the page, so the whole-body index would compare the wrong one.
+        section = body[body.index("Contracts Pipeline"):]
+        assert section.index("Confirmed") < section.index("Delivered")
+    finally:
+        _cleanup()
+
+
+def test_pipeline_days_badge_escalation_boundaries() -> None:
+    """The named display constants are neutral < 30d · warning 30–90d · danger > 90d.
+    Pinned at the exact boundaries so a future tweak to either constant is a visible
+    test change, not a silent one."""
+    rows = [
+        {"contract_id": 1, "name": "C1", "unit_id": 1, "unit_name": "U1",
+         "days_in_stage": 29, "stage": None, "stage_label": None},
+        {"contract_id": 2, "name": "C2", "unit_id": 2, "unit_name": "U2",
+         "days_in_stage": 30, "stage": None, "stage_label": None},
+        {"contract_id": 3, "name": "C3", "unit_id": 3, "unit_name": "U3",
+         "days_in_stage": 90, "stage": None, "stage_label": None},
+        {"contract_id": 4, "name": "C4", "unit_id": 4, "unit_name": "U4",
+         "days_in_stage": 91, "stage": None, "stage_label": None},
+    ]
+    pipeline = {**_MOCK_PIPELINE, "awaiting_action": rows, "awaiting_action_count": 4,
+                "under_review": [], "under_review_count": 0,
+                "confirmed_count": 0, "delivered_count": 0, "total_non_cancel": 4}
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        _ov, _pl = _patch_board(pipeline=pipeline)
+        with _ov, _pl:
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        _B = '<span class="{} font-mono tabular-nums">{}d</span>'
+        assert _B.format("badge-neutral", 29) in body    # below the warning floor
+        assert _B.format("badge-warning", 30) in body    # AT the warning floor
+        assert _B.format("badge-warning", 90) in body    # AT the danger ceiling
+        assert _B.format("badge-danger", 91) in body     # above the danger ceiling
+        # An empty group states so rather than rendering an empty table.
+        assert "Nothing waiting at this stage" in body
+    finally:
+        _cleanup()
+
+
+def test_pipeline_service_failure_degrades_gracefully() -> None:
+    """If the contracts axis is unavailable the section shows an inline error card and
+    the REST of the board still renders — the page is still a 200."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
+            new=AsyncMock(return_value=_MOCK_DATA),
+        ), patch(
+            "backend.api.v1.endpoints.dashboard.get_contracts_pipeline",
+            new=AsyncMock(side_effect=RuntimeError("odoo down")),
+        ):
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        # The section says so, in place.
+        assert "The contracts pipeline could not be loaded" in body
+        # …and nothing from the pipeline payload leaked in.
+        assert "C00255" not in body
+        # The unit board above it is untouched — six buckets, projects, drill wiring.
+        assert "Under Review" in body
+        assert "Unclassified" in body
+        assert "Project#New Capital" in body
+        assert 'data-pi-drill-level="project"' in body
+        assert "Total units" in body
+    finally:
+        _cleanup()
+
+
 # ── Slice 1b — drill-down wiring rendered into the page ────────────────────────
 
 
@@ -243,10 +431,8 @@ def test_drill_wiring_present_in_page() -> None:
     object, and the breadcrumb root are all rendered."""
     c = _client_with(_SCOPED_RECORD)
     try:
-        with patch(
-            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
-            new=AsyncMock(return_value=_MOCK_DATA),
-        ):
+        _ov, _pl = _patch_board()
+        with _ov, _pl:
             r = c.get(_URL)
         assert r.status_code == 200
         body = r.text
