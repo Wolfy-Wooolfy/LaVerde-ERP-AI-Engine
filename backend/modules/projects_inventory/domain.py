@@ -1,7 +1,7 @@
 """
 Projects Inventory — domain configuration & invariants (LOCKED DECISIONS).
 
-This module holds ONLY config (the model name, the status→bucket mapping, the
+This module holds ONLY config (the model names, the document→bucket ranking, the
 fixed bucket order, the early-stage threshold). It contains no Odoo I/O. The
 per-project names and every count are DERIVED at runtime from live data — never
 hardcoded here. See docs/PROJECTS_INVENTORY_DISCOVERY.md.
@@ -51,27 +51,87 @@ CHILD_LEVEL: dict[str, str] = {
 # The single leaf level — its children are individual units, not a grouped breakdown.
 LEAF_LEVEL = "building"
 
-# ── Status buckets (LOCKED — §2). Stable keys used by the API + template. ──────
+# ── Status buckets (LOCKED — six-bucket DOCUMENT-DRIVEN model, recon 2026-07-30) ─
+# Stable keys used by the API + template. A unit's board bucket is DERIVED FROM ITS
+# DOCUMENTS — its contracts first, then its live reservations — and the unit's own
+# `state` is consulted only as a last-resort fallback. The old unit-state→bucket map
+# is GONE: on the live data the unit state disagrees with the documents (e.g. units
+# sitting in `reserved`/`initial` with no reservation and no contract at all), so it
+# cannot be the source of truth. See services/inventory_service.classify_unit().
 BUCKET_AVAILABLE = "available"
-BUCKET_RESERVED = "reserved"
-BUCKET_CONTRACTED = "contracted"   # the "sold" bucket (label: Contracted)
+BUCKET_RESERVED = "reserved"          # a LIVE reservation hold, no contract yet
+BUCKET_UNDER_REVIEW = "under_review"  # a contract exists but is not yet confirmed
+BUCKET_CONTRACTED = "contracted"      # a confirmed contract (label: Contracted)
+BUCKET_DELIVERED = "delivered"        # a delivered contract (handed over)
+BUCKET_UNCLASSIFIED = "unclassified"  # no document AND no trustworthy unit state
 
-# Fixed output order — every overall/per-project bucket list is emitted in this order.
-BUCKET_ORDER: tuple[str, ...] = (BUCKET_AVAILABLE, BUCKET_RESERVED, BUCKET_CONTRACTED)
+# Fixed output order — LIFECYCLE order. Every overall/per-project bucket list is
+# emitted in this order. `unclassified` sits last because it is the data-quality
+# tail, not a lifecycle stage.
+BUCKET_ORDER: tuple[str, ...] = (
+    BUCKET_AVAILABLE,
+    BUCKET_RESERVED,
+    BUCKET_UNDER_REVIEW,
+    BUCKET_CONTRACTED,
+    BUCKET_DELIVERED,
+    BUCKET_UNCLASSIFIED,
+)
 
-# Map each live rs.structure.unit.state value → a board bucket (LOCKED, §2). The 5
-# live states are confirmed and exhaustive; a value outside this map is a material
-# data change and is raised on (never silently miscounted) by the service.
-STATE_TO_BUCKET: dict[str, str] = {
-    "available": BUCKET_AVAILABLE,
-    "initial": BUCKET_RESERVED,      # "Initial Reserve" → Reserved
-    "reserved": BUCKET_RESERVED,
-    "contracted": BUCKET_CONTRACTED,
-    "delivered": BUCKET_CONTRACTED,  # handed-over units count as sold
+# The ONE rs.structure.unit.state the classifier trusts as a fallback (precedence
+# step c): "no document, genuinely on the shelf". Every OTHER undocumented unit state
+# falls through to `unclassified` — that bucket IS the alarm, so the unit axis
+# degrades silently by design and never raises.
+UNIT_STATE_AVAILABLE = "available"
+
+# The 5 live rs.structure.unit.state values (fields_get-verified 2026-07-30:
+# available / initial / reserved / contracted / delivered). The BOARD no longer maps
+# these to buckets. This frozen vocabulary exists ONLY for the unit-STATE-based
+# slices (value / pricing-outliers / data-quality) whose shared guard still refuses
+# to run against a state vocabulary it has never seen.
+LOCKED_UNIT_STATES: frozenset[str] = frozenset(
+    {"available", "initial", "reserved", "contracted", "delivered"}
+)
+
+# ── The CONTRACT axis (STRICT — an unknown state is a loud error) ─────────────
+# fields_get-verified 2026-07-30: rs.contract.state is one of
+# draft / legal / finance / engineering / confirm / delivered / cancel.
+# Rank = how far along the contract is. A unit carrying SEVERAL non-cancel contracts
+# counts exactly ONCE, at its MAX rank (live proof: unit AF208-6-501 / unit_id 3608
+# holds two `confirm` contracts). `cancel` is excluded upstream by the query domain
+# and is therefore deliberately absent here — it is never ranked. A non-cancel state
+# missing from this map is a material vocabulary change and the service RAISES on it:
+# strictness lives on the contract axis.
+CONTRACT_RANK: dict[str, int] = {
+    "delivered": 3,
+    "confirm": 2,
+    "draft": 1,
+    "legal": 1,
+    "finance": 1,
+    "engineering": 1,
 }
 
-# "Sold" = the contracted bucket; sold% = contracted ÷ total.
-SOLD_BUCKET = BUCKET_CONTRACTED
+# Contract rank → board bucket. Rank 1 (ANY pre-confirm contract stage) is "under
+# review" — the deal is on paper but not yet committed.
+RANK_TO_BUCKET: dict[int, str] = {
+    3: BUCKET_DELIVERED,
+    2: BUCKET_CONTRACTED,
+    1: BUCKET_UNDER_REVIEW,
+}
+
+# ── The RESERVATION axis — consulted ONLY when a unit has no contract ─────────
+# fields_get-verified 2026-07-30: rs.reservation.state is one of
+# draft / initial / confirm / contract / cancel / expire, and the unit join field is
+# `unit_id`. `contract` means CONVERTED TO A CONTRACT — it, `cancel` and `expire` are
+# all TERMINAL, so a row in one of them is NOT a live hold (a converted reservation's
+# unit is already classified by the contract axis). The LIVE set on 2026-07-30 was
+# exactly {draft, initial, confirm} — 1 / 10 / 12 rows over 23 distinct units.
+RESERVATION_MODEL = "rs.reservation"
+RESERVATION_UNIT_FIELD = "unit_id"
+RESERVATION_STATE_FIELD = "state"
+RESERVATION_LIVE_STATES: frozenset[str] = frozenset({"draft", "initial", "confirm"})
+
+# "Sold" = a confirmed OR delivered contract; sold% = (contracted + delivered) ÷ total.
+SOLD_BUCKETS: tuple[str, ...] = (BUCKET_CONTRACTED, BUCKET_DELIVERED)
 
 # A project whose sold% is below this is flagged "Early stage" in the UI (a subtle,
 # neutral badge). Display-only — it changes no count. La Puerta (≈3.6% sold, the

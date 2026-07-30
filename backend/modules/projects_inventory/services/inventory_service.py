@@ -1,26 +1,49 @@
 """
 Projects Inventory service — unit INVENTORY by sales STATUS (read-only).
 
-Slice 1: board-level counts only — overall + per project. Data source:
-rs.structure.unit via the shared read-only OdooClient. No method ever calls
-create / write / unlink. _assert_read_only() runs at entry.
+Board-level counts only — overall + per project + drilled down the hierarchy. Data
+sources: rs.structure.unit, rs.contract and rs.reservation via the shared read-only
+OdooClient. No method ever calls create / write / unlink. _assert_read_only() runs at
+entry.
 
-Algorithm (LOCKED — docs/PROJECTS_INVENTORY_DISCOVERY.md §1/§2):
-  1. ONE paged search_read of every unit's [id, state, project_id, phase_id,
-     zone_id, building_id] (no read_group — regroup in Python, consistent with the
-     campaign windowing's single-query path). All 4 hierarchy links are fetched
-     now so per-phase/per-zone/per-building grouping is a one-line change later.
-  2. Fold each unit's `state` into a board BUCKET via STATE_TO_BUCKET
-     (available / reserved{+initial} / contracted{+delivered}). An unmapped or
-     empty state is a material data change → explicit raise (never miscounted).
-  3. _tally_by(units, group_field) is the single reusable bucketing primitive,
-     keyed by ANY denormalised hierarchy field — called with None for the overall
-     totals and with "project_id" for the per-project breakdown. Slice 2 reuses it
-     verbatim with "phase_id" / "zone_id".
-  4. sold% = contracted ÷ total (overall and per project). A project below the
-     early-stage threshold is flagged for a subtle UI badge (display only).
+DESIGN PRINCIPLE (six-bucket DOCUMENT-DRIVEN model, live recon 2026-07-30): a unit's
+board bucket is derived from its DOCUMENTS — its contracts first, then its live
+reservations — with rs.structure.unit.state used only as a last-resort fallback. The
+unit state is NOT trustworthy on its own: the live data holds units sitting in
+`reserved`/`initial` with no reservation and no contract behind them.
+
+The two axes have deliberately DIFFERENT strictness:
+  • CONTRACT axis — STRICT. A non-cancel contract state outside domain.CONTRACT_RANK
+    is a material vocabulary change and raises UnknownContractStateError.
+  • UNIT axis — SILENT. An unknown/blank unit state degrades into `unclassified`;
+    that bucket IS the alarm, so it is surfaced rather than raised.
+
+Algorithm:
+  1. THREE batched Odoo fetch groups per cold cache, and nothing per unit or per drill:
+     (a) every unit's [id, state, hierarchy m2os, code, name, pricing fields] — one
+         paged search_read (the SINGLE module-wide unit set, shared with Slices 2/2.5
+         and Data Quality);
+     (b) every NON-cancel rs.contract's [unit_id, state] → unit_id → MAX contract rank
+         (a unit with several contracts counts ONCE, at its highest rank);
+     (c) every LIVE rs.reservation's [unit_id] → the set of units on a live hold.
+         Terminal reservations (contract / cancel / expire) are excluded by the query
+         domain, so a converted reservation never double-counts against its contract.
+  2. classify_unit(unit_state, max_contract_rank, has_live_reservation) folds each unit
+     into ONE of the six buckets by strict precedence — contract, then live
+     reservation, then `available`, else `unclassified`. It is a pure function.
+  3. _tally_by(units, group_field, buckets) is the single reusable bucketing
+     primitive, keyed by ANY denormalised hierarchy field — called with None for the
+     overall totals and with "project_id" / "phase_id" / "zone_id" / "building_id"
+     for every breakdown.
+  4. sold% = (contracted + delivered) ÷ total (overall and per project). A project
+     below the early-stage threshold is flagged for a subtle UI badge (display only).
   5. Reconcile: Σ(bucket counts) == total, and Σ(per-project totals) == overall
      total — explicit raises (survive python -O).
+
+SINGLE-SOURCE INVARIANT: the board overview and every drill level read the SAME
+cached units + the SAME cached documents, so a drill panel can never disagree with
+the header that opened it. Both caches carry the module's 60s TTL and Cairo-date key,
+so ?refresh=1 bypasses them together.
 """
 
 import time
@@ -38,22 +61,45 @@ from backend.core.exceptions import (
 )
 from backend.modules.projects_inventory import domain
 from backend.modules.projects_inventory.domain import (
+    BUCKET_AVAILABLE,
     BUCKET_ORDER,
+    BUCKET_RESERVED,
+    BUCKET_UNCLASSIFIED,
     CHILD_FIELD,
     CHILD_LEVEL,
+    CONTRACT_CANCEL_STATE,
+    CONTRACT_MODEL,
+    CONTRACT_RANK,
+    CONTRACT_STATE_FIELD,
+    CONTRACT_UNIT_FIELD,
     DRILL_LEVELS,
     EARLY_STAGE_SOLD_PCT_THRESHOLD,
     LEAF_LEVEL,
     LEVEL_FIELD,
-    SOLD_BUCKET,
-    STATE_TO_BUCKET,
+    LOCKED_UNIT_STATES,
+    RANK_TO_BUCKET,
+    RESERVATION_LIVE_STATES,
+    RESERVATION_MODEL,
+    RESERVATION_STATE_FIELD,
+    RESERVATION_UNIT_FIELD,
+    SOLD_BUCKETS,
     UNIT_MODEL,
+    UNIT_STATE_AVAILABLE,
 )
 from backend.modules.projects_inventory.services import cache as _cache
 from backend.shared.odoo.client import ALLOWED_METHODS, OdooClient
 
 # Methods that must never appear in ALLOWED_METHODS.
 _FORBIDDEN_WRITE_METHODS = frozenset({"create", "write", "unlink"})
+
+
+class UnknownContractStateError(RuntimeError):
+    """A non-cancel rs.contract carries a state outside domain.CONTRACT_RANK.
+
+    The contract axis is STRICT: an unranked state would silently mis-bucket real
+    units, so the service refuses to return a breakdown at all. RuntimeError-derived
+    so the endpoint layer maps it to a 500 like every other reconciliation raise."""
+
 
 # `code` + `name` carry the human-readable leaf identifier (code is 100% populated and
 # unique, e.g. "AF190-1-101"; name is the short label, e.g. "101"). Both are fetched in
@@ -70,10 +116,17 @@ _UNIT_FIELDS = ["id", "state", "project_id", "phase_id", "zone_id", "building_id
                 "code", "name", domain.UNIT_AMOUNT_FIELD, domain.UNIT_AREA_FIELD,
                 domain.UNIT_TYPE_FIELD, domain.UNIT_METER_PRICE_FIELD]
 
+# The two DOCUMENT fetches are deliberately minimal — only what the classifier needs.
+_CONTRACT_DOC_FIELDS = [CONTRACT_UNIT_FIELD, CONTRACT_STATE_FIELD]
+_RESERVATION_DOC_FIELDS = [RESERVATION_UNIT_FIELD]
+
 _CACHE_KEY_PREFIX = "projects_inventory:overview"
 # The RAW unit rows are cached under their OWN key, shared by the board overview AND
 # every drill level, so both read identical rows (exact reconciliation by construction).
 _UNITS_CACHE_KEY_PREFIX = "projects_inventory:units"
+# The classifying DOCUMENTS (non-cancel contracts + live reservations) share one key,
+# fetched and expired together so a bucket can never be derived from a half-stale pair.
+_DOCS_CACHE_KEY_PREFIX = "projects_inventory:unit_docs"
 _CAIRO_TZ = ZoneInfo("Africa/Cairo")
 _PAGE = 5000
 
@@ -100,7 +153,8 @@ def _empty_buckets() -> dict[str, int]:
 
 
 def _bucket_rows(counts: dict[str, int], total: int) -> list[dict]:
-    """Materialise the BUCKET_ORDER list of {key, count, pct} rows for a total."""
+    """Materialise the BUCKET_ORDER list of {key, count, pct} rows for a total —
+    always all six buckets, the empty ones at 0."""
     return [
         {
             "key": b,
@@ -112,26 +166,124 @@ def _bucket_rows(counts: dict[str, int], total: int) -> list[dict]:
 
 
 def _sold_pct(counts: dict[str, int], total: int) -> float:
-    return round(100.0 * counts[SOLD_BUCKET] / total, 2) if total else 0.0
+    """sold% = (contracted + delivered) ÷ total — a unit is sold once its contract is
+    confirmed, and stays sold after hand-over."""
+    sold = sum(counts[b] for b in SOLD_BUCKETS)
+    return round(100.0 * sold / total, 2) if total else 0.0
 
 
-async def _fetch_all_units(client: OdooClient) -> list[dict]:
-    """search_read every unit in pages of _PAGE, ordered by id — the SAME paged
-    pattern the campaign windowing uses for its single lead fetch. ~1,873 units fit
-    one page today; paging keeps it correct if inventory grows past the threshold."""
+# ── the classifier ────────────────────────────────────────────────────────────
+
+
+def classify_unit(
+    unit_state, max_contract_rank: Optional[int], has_live_reservation: bool
+) -> str:
+    """Fold ONE unit into ONE of the six board buckets. Pure — no I/O, no globals.
+
+    Precedence (documents first, unit state last):
+        (a) any non-cancel contract  → RANK_TO_BUCKET[max rank]
+                                       (delivered > confirm > any pre-confirm stage)
+        (b) else a LIVE reservation  → reserved
+        (c) else state == available  → available
+        (d) else                     → unclassified
+
+    Step (d) is the silent-degradation rule: an unknown, blank or merely stale unit
+    state (e.g. `reserved` with no reservation behind it) lands in `unclassified`
+    rather than raising, because that bucket is the data-quality alarm the board is
+    meant to see.
+    """
+    if max_contract_rank is not None:
+        return RANK_TO_BUCKET[max_contract_rank]
+    if has_live_reservation:
+        return BUCKET_RESERVED
+    if unit_state == UNIT_STATE_AVAILABLE:
+        return BUCKET_AVAILABLE
+    return BUCKET_UNCLASSIFIED
+
+
+def _contract_ranks(contract_rows: list[dict]) -> dict[int, int]:
+    """unit_id → MAX domain.CONTRACT_RANK over that unit's NON-cancel contracts.
+
+    A unit with several contracts counts ONCE, at its highest rank (live proof: unit
+    AF208-6-501 carries two `confirm` contracts; a draft + confirm pair is contracted,
+    not under review). Rows with no unit link cannot be attributed to a unit and are
+    skipped. Every unranked state seen is collected first, then raised together so the
+    error names ALL offenders with their counts.
+    """
+    ranks: dict[int, int] = {}
+    unknown: dict[str, int] = defaultdict(int)
+    for ct in contract_rows:
+        state = ct.get(CONTRACT_STATE_FIELD)
+        rank = CONTRACT_RANK.get(state)
+        if rank is None:
+            unknown[str(state)] += 1
+            continue
+        uid = _m2o(ct.get(CONTRACT_UNIT_FIELD))[0]
+        if uid is None:
+            continue
+        if rank > ranks.get(uid, 0):
+            ranks[uid] = rank
+    if unknown:
+        raise UnknownContractStateError(
+            f"{CONTRACT_MODEL} carries non-cancel state value(s) outside the locked "
+            f"rank map {sorted(CONTRACT_RANK)}: {dict(unknown)}. Refusing to return an "
+            f"inventory breakdown that would silently mis-bucket these units."
+        )
+    return ranks
+
+
+def _live_reservation_units(reservation_rows: list[dict]) -> set[int]:
+    """The set of unit ids on a LIVE reservation hold. The query domain has already
+    excluded the terminal states, so every row here is live. A row with no unit link
+    cannot be attributed to a unit and is skipped WITHOUT error — unlike the contract
+    axis, the reservation axis only ever adds a hold, so a dangling row loses nothing
+    but a `reserved` badge (the unit falls through to (c)/(d))."""
+    units: set[int] = set()
+    for rv in reservation_rows:
+        uid = _m2o(rv.get(RESERVATION_UNIT_FIELD))[0]
+        if uid is None:
+            continue
+        units.add(uid)
+    return units
+
+
+def _classify_all(units: list[dict], docs: dict) -> dict[int, str]:
+    """unit_id → board bucket for every unit, from the shared documents snapshot."""
+    ranks = _contract_ranks(docs["contracts"])
+    reserved = _live_reservation_units(docs["reservations"])
+    return {
+        u["id"]: classify_unit(u.get("state"), ranks.get(u["id"]), u["id"] in reserved)
+        for u in units
+    }
+
+
+# ── Odoo fetches (three batched groups, nothing per unit) ─────────────────────
+
+
+async def _paged_search_read(
+    client: OdooClient, model: str, domain_: list, fields: list[str]
+) -> list[dict]:
+    """search_read every matching row in pages of _PAGE, ordered by id — the SAME paged
+    pattern the campaign windowing uses for its single lead fetch. Every live result set
+    here fits one page today; paging keeps it correct if the data grows past it."""
     rows, offset = [], 0
     while True:
         page = await client.execute_kw(
-            UNIT_MODEL,
+            model,
             "search_read",
-            args=[[]],
-            kwargs={"fields": _UNIT_FIELDS, "order": "id", "limit": _PAGE, "offset": offset},
+            args=[domain_],
+            kwargs={"fields": fields, "order": "id", "limit": _PAGE, "offset": offset},
         )
         rows.extend(page)
         if len(page) < _PAGE:
             break
         offset += _PAGE
     return rows
+
+
+async def _fetch_all_units(client: OdooClient) -> list[dict]:
+    """Fetch group 1 — every rs.structure.unit row (~1,873 today)."""
+    return await _paged_search_read(client, UNIT_MODEL, [], _UNIT_FIELDS)
 
 
 async def _get_units_cached(client: OdooClient) -> list[dict]:
@@ -152,31 +304,80 @@ async def _get_units_cached(client: OdooClient) -> list[dict]:
     return rows
 
 
+async def _fetch_unit_docs(client: OdooClient) -> dict:
+    """Fetch groups 2 and 3 — the documents that classify a unit.
+
+    Both are whole-population batched reads filtered SERVER-side, so the classifier
+    never issues a per-unit query:
+      • contracts   — every rs.contract whose state != cancel (a cancelled contract
+                      carries no claim on its unit and must not bucket it);
+      • reservations — every rs.reservation in a LIVE state. Terminal rows (contract /
+                      cancel / expire) are excluded here, which is exactly what makes a
+                      converted reservation defer to its contract.
+    """
+    contracts = await _paged_search_read(
+        client,
+        CONTRACT_MODEL,
+        [(CONTRACT_STATE_FIELD, "!=", CONTRACT_CANCEL_STATE)],
+        _CONTRACT_DOC_FIELDS,
+    )
+    reservations = await _paged_search_read(
+        client,
+        RESERVATION_MODEL,
+        [(RESERVATION_STATE_FIELD, "in", sorted(RESERVATION_LIVE_STATES))],
+        _RESERVATION_DOC_FIELDS,
+    )
+    return {"contracts": contracts, "reservations": reservations}
+
+
+async def _get_unit_docs_cached(client: OdooClient) -> dict:
+    """Cached (60s TTL, per Cairo date) classifying documents. Contracts and
+    reservations share ONE key so they expire together — a bucket is never derived
+    from a half-stale document pair. Mirrors _get_units_cached."""
+    cache_key = _cache.make_key(_DOCS_CACHE_KEY_PREFIX)
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        logger.debug(f"Unit docs cache hit: {cache_key}")
+        return cached
+    logger.info(f"Unit docs cache miss: {cache_key} — querying Odoo")
+    docs = await _fetch_unit_docs(client)
+    _cache.set(cache_key, docs)
+    return docs
+
+
 def _classify_states(units: list[dict]) -> None:
-    """Validate that every unit's state maps to a known bucket. The 5 live states are
-    LOCKED (§2); an unmapped/empty value is raised on so it can never be silently
-    miscounted (explicit raise — survives python -O)."""
+    """Validate that every unit's rs.structure.unit.state is in the LOCKED vocabulary.
+
+    NOT used by the board or the drill any more — they classify from DOCUMENTS and let
+    an unknown state fall into `unclassified`. This guard survives for the
+    unit-STATE-based slices (value / pricing-outliers / data-quality), whose whole
+    population definition is a state literal (domain.SOLD_STATES / AVAILABLE_STATES):
+    those slices must refuse to run against a vocabulary they have never seen rather
+    than silently drop units. Explicit raise — survives python -O."""
     unknown: dict[str, int] = defaultdict(int)
     for u in units:
-        if u.get("state") not in STATE_TO_BUCKET:
+        if u.get("state") not in LOCKED_UNIT_STATES:
             unknown[str(u.get("state"))] += 1
     if unknown:
         raise RuntimeError(
-            f"rs.structure.unit carries state value(s) outside the locked bucket map "
-            f"{sorted(STATE_TO_BUCKET)}: {dict(unknown)}. Refusing to return an "
-            f"inventory breakdown that would silently drop these units."
+            f"rs.structure.unit carries state value(s) outside the locked vocabulary "
+            f"{sorted(LOCKED_UNIT_STATES)}: {dict(unknown)}. Refusing to return a "
+            f"unit-state-based breakdown that would silently drop these units."
         )
 
 
-def _tally_by(units: list[dict], group_field: Optional[str]) -> list[dict]:
-    """THE reusable bucketing primitive. Tally units into status buckets, optionally
-    grouped by a denormalised hierarchy m2o on the unit.
+def _tally_by(
+    units: list[dict], group_field: Optional[str], buckets: dict[int, str]
+) -> list[dict]:
+    """THE reusable bucketing primitive. Tally units into the six board buckets,
+    optionally grouped by a denormalised hierarchy m2o on the unit.
 
     Args:
-        units: rows from _fetch_all_units (each carries `state` + the hierarchy m2os).
+        units: rows from _fetch_all_units (each carries the hierarchy m2os).
         group_field: None for a single all-units group, or one of domain.GROUP_FIELDS
-            ("project_id" / "phase_id" / "zone_id" / "building_id"). Slice 1 uses
-            None (overall) and "project_id"; the rest are ready for Slice 2.
+            ("project_id" / "phase_id" / "zone_id" / "building_id").
+        buckets: the classified snapshot from _classify_all — unit_id → bucket. Passed
+            in (never recomputed here) so every caller tallies the SAME classification.
 
     Returns a list of group dicts, each:
         {"group_id": int|None, "group_name": str|None,
@@ -187,7 +388,7 @@ def _tally_by(units: list[dict], group_field: Optional[str]) -> list[dict]:
     if group_field is None:
         counts = _empty_buckets()
         for u in units:
-            counts[STATE_TO_BUCKET[u["state"]]] += 1
+            counts[buckets[u["id"]]] += 1
         return [{"group_id": None, "group_name": None, "total": len(units), "buckets": counts}]
 
     groups: dict[int, dict] = {}
@@ -197,7 +398,7 @@ def _tally_by(units: list[dict], group_field: Optional[str]) -> list[dict]:
             gid, {"group_id": gid, "group_name": gname, "total": 0, "buckets": _empty_buckets()}
         )
         entry["total"] += 1
-        entry["buckets"][STATE_TO_BUCKET[u["state"]]] += 1
+        entry["buckets"][buckets[u["id"]]] += 1
     return sorted(groups.values(), key=lambda g: (-g["total"], g["group_name"] or ""))
 
 
@@ -213,8 +414,9 @@ async def get_inventory_overview(client: Optional[OdooClient] = None) -> dict:
     Raises:
         ReadOnlyViolationError: if ALLOWED_METHODS has been contaminated.
         OdooQueryError: if the Odoo RPC fails.
-        RuntimeError: if a state is unmapped, or the bucket/per-project counts fail to
-            reconcile to the total (explicit raises so they survive python -O).
+        UnknownContractStateError: if a non-cancel contract state is unranked.
+        RuntimeError: if the bucket/per-project counts fail to reconcile to the total
+            (explicit raises so they survive python -O).
     """
     _assert_read_only()
 
@@ -231,6 +433,7 @@ async def get_inventory_overview(client: Optional[OdooClient] = None) -> dict:
     t0 = time.monotonic()
     try:
         units = await _get_units_cached(_client)
+        docs = await _get_unit_docs_cached(_client)
     except ReadOnlyViolationError:
         raise
     except Exception as exc:
@@ -241,15 +444,16 @@ async def get_inventory_overview(client: Optional[OdooClient] = None) -> dict:
 
     rpc_ms = int((time.monotonic() - t0) * 1000)
 
-    # Every state must map to a bucket before we count anything.
-    _classify_states(units)
+    # Classify OUTSIDE the try: an unranked contract state is a data verdict, not an
+    # RPC failure, and must surface as itself rather than as OdooQueryError.
+    unit_buckets = _classify_all(units, docs)
 
     # Overall totals (single group) + per-project breakdown (same primitive).
-    overall = _tally_by(units, None)[0]
+    overall = _tally_by(units, None, unit_buckets)[0]
     total_units = overall["total"]
     overall_counts = overall["buckets"]
 
-    project_groups = _tally_by(units, "project_id")
+    project_groups = _tally_by(units, "project_id", unit_buckets)
     projects: list[dict] = []
     project_total_check = 0
     for g in project_groups:
@@ -285,10 +489,10 @@ async def get_inventory_overview(client: Optional[OdooClient] = None) -> dict:
             f"{project_total_check} != overall total {total_units}."
         )
 
+    breakdown = " ".join(f"{b}={overall_counts[b]:,}" for b in BUCKET_ORDER)
     logger.info(
         f"Projects inventory: {total_units:,} units across {len(projects)} projects | "
-        f"available={overall_counts['available']:,} reserved={overall_counts['reserved']:,} "
-        f"contracted={overall_counts['contracted']:,} | sold={_sold_pct(overall_counts, total_units):.1f}% "
+        f"{breakdown} | sold={_sold_pct(overall_counts, total_units):.1f}% "
         f"| RPC in {rpc_ms}ms | cache_key={cache_key}"
     )
 
@@ -308,15 +512,18 @@ async def get_inventory_overview(client: Optional[OdooClient] = None) -> dict:
     return result
 
 
-def _leaf_row(u: dict) -> dict:
+def _leaf_row(u: dict, bucket: str) -> dict:
     """One unit leaf row: code (primary, 100% unique) + name (short label) + the raw
-    state AND its board bucket (the UI shows a bucket-coloured badge)."""
+    rs.structure.unit.state AND the DERIVED board bucket. The bucket is the one the
+    header above it counted — a drill panel can never disagree with itself — and it is
+    kept alongside the raw state precisely because the two legitimately differ (a
+    `reserved` unit with a confirmed contract reads contracted)."""
     return {
         "unit_id": u["id"],
         "code": u.get("code") or "",
         "name": u.get("name") or "",
         "state": u["state"],
-        "bucket": STATE_TO_BUCKET[u["state"]],
+        "bucket": bucket,
     }
 
 
@@ -325,11 +532,11 @@ async def get_inventory_drill(
 ) -> dict:
     """Return one drill scope of the Project → Phase → Zone → Building → Unit hierarchy.
 
-    `level` names the level drilled INTO (the parent); `parent_id` is its id. The unit
-    set is loaded once from the SHARED cache (_get_units_cached) and filtered in Python
-    to that scope — no per-drill Odoo query. Group levels (project/phase/zone) return the
-    child breakdown via the same _tally_by primitive the board uses; the building level
-    returns the unit leaf list. Counts only (no pricing/area).
+    `level` names the level drilled INTO (the parent); `parent_id` is its id. The units
+    AND the classifying documents are loaded once from the SHARED caches and filtered in
+    Python to that scope — no per-drill Odoo query. Group levels (project/phase/zone)
+    return the child breakdown via the same _tally_by primitive the board uses; the
+    building level returns the unit leaf list. Counts only (no pricing/area).
 
     Args:
         level: one of domain.DRILL_LEVELS ("project"/"phase"/"zone"/"building").
@@ -341,9 +548,9 @@ async def get_inventory_drill(
     Raises:
         ValueError: if `level` is not a known drill level (endpoint maps to 422).
         InventoryScopeNotFoundError: if no units match (level, parent_id) (→ 404).
-        ReadOnlyViolationError / OdooQueryError: as for the overview.
-        RuntimeError: on an unmapped state or a reconciliation failure (explicit raises
-            so they survive python -O).
+        ReadOnlyViolationError / OdooQueryError / UnknownContractStateError: as for the
+            overview.
+        RuntimeError: on a reconciliation failure (explicit raise — survives python -O).
     """
     _assert_read_only()
     if level not in DRILL_LEVELS:
@@ -354,12 +561,17 @@ async def get_inventory_drill(
     cairo_today = datetime.now(_CAIRO_TZ).date()
     _client = client if client is not None else OdooClient()
 
-    # cache_status/timing reflect the shared unit fetch: a hit makes the drill RPC-free.
+    # cache_status/timing reflect the shared snapshot: a drill is RPC-free only when
+    # BOTH the units and the classifying documents are already cached.
     units_cache_key = _cache.make_key(_UNITS_CACHE_KEY_PREFIX)
-    was_cached = _cache.get(units_cache_key) is not None
+    docs_cache_key = _cache.make_key(_DOCS_CACHE_KEY_PREFIX)
+    was_cached = (
+        _cache.get(units_cache_key) is not None and _cache.get(docs_cache_key) is not None
+    )
     t0 = time.monotonic()
     try:
         units = await _get_units_cached(_client)
+        docs = await _get_unit_docs_cached(_client)
     except ReadOnlyViolationError:
         raise
     except Exception as exc:
@@ -369,8 +581,8 @@ async def get_inventory_drill(
             await _client.close()
     rpc_ms = 0 if was_cached else int((time.monotonic() - t0) * 1000)
 
-    # Every state must map to a bucket before we count anything (same guard as the board).
-    _classify_states(units)
+    # The SAME classified snapshot the board counts (same units, same documents).
+    unit_buckets = _classify_all(units, docs)
 
     # Filter to the parent scope on the denormalised m2o id, then derive the parent name
     # from a matched row's m2o pair (no extra lookup — every reachable node has ≥1 unit).
@@ -383,7 +595,7 @@ async def get_inventory_drill(
     parent_name = _m2o(scope[0].get(level_field))[1] or "—"
 
     # Scope header breakdown (the panel's own status bar), via the shared primitive.
-    scope_overall = _tally_by(scope, None)[0]
+    scope_overall = _tally_by(scope, None, unit_buckets)[0]
     scope_total = scope_overall["total"]
     scope_counts = scope_overall["buckets"]
     if sum(scope_counts.values()) != scope_total:
@@ -415,7 +627,9 @@ async def get_inventory_drill(
     }
 
     if is_leaf:
-        leaf = sorted((_leaf_row(u) for u in scope), key=lambda r: r["code"])
+        leaf = sorted(
+            (_leaf_row(u, unit_buckets[u["id"]]) for u in scope), key=lambda r: r["code"]
+        )
         # Leaf reconciliation: every scoped unit is listed exactly once.
         if len(leaf) != scope_total:
             raise RuntimeError(
@@ -434,7 +648,7 @@ async def get_inventory_drill(
     child_field = CHILD_FIELD[level]
     rows: list[dict] = []
     child_total_check = 0
-    for g in _tally_by(scope, child_field):
+    for g in _tally_by(scope, child_field, unit_buckets):
         gid, gname, gtotal, gcounts = g["group_id"], g["group_name"], g["total"], g["buckets"]
         if sum(gcounts.values()) != gtotal:
             raise RuntimeError(

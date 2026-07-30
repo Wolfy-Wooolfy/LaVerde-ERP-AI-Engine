@@ -15,6 +15,7 @@ from backend.api.deps import get_current_user
 from backend.auth.models import UserRecord
 from backend.core.exceptions import InventoryScopeNotFoundError, OdooQueryError
 from backend.main import app
+from backend.modules.projects_inventory.domain import BUCKET_ORDER
 
 _URL = "/api/v1/projects-inventory/overview"
 _DRILL_URL = "/api/v1/projects-inventory/drill/project/1"
@@ -41,12 +42,16 @@ _OTHER_MODULE_RECORD = UserRecord(
     created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
 )
 
+# Six-bucket payloads (domain.BUCKET_ORDER). sold_pct = (contracted + delivered) ÷ total.
 _MOCK_DATA = {
     "total_units": 23,
     "buckets": [
         {"key": "available", "count": 11, "pct": 47.83},
-        {"key": "reserved", "count": 3, "pct": 13.04},
-        {"key": "contracted", "count": 9, "pct": 39.13},
+        {"key": "reserved", "count": 2, "pct": 8.70},
+        {"key": "under_review", "count": 1, "pct": 4.35},
+        {"key": "contracted", "count": 8, "pct": 34.78},
+        {"key": "delivered", "count": 1, "pct": 4.35},
+        {"key": "unclassified", "count": 0, "pct": 0.0},
     ],
     "sold_pct": 39.13,
     "projects": [
@@ -54,8 +59,11 @@ _MOCK_DATA = {
             "project_id": 1, "project_name": "Project#New Capital", "total_units": 10,
             "buckets": [
                 {"key": "available", "count": 2, "pct": 20.0},
-                {"key": "reserved", "count": 2, "pct": 20.0},
-                {"key": "contracted", "count": 6, "pct": 60.0},
+                {"key": "reserved", "count": 1, "pct": 10.0},
+                {"key": "under_review", "count": 1, "pct": 10.0},
+                {"key": "contracted", "count": 5, "pct": 50.0},
+                {"key": "delivered", "count": 1, "pct": 10.0},
+                {"key": "unclassified", "count": 0, "pct": 0.0},
             ],
             "sold_pct": 60.0, "is_early_stage": False,
         },
@@ -64,7 +72,10 @@ _MOCK_DATA = {
             "buckets": [
                 {"key": "available", "count": 5, "pct": 100.0},
                 {"key": "reserved", "count": 0, "pct": 0.0},
+                {"key": "under_review", "count": 0, "pct": 0.0},
                 {"key": "contracted", "count": 0, "pct": 0.0},
+                {"key": "delivered", "count": 0, "pct": 0.0},
+                {"key": "unclassified", "count": 0, "pct": 0.0},
             ],
             "sold_pct": 0.0, "is_early_stage": True,
         },
@@ -112,7 +123,7 @@ def test_overview_returns_200_and_keys(client: TestClient) -> None:
     ):
         assert key in body, f"Response missing key: {key!r}"
     assert body["total_units"] == 23
-    assert [b["key"] for b in body["buckets"]] == ["available", "reserved", "contracted"]
+    assert [b["key"] for b in body["buckets"]] == list(BUCKET_ORDER)
     assert body["projects"][1]["is_early_stage"] is True
 
 
@@ -204,7 +215,10 @@ _MOCK_DRILL = {
     "buckets": [
         {"key": "available", "count": 4, "pct": 44.44},
         {"key": "reserved", "count": 1, "pct": 11.11},
-        {"key": "contracted", "count": 4, "pct": 44.44},
+        {"key": "under_review", "count": 0, "pct": 0.0},
+        {"key": "contracted", "count": 3, "pct": 33.33},
+        {"key": "delivered", "count": 1, "pct": 11.11},
+        {"key": "unclassified", "count": 0, "pct": 0.0},
     ],
     "sold_pct": 44.44,
     "rows": [
@@ -213,7 +227,10 @@ _MOCK_DRILL = {
             "buckets": [
                 {"key": "available", "count": 3, "pct": 37.5},
                 {"key": "reserved", "count": 1, "pct": 12.5},
-                {"key": "contracted", "count": 4, "pct": 50.0},
+                {"key": "under_review", "count": 0, "pct": 0.0},
+                {"key": "contracted", "count": 3, "pct": 37.5},
+                {"key": "delivered", "count": 1, "pct": 12.5},
+                {"key": "unclassified", "count": 0, "pct": 0.0},
             ],
             "sold_pct": 50.0,
         },

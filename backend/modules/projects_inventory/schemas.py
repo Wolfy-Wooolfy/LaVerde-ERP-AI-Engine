@@ -13,8 +13,12 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-# The 3 status buckets, fixed order (domain.BUCKET_ORDER).
-BucketKey = Literal["available", "reserved", "contracted"]
+# The 6 status buckets, in lifecycle order (domain.BUCKET_ORDER). A unit's bucket is
+# DERIVED from its documents (contracts, then live reservations), not from its raw
+# rs.structure.unit.state — `unclassified` is the tail with neither.
+BucketKey = Literal[
+    "available", "reserved", "under_review", "contracted", "delivered", "unclassified"
+]
 
 # The level a drill request targets (the parent drilled INTO).
 DrillLevel = Literal["project", "phase", "zone", "building"]
@@ -32,15 +36,15 @@ class ProjectInventory(BaseModel):
     project_id: int
     project_name: str
     total_units: int
-    buckets: list[BucketCount]        # always exactly 3, in BUCKET_ORDER; sum(count) == total_units
-    sold_pct: float                   # contracted ÷ total_units * 100
+    buckets: list[BucketCount]        # always exactly 6, in BUCKET_ORDER; sum(count) == total_units
+    sold_pct: float                   # (contracted + delivered) ÷ total_units * 100
     is_early_stage: bool              # sold_pct < EARLY_STAGE_SOLD_PCT_THRESHOLD (display badge)
 
 
 class ProjectsInventoryOverview(BaseModel):
     total_units: int
-    buckets: list[BucketCount]        # always exactly 3, in BUCKET_ORDER; sum(count) == total_units
-    sold_pct: float                   # portfolio contracted ÷ total_units * 100
+    buckets: list[BucketCount]        # always exactly 6, in BUCKET_ORDER; sum(count) == total_units
+    sold_pct: float                   # portfolio (contracted + delivered) ÷ total_units * 100
 
     projects: list[ProjectInventory]  # one per project, sorted by total_units desc
     project_count: int
@@ -60,13 +64,14 @@ class DrillGroupRow(BaseModel):
     group_id: int
     group_name: str
     total_units: int
-    buckets: list[BucketCount]        # always exactly 3, in BUCKET_ORDER; sum == total_units
-    sold_pct: float                   # contracted ÷ total_units * 100
+    buckets: list[BucketCount]        # always exactly 6, in BUCKET_ORDER; sum == total_units
+    sold_pct: float                   # (contracted + delivered) ÷ total_units * 100
 
 
 class DrillUnitRow(BaseModel):
     """One unit leaf row (building level). `code` is the human-readable unique id; the UI
-    shows a badge for `bucket`. `state` is the raw rs.structure.unit.state."""
+    shows a badge for `bucket` — the DERIVED bucket the panel header counted, which
+    legitimately differs from `state`, the raw rs.structure.unit.state."""
     unit_id: int
     code: str
     name: str
@@ -83,8 +88,8 @@ class ProjectsInventoryDrill(BaseModel):
 
     # The drilled scope's own status breakdown (the panel header bar).
     total_units: int
-    buckets: list[BucketCount]        # always exactly 3, in BUCKET_ORDER; sum == total_units
-    sold_pct: float
+    buckets: list[BucketCount]        # always exactly 6, in BUCKET_ORDER; sum == total_units
+    sold_pct: float                   # (contracted + delivered) ÷ total_units * 100
 
     # Exactly one of these is populated: rows for group levels, units for the leaf.
     rows: list[DrillGroupRow]         # child group rows (empty when is_leaf)

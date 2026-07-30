@@ -41,12 +41,16 @@ _ADMIN_RECORD = UserRecord(
     created_at="2026-01-01T00:00:00", updated_at="2026-01-01T00:00:00",
 )
 
+# Six-bucket payload (domain.BUCKET_ORDER). sold_pct = (contracted + delivered) ÷ total.
 _MOCK_DATA = {
     "total_units": 23,
     "buckets": [
         {"key": "available", "count": 11, "pct": 47.83},
-        {"key": "reserved", "count": 3, "pct": 13.04},
-        {"key": "contracted", "count": 9, "pct": 39.13},
+        {"key": "reserved", "count": 2, "pct": 8.70},
+        {"key": "under_review", "count": 1, "pct": 4.35},
+        {"key": "contracted", "count": 8, "pct": 34.78},
+        {"key": "delivered", "count": 1, "pct": 4.35},
+        {"key": "unclassified", "count": 0, "pct": 0.0},
     ],
     "sold_pct": 39.13,
     "projects": [
@@ -54,8 +58,11 @@ _MOCK_DATA = {
             "project_id": 1, "project_name": "Project#New Capital", "total_units": 10,
             "buckets": [
                 {"key": "available", "count": 2, "pct": 20.0},
-                {"key": "reserved", "count": 2, "pct": 20.0},
-                {"key": "contracted", "count": 6, "pct": 60.0},
+                {"key": "reserved", "count": 1, "pct": 10.0},
+                {"key": "under_review", "count": 1, "pct": 10.0},
+                {"key": "contracted", "count": 5, "pct": 50.0},
+                {"key": "delivered", "count": 1, "pct": 10.0},
+                {"key": "unclassified", "count": 0, "pct": 0.0},
             ],
             "sold_pct": 60.0, "is_early_stage": False,
         },
@@ -64,7 +71,10 @@ _MOCK_DATA = {
             "buckets": [
                 {"key": "available", "count": 5, "pct": 100.0},
                 {"key": "reserved", "count": 0, "pct": 0.0},
+                {"key": "under_review", "count": 0, "pct": 0.0},
                 {"key": "contracted", "count": 0, "pct": 0.0},
+                {"key": "delivered", "count": 0, "pct": 0.0},
+                {"key": "unclassified", "count": 0, "pct": 0.0},
             ],
             "sold_pct": 0.0, "is_early_stage": True,
         },
