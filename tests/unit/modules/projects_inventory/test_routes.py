@@ -16,6 +16,9 @@ from backend.auth.models import UserRecord
 from backend.core.exceptions import InventoryScopeNotFoundError, OdooQueryError
 from backend.main import app
 from backend.modules.projects_inventory.domain import BUCKET_ORDER
+from backend.modules.projects_inventory.services.inventory_service import (
+    UnknownContractStateError,
+)
 
 _URL = "/api/v1/projects-inventory/overview"
 _DRILL_URL = "/api/v1/projects-inventory/drill/project/1"
@@ -647,3 +650,167 @@ def test_data_quality_500_on_unexpected(client: TestClient) -> None:
         r = client.get(_DQ_URL)
     assert r.status_code == 500
     assert r.json()["error"]["code"] == "internal_error"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Contracts pipeline — GET /api/v1/projects-inventory/pipeline
+# The pre-confirm funnel by stage. Module-gated (NOT admin), GET-only.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PIPELINE_URL = "/api/v1/projects-inventory/pipeline"
+
+# awaiting_action = draft (stage/stage_label None); under_review = a named desk.
+# Both lists arrive days_in_stage desc; Σ groups == total_non_cancel (2 + 1 + 3 + 1 = 7).
+_MOCK_PIPELINE = {
+    "awaiting_action": [
+        {"contract_id": 901, "name": "C00901", "unit_id": 3608, "unit_name": "AF208-6-501",
+         "days_in_stage": 95, "stage": None, "stage_label": None},
+        {"contract_id": 902, "name": "C00902", "unit_id": 3609, "unit_name": "AF208-6-502",
+         "days_in_stage": 58, "stage": None, "stage_label": None},
+    ],
+    "awaiting_action_count": 2,
+    "under_review": [
+        {"contract_id": 255, "name": "C00255", "unit_id": 4170,
+         "unit_name": "Unit#BF170-10-702", "days_in_stage": 199,
+         "stage": "finance", "stage_label": "Finance Review"},
+    ],
+    "under_review_count": 1,
+    "confirmed_count": 3,
+    "delivered_count": 1,
+    "total_non_cancel": 7,
+    "reference_date": "2026-07-30",
+    "as_of": "2026-07-30T10:00:00+00:00",
+    "cache_status": "fresh",
+    "rpc_duration_ms": 140,
+}
+
+
+def test_pipeline_returns_200_and_keys(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_contracts_pipeline",
+        new=AsyncMock(return_value=_MOCK_PIPELINE),
+    ):
+        r = client.get(_PIPELINE_URL)
+    assert r.status_code == 200
+    body = r.json()
+    for key in (
+        "awaiting_action", "awaiting_action_count", "under_review", "under_review_count",
+        "confirmed_count", "delivered_count", "total_non_cancel", "reference_date",
+        "as_of", "cache_status", "rpc_duration_ms",
+    ):
+        assert key in body, f"Response missing key: {key!r}"
+    # The four groups reconcile to total_non_cancel.
+    assert (
+        body["awaiting_action_count"] + body["under_review_count"]
+        + body["confirmed_count"] + body["delivered_count"]
+    ) == body["total_non_cancel"] == 7
+    # Row lists are oldest-first and carry the full PipelineEntry shape.
+    assert [e["days_in_stage"] for e in body["awaiting_action"]] == [95, 58]
+    for entry in body["awaiting_action"] + body["under_review"]:
+        for key in ("contract_id", "name", "unit_id", "unit_name", "days_in_stage",
+                    "stage", "stage_label"):
+            assert key in entry, f"PipelineEntry missing key: {key!r}"
+    # A draft sits at no named desk; a review row carries the desk + its human label.
+    assert body["awaiting_action"][0]["stage"] is None
+    assert body["awaiting_action"][0]["stage_label"] is None
+    assert body["under_review"][0]["stage"] == "finance"
+    assert body["under_review"][0]["stage_label"] == "Finance Review"
+    assert body["under_review"][0]["days_in_stage"] == 199
+
+
+def test_pipeline_response_has_cache_headers(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_contracts_pipeline",
+        new=AsyncMock(return_value=_MOCK_PIPELINE),
+    ):
+        r = client.get(_PIPELINE_URL)
+    assert r.status_code == 200
+    assert "private, max-age=60" in r.headers.get("cache-control", "")
+    assert r.headers.get("x-cache-status") == "fresh"
+
+
+def test_pipeline_cached_status_reflected_in_header(client: TestClient) -> None:
+    """X-Cache-Status echoes the payload's cache_status — 'cached' on a cache hit."""
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_contracts_pipeline",
+        new=AsyncMock(return_value={**_MOCK_PIPELINE, "cache_status": "cached",
+                                    "rpc_duration_ms": 0}),
+    ):
+        r = client.get(_PIPELINE_URL)
+    assert r.status_code == 200
+    assert r.headers.get("x-cache-status") == "cached"
+    assert r.json()["rpc_duration_ms"] == 0
+
+
+def test_pipeline_503_on_odoo_error(client: TestClient) -> None:
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_contracts_pipeline",
+        new=AsyncMock(side_effect=OdooQueryError("boom")),
+    ):
+        r = client.get(_PIPELINE_URL)
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "odoo_unavailable"
+
+
+def test_pipeline_500_on_unexpected(client: TestClient) -> None:
+    """The Σ-groups reconciliation RuntimeError (and any other surprise) → 500."""
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_contracts_pipeline",
+        new=AsyncMock(side_effect=RuntimeError("kaboom")),
+    ):
+        r = client.get(_PIPELINE_URL)
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
+
+
+def test_pipeline_500_on_unknown_contract_state(client: TestClient) -> None:
+    """An unplaceable non-cancel contract state is a data verdict → 500, never a
+    partial pipeline that silently drops those contracts."""
+    with patch(
+        "backend.api.v1.endpoints.projects_inventory.get_contracts_pipeline",
+        new=AsyncMock(side_effect=UnknownContractStateError("new state 'escrow'")),
+    ):
+        r = client.get(_PIPELINE_URL)
+    assert r.status_code == 500
+    assert r.json()["error"]["code"] == "internal_error"
+
+
+def test_pipeline_401_when_unauthenticated() -> None:
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.get(_PIPELINE_URL)
+    assert r.status_code == 401
+
+
+def test_pipeline_403_without_module_grant() -> None:
+    c = _client_with(_OTHER_MODULE_RECORD)
+    try:
+        r = c.get(_PIPELINE_URL)
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "MODULE_ACCESS_DENIED"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+def test_pipeline_200_with_scoped_module_grant() -> None:
+    """A non-admin user explicitly granted the module is allowed (NOT admin-only)."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.projects_inventory.get_contracts_pipeline",
+            new=AsyncMock(return_value=_MOCK_PIPELINE),
+        ):
+            r = c.get(_PIPELINE_URL)
+        assert r.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if hasattr(app.state, "user_repo"):
+            del app.state.user_repo
+
+
+def test_pipeline_405_on_post(client: TestClient) -> None:
+    """Read-only surface: the path exists for GET only, so POST is a 405 (never a
+    write attempt reaching a handler)."""
+    r = client.post(_PIPELINE_URL, json={})
+    assert r.status_code == 405

@@ -3,6 +3,9 @@ Projects Inventory endpoints.
 
 GET /api/v1/projects-inventory/overview — unit counts by sales status, overall and
     per project (counts only; no pricing/area/value). Read-only. [Slice 1]
+GET /api/v1/projects-inventory/pipeline — the contracts pipeline: every non-cancel
+    rs.contract grouped by the stage it sits in (awaiting action / under review) with
+    days-in-stage, plus confirmed/delivered counts. Read-only. [Slice 1]
 GET /api/v1/projects-inventory/drill/{level}/{parent_id} — one hierarchy scope of
     Project → Phase → Zone → Building → Unit: the scope's status breakdown plus its
     child rows (or the unit leaf list at the building level). Read-only. [Slice 1b]
@@ -27,6 +30,7 @@ from backend.api.deps import get_current_user, require_admin_api
 from backend.core.exceptions import InventoryScopeNotFoundError, OdooQueryError
 from backend.core.limiter import limiter
 from backend.modules.projects_inventory.schemas import (
+    ContractsPipeline,
     DataQualityOverview,
     DrillLevel,
     PricingOutliersOverview,
@@ -40,6 +44,9 @@ from backend.modules.projects_inventory.services.data_quality_service import (
 from backend.modules.projects_inventory.services.inventory_service import (
     get_inventory_drill,
     get_inventory_overview,
+)
+from backend.modules.projects_inventory.services.pipeline_service import (
+    get_contracts_pipeline,
 )
 from backend.modules.projects_inventory.services.pricing_outliers_service import (
     get_pricing_outliers_overview,
@@ -73,6 +80,39 @@ async def overview(
         return JSONResponse(status_code=503, content=_ERR_503)
     except Exception:
         logger.error("Projects inventory overview — unexpected error", exc_info=True)
+        return JSONResponse(status_code=500, content=_ERR_500)
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Cache-Status"] = str(data.get("cache_status", "fresh"))
+    return data
+
+
+@router.get(
+    "/pipeline",
+    summary="Projects Inventory — contracts pipeline (pre-confirm funnel by stage)",
+    response_model=ContractsPipeline,
+)
+@limiter.limit("60/minute")
+async def contracts_pipeline(
+    request: Request,
+    response: Response,
+    _user: str = Depends(get_current_user),
+) -> dict | JSONResponse:
+    """Every NON-cancel rs.contract grouped by the stage it currently sits in, with how
+    long it has been sitting there: `awaiting_action` (draft — no desk owns it yet) and
+    `under_review` (legal / finance / engineering) carry row lists sorted oldest-first;
+    confirm and delivered are counts only, having left the funnel. days_in_stage comes
+    from the chatter state-change tracking row, falling back to create_date — never
+    write_date. GET-only; a POST is a 405 from the router."""
+    try:
+        data = await get_contracts_pipeline()
+    except OdooQueryError:
+        logger.warning("Projects inventory pipeline — Odoo query failed", exc_info=True)
+        return JSONResponse(status_code=503, content=_ERR_503)
+    except Exception:
+        # UnknownContractStateError and the Σ-groups reconciliation RuntimeError both land
+        # here — a data verdict the board must not paper over, surfaced as a 500.
+        logger.error("Projects inventory pipeline — unexpected error", exc_info=True)
         return JSONResponse(status_code=500, content=_ERR_500)
 
     response.headers["Cache-Control"] = "private, max-age=60"
