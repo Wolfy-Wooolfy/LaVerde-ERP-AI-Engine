@@ -139,6 +139,54 @@ SOLD_BUCKETS: tuple[str, ...] = (BUCKET_CONTRACTED, BUCKET_DELIVERED)
 EARLY_STAGE_SOLD_PCT_THRESHOLD = 10.0
 
 
+# ── Contracts pipeline — the pre-confirm funnel, grouped by STAGE ──────────────
+# The board view of deals still in flight. The population is the SAME non-cancel
+# rs.contract set the bucket classifier reads; the pipeline groups it by stage instead
+# of folding it onto units:
+#   draft                         → awaiting action (no desk owns it yet)
+#   legal / finance / engineering  → under review (a named desk owns it)
+#   confirm / delivered            → counts only (they have left the funnel)
+CONTRACT_DRAFT_STATE = "draft"
+CONTRACT_CONFIRM_STATE = "confirm"
+CONTRACT_DELIVERED_STATE = "delivered"
+
+# The under-review desks — technical value → human label, in deal-flow order.
+PIPELINE_REVIEW_STAGES: dict[str, str] = {
+    "legal": "Legal Review",
+    "finance": "Finance Review",
+    "engineering": "Engineering Review",
+}
+
+# Every non-cancel state that occupies a place IN the funnel. Together with
+# confirm/delivered this covers all 6 non-cancel states; anything else is a loud raise,
+# the SAME strictness rule the contract axis uses above.
+PIPELINE_STAGE_STATES: tuple[str, ...] = (
+    CONTRACT_DRAFT_STATE,
+) + tuple(PIPELINE_REVIEW_STAGES)
+
+# ── days-in-stage evidence — Odoo chatter, NOT write_date (probe 2026-07-30) ───
+# write_date is REJECTED as a signal: 31 of the 33 live pipeline contracts share ONE
+# bulk-edit stamp (2026-06-09 12:56:46), so it dates the edit, not the stage entry.
+# The stage-entry date is the LATEST mail.message whose tracking rows record a change
+# to rs.contract.state. A contract that never changed state — every draft, and 32 of
+# the 33 live pipeline rows — falls back to create_date, which is the NORMAL path.
+#
+# Verified on THIS Odoo 18 server (2026-07-30): mail.tracking.value identifies its
+# field ONLY through field_id, an m2o to ir.model.fields — there is no `field` char
+# column as on older majors — and that m2o's display name is the translatable LABEL
+# ("Status"). So the state filter is pushed SERVER-side as a dotted path on the
+# TECHNICAL field name: exact, immune to translation, and it costs no extra
+# round-trip (cross-checked identical to a client-side field_id match).
+MAIL_MESSAGE_MODEL = "mail.message"
+MAIL_MESSAGE_MODEL_FIELD = "model"
+MAIL_MESSAGE_RES_ID_FIELD = "res_id"
+MAIL_MESSAGE_DATE_FIELD = "date"
+TRACKING_MODEL = "mail.tracking.value"
+TRACKING_MESSAGE_FIELD = "mail_message_id"
+TRACKING_FIELD_NAME_PATH = "field_id.name"     # technical field name, e.g. "state"
+TRACKING_FIELD_MODEL_PATH = "field_id.model"   # owning model, e.g. "rs.contract"
+
+
 # ── Slice 2 — Value & Area (LOCKED) ───────────────────────────────────────────
 # Confirmed live project IDs (read-only discovery 2026-06-19,
 # docs/PROJECTS_INVENTORY_PRICING_DISCOVERY.md): New Capital = 1, Cassette = 2 are

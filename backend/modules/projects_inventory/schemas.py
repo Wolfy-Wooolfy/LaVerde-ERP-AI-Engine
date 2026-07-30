@@ -330,3 +330,43 @@ class PricingOutliersOverview(BaseModel):
     as_of: str                            # UTC ISO 8601 of the query
     cache_status: Literal["fresh", "cached"]
     rpc_duration_ms: int                  # 0 when served from cache
+
+
+# ── Contracts pipeline — the pre-confirm funnel (read-only) ────────────────────
+# awaiting_action = draft contracts (no desk owns them yet); under_review = the named
+# desks (legal / finance / engineering). confirm + delivered are COUNTS ONLY — they
+# have left the funnel, so they carry no row list. days_in_stage is whole Cairo days
+# since the contract entered its current stage, evidenced by the chatter
+# state-change tracking row and falling back to create_date. write_date is never
+# consulted: a bulk edit gives 31 of the 33 live pipeline rows one shared stamp.
+
+# The named review desks a contract can sit at (draft sits at none).
+PipelineStage = Literal["legal", "finance", "engineering"]
+
+
+class PipelineEntry(BaseModel):
+    """One in-flight contract. `stage` / `stage_label` are None for an awaiting-action
+    (draft) row — it sits at no named desk yet."""
+    contract_id: int
+    name: str
+    unit_id: int                          # 0 when the contract carries no unit link
+    unit_name: str                        # from the unit_id m2o pair; "—" when absent
+    days_in_stage: int
+    stage: PipelineStage | None = None
+    stage_label: str | None = None        # "Legal Review" / "Finance Review" / …
+
+
+class ContractsPipeline(BaseModel):
+    awaiting_action: list[PipelineEntry]  # draft, days_in_stage desc
+    awaiting_action_count: int            # == len(awaiting_action)
+    under_review: list[PipelineEntry]     # legal/finance/engineering, days_in_stage desc
+    under_review_count: int               # == len(under_review)
+
+    confirmed_count: int                  # counts only — out of the funnel
+    delivered_count: int                  # counts only — out of the funnel
+    total_non_cancel: int                 # Σ of the four groups reconciles to this
+
+    reference_date: str                   # Cairo-local YYYY-MM-DD (days measured to)
+    as_of: str                            # UTC ISO 8601 of the query
+    cache_status: Literal["fresh", "cached"]
+    rpc_duration_ms: int                  # 0 when served from cache
