@@ -145,10 +145,13 @@ def test_200_with_scoped_module_grant() -> None:
         assert "Inventory &amp; Availability" in body or "Inventory & Availability" in body
         assert "Total units" in body
         assert "By project" in body
-        # Status labels.
+        # All SIX status labels (domain.BUCKET_ORDER), EN default.
         assert "Available" in body
         assert "Reserved" in body
+        assert "Under Review" in body
         assert "Contracted" in body
+        assert "Delivered" in body
+        assert "Unclassified" in body
         # Project rows rendered from the mock.
         assert "Project#New Capital" in body
         assert "Project#La puerta" in body
@@ -157,6 +160,77 @@ def test_200_with_scoped_module_grant() -> None:
         assert "Early stage" in body
         # Sidebar entry present for a user with the module.
         assert 'href="/projects-inventory/dashboard"' in body
+    finally:
+        _cleanup()
+
+
+def test_six_buckets_render_with_distinct_colours() -> None:
+    """Every one of the six buckets renders its own label, its own bar/dot colour and
+    its own KPI card — no bucket borrows another's. The three NEW buckets are the ones
+    the old three-branch chain used to mislabel, so they are asserted explicitly."""
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
+            new=AsyncMock(return_value=_MOCK_DATA),
+        ):
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        # Each bucket's segment/dot colour is present exactly as the BUCKET_UI map
+        # declares it — under_review is sky, delivered is a DARKER success step, and
+        # unclassified is neutral grey (never the contracted green).
+        assert "bg-primary-500 dark:bg-primary-600" in body      # available
+        assert "bg-warning-400 dark:bg-warning-500" in body      # reserved
+        assert "bg-sky-500 dark:bg-sky-600" in body              # under_review
+        assert "bg-success-500 dark:bg-success-600" in body      # contracted
+        assert "bg-success-700 dark:bg-success-800" in body      # delivered
+        assert "bg-neutral-400 dark:bg-neutral-500" in body      # unclassified
+        # The KPI row is the 7-card layout (Total + six buckets).
+        assert "xl:grid-cols-7" in body
+        # Bar-segment titles carry the right label against the right count: the mock's
+        # under_review is 1 unit at 4.35%, delivered 1 at 4.35% — the old chain painted
+        # BOTH of these green and called them "Contracted".
+        assert 'title="Under Review: 1 (4.3%)"' in body
+        assert 'title="Delivered: 1 (4.3%)"' in body
+        # A zero-count bucket keeps its KPI card and its legend entry (the legend's
+        # title is the bare label) but is skipped as a bar segment — a segment title
+        # is the "Label: count (pct%)" form, and unclassified has none.
+        assert 'title="Unclassified">Unclassified</span>' in body
+        assert 'title="Unclassified:' not in body
+        # The strings object hands the drill panel all six labels.
+        for key in ("available", "reserved", "under_review", "contracted",
+                    "delivered", "unclassified"):
+            assert f"{key}:" in body, f"PROJINV_STRINGS missing bucket label: {key!r}"
+    finally:
+        _cleanup()
+
+
+def test_unknown_bucket_key_renders_grey_with_raw_key() -> None:
+    """No else-fallthrough anywhere: a bucket key the template has never seen renders
+    neutral grey labelled with the RAW key — never green, never 'Contracted'. This is
+    the regression the six-branch mapping exists to prevent."""
+    payload = {
+        **_MOCK_DATA,
+        "total_units": 24,
+        "buckets": _MOCK_DATA["buckets"] + [
+            {"key": "escrow", "count": 1, "pct": 4.17},
+        ],
+    }
+    c = _client_with(_SCOPED_RECORD)
+    try:
+        with patch(
+            "backend.api.v1.endpoints.dashboard.get_inventory_overview",
+            new=AsyncMock(return_value=payload),
+        ):
+            r = c.get(_URL)
+        assert r.status_code == 200
+        body = r.text
+        # Labelled with the raw key, and its bar segment is grey.
+        assert 'title="escrow: 1 (4.2%)"' in body
+        assert "bg-neutral-400 dark:bg-neutral-500" in body
+        # It did NOT inherit the contracted label.
+        assert 'title="Contracted: 1 (4.2%)"' not in body
     finally:
         _cleanup()
 

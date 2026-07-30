@@ -6,6 +6,83 @@
 {% block page_title %}{{ _t("projinv_title") }}{% endblock %}
 
 {% block content %}
+
+{# ── BUCKET → UI MAP (six explicit keys; NO else-fallthrough) ───────────────
+   ONE source of truth for every bucket's colour and label, reused verbatim by the
+   KPI cards, the portfolio bar + legend and the per-project bars + legends — so a
+   card can never disagree with the segment beside it, and adding a seventh bucket
+   is a one-place edit.
+
+   Colour intent (see tailwind.config.js — `colors` sits under theme.extend, so the
+   full default v3 palette is available alongside primary/success/warning/danger):
+     available    primary  — unchanged, the locked "on the shelf" hue
+     reserved     warning  — unchanged, the locked "on hold" hue
+     under_review sky      — the in-progress hue. Deliberately NOT violet/indigo:
+                             violet-500 (#8b5cf6) sits ~19° from primary-500
+                             (#6366f1) and a legend dot would read as `available`.
+                             sky-500 (#0ea5e9) is the farthest of the candidates
+                             from primary while still not reading as green.
+     contracted   success  — unchanged, the locked "sold" hue
+     delivered    success, a CLEARLY DARKER step — delivered is the second SOLD
+                             bucket, so same family reads as "further along". The
+                             config's `emerald` is byte-identical to `success`
+                             (#10b981 both), so it could not have differentiated.
+     unclassified neutral  — grey. It is the data-quality tail, not a stage.
+
+   An unknown bucket key resolves to BUCKET_UI_UNKNOWN: neutral grey, labelled with
+   the RAW key. Never green, never "Contracted". #}
+{% set BUCKET_UI = {
+  "available": {
+    "label":  _t("projinv_available"),
+    "seg":    "bg-primary-500 dark:bg-primary-600",
+    "border": "border-primary-200 dark:border-primary-800",
+    "icon":   "bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400",
+    "value":  "text-primary-700 dark:text-primary-400"
+  },
+  "reserved": {
+    "label":  _t("projinv_reserved"),
+    "seg":    "bg-warning-400 dark:bg-warning-500",
+    "border": "border-warning-200 dark:border-warning-800",
+    "icon":   "bg-warning-100 dark:bg-warning-900/40 text-warning-600 dark:text-warning-400",
+    "value":  "text-warning-700 dark:text-warning-400"
+  },
+  "under_review": {
+    "label":  _t("projinv_under_review"),
+    "seg":    "bg-sky-500 dark:bg-sky-600",
+    "border": "border-sky-200 dark:border-sky-800",
+    "icon":   "bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400",
+    "value":  "text-sky-700 dark:text-sky-400"
+  },
+  "contracted": {
+    "label":  _t("projinv_contracted"),
+    "seg":    "bg-success-500 dark:bg-success-600",
+    "border": "border-success-200 dark:border-success-800",
+    "icon":   "bg-success-100 dark:bg-success-900/40 text-success-600 dark:text-success-400",
+    "value":  "text-success-700 dark:text-success-400"
+  },
+  "delivered": {
+    "label":  _t("projinv_delivered"),
+    "seg":    "bg-success-700 dark:bg-success-800",
+    "border": "border-success-300 dark:border-success-700",
+    "icon":   "bg-success-200 dark:bg-success-900/60 text-success-800 dark:text-success-300",
+    "value":  "text-success-800 dark:text-success-300"
+  },
+  "unclassified": {
+    "label":  _t("projinv_unclassified"),
+    "seg":    "bg-neutral-400 dark:bg-neutral-500",
+    "border": "border-neutral-200 dark:border-neutral-700",
+    "icon":   "bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400",
+    "value":  "text-neutral-600 dark:text-neutral-300"
+  }
+} %}
+{% set BUCKET_UI_UNKNOWN = {
+  "label":  none,
+  "seg":    "bg-neutral-400 dark:bg-neutral-500",
+  "border": "border-neutral-200 dark:border-neutral-700",
+  "icon":   "bg-neutral-100 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400",
+  "value":  "text-neutral-600 dark:text-neutral-300"
+} %}
+
 <div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">
 
   {# ── 1. HEADER STRIP ────────────────────────────────────────────────────── #}
@@ -28,10 +105,13 @@
     </div>
   </div>
 
-  {# ── 2. KPI CARDS — Total / Available / Reserved / Contracted ────────────── #}
-  {# Total is neutral; the 3 buckets carry the locked status colours (info / warning /
-     success) reused 1:1 by the bars below, so card colour == bar colour everywhere. #}
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+  {# ── 2. KPI CARDS — Total + the six status buckets (7 cards) ─────────────── #}
+  {# Total is neutral; the six buckets carry the BUCKET_UI colours reused 1:1 by the
+     bars below, so card colour == bar colour everywhere.
+     LAYOUT: 2 cols on phones → 4 from md (a 4+3 wrap) → all 7 in one row from xl.
+     Seven equal columns only earn their keep on a wide screen; below xl a 4+3 wrap
+     keeps every card wide enough for a 3xl figure without shrinking the type. #}
+  <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
 
     {# Total units #}
     <div class="kpi-card border border-neutral-200 dark:border-neutral-700 flex flex-col overflow-hidden">
@@ -44,33 +124,21 @@
       <p class="text-3xl font-bold tabular text-neutral-900 dark:text-neutral-100">{{ "{:,}".format(inv.total_units) }}</p>
     </div>
 
-    {# Available / Reserved / Contracted — driven off inv.buckets (BUCKET_ORDER). #}
+    {# The six status buckets — driven off inv.buckets (BUCKET_ORDER), coloured and
+       labelled from the single BUCKET_UI map. An unknown key resolves to grey +
+       the raw key; there is no else-branch that could paint it green. #}
     {% for b in inv.buckets %}
-      {% if b.key == "available" %}
-        {% set border_cls = "border-primary-200 dark:border-primary-800" %}
-        {% set icon_cls = "bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400" %}
-        {% set value_cls = "text-primary-700 dark:text-primary-400" %}
-        {% set lbl = _t("projinv_available") %}
-      {% elif b.key == "reserved" %}
-        {% set border_cls = "border-warning-200 dark:border-warning-800" %}
-        {% set icon_cls = "bg-warning-100 dark:bg-warning-900/40 text-warning-600 dark:text-warning-400" %}
-        {% set value_cls = "text-warning-700 dark:text-warning-400" %}
-        {% set lbl = _t("projinv_reserved") %}
-      {% else %}
-        {% set border_cls = "border-success-200 dark:border-success-800" %}
-        {% set icon_cls = "bg-success-100 dark:bg-success-900/40 text-success-600 dark:text-success-400" %}
-        {% set value_cls = "text-success-700 dark:text-success-400" %}
-        {% set lbl = _t("projinv_contracted") %}
-      {% endif %}
-      <div class="kpi-card border {{ border_cls }} flex flex-col overflow-hidden">
+      {% set ui = BUCKET_UI.get(b.key, BUCKET_UI_UNKNOWN) %}
+      {% set lbl = ui.label or b.key %}
+      <div class="kpi-card border {{ ui.border }} flex flex-col overflow-hidden">
         <div class="flex items-start justify-between mb-3">
           <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight">{{ lbl }}</p>
-          <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center {{ icon_cls }}">
+          <div class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center {{ ui.icon }}">
             <span class="w-2.5 h-2.5 rounded-sm bg-current"></span>
           </div>
         </div>
         <div class="flex items-end justify-between gap-2">
-          <p class="text-3xl font-bold tabular {{ value_cls }}">{{ "{:,}".format(b.count) }}</p>
+          <p class="text-3xl font-bold tabular {{ ui.value }}">{{ "{:,}".format(b.count) }}</p>
           <p class="text-sm font-semibold font-mono tabular-nums text-neutral-400 dark:text-neutral-500 pb-1">{{ b.pct | round(1) }}%</p>
         </div>
       </div>
@@ -91,22 +159,22 @@
        flex-row reverses automatically under dir=rtl. Colours match the KPI cards. #}
     <div class="h-5 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-4">
       {% for b in inv.buckets %}
-        {% if b.key == "available" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
-        {% elif b.key == "reserved" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
-        {% else %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+        {% set ui = BUCKET_UI.get(b.key, BUCKET_UI_UNKNOWN) %}
+        {% set lbl = ui.label or b.key %}
         {% if b.pct > 0 %}
-        <div class="h-full {{ seg_cls }}" style="width: {{ b.pct }}%;"
+        <div class="h-full {{ ui.seg }}" style="width: {{ b.pct }}%;"
              title="{{ lbl }}: {{ "{:,}".format(b.count) }} ({{ b.pct | round(1) }}%)"></div>
         {% endif %}
       {% endfor %}
     </div>
 
-    {# 3-item legend — dot + label + count + %. #}
-    <div class="grid grid-cols-3 gap-3">
+    {# 6-item legend — dot + label + count + %. 2 cols on phones → 3 → all six across
+       from lg. The grid flows right-to-left under dir=rtl with no extra rules. #}
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-3 gap-y-3">
       {% for b in inv.buckets %}
-        {% if b.key == "available" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
-        {% elif b.key == "reserved" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
-        {% else %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+        {% set ui = BUCKET_UI.get(b.key, BUCKET_UI_UNKNOWN) %}
+        {% set lbl = ui.label or b.key %}
+        {% set dot_cls = ui.seg %}
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
             <span class="w-2.5 h-2.5 rounded-sm shrink-0 {{ dot_cls }}"></span>
@@ -156,22 +224,22 @@
         {# Status stacked bar #}
         <div class="h-4 flex rounded overflow-hidden bg-neutral-100 dark:bg-neutral-700 mb-3">
           {% for b in p.buckets %}
-            {% if b.key == "available" %}{% set seg_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
-            {% elif b.key == "reserved" %}{% set seg_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
-            {% else %}{% set seg_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+            {% set ui = BUCKET_UI.get(b.key, BUCKET_UI_UNKNOWN) %}
+            {% set lbl = ui.label or b.key %}
             {% if b.pct > 0 %}
-            <div class="h-full {{ seg_cls }}" style="width: {{ b.pct }}%;"
+            <div class="h-full {{ ui.seg }}" style="width: {{ b.pct }}%;"
                  title="{{ lbl }}: {{ "{:,}".format(b.count) }} ({{ b.pct | round(1) }}%)"></div>
             {% endif %}
           {% endfor %}
         </div>
 
-        {# Compact legend — count per bucket #}
-        <div class="grid grid-cols-3 gap-2 mt-auto">
+        {# Compact 6-item legend — count per bucket. 2 cols on the narrowest phones,
+           3×2 from sm; the extra row-gap keeps the two rows from reading as one. #}
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-2.5 mt-auto">
           {% for b in p.buckets %}
-            {% if b.key == "available" %}{% set dot_cls = "bg-primary-500 dark:bg-primary-600" %}{% set lbl = _t("projinv_available") %}
-            {% elif b.key == "reserved" %}{% set dot_cls = "bg-warning-400 dark:bg-warning-500" %}{% set lbl = _t("projinv_reserved") %}
-            {% else %}{% set dot_cls = "bg-success-500 dark:bg-success-600" %}{% set lbl = _t("projinv_contracted") %}{% endif %}
+            {% set ui = BUCKET_UI.get(b.key, BUCKET_UI_UNKNOWN) %}
+            {% set lbl = ui.label or b.key %}
+            {% set dot_cls = ui.seg %}
             <div class="min-w-0">
               <div class="flex items-center gap-1.5">
                 <span class="w-2 h-2 rounded-sm shrink-0 {{ dot_cls }}"></span>
@@ -202,9 +270,14 @@
 <script>
 window.PROJINV_STRINGS = {
   lang:           {{ lang | tojson }},
+  {# All SIX bucket labels, in BUCKET_ORDER — the drill panel builds its own bars,
+     legends and unit badges client-side and must never fall back to a raw key. #}
   available:      {{ _t("projinv_available")          | tojson }},
   reserved:       {{ _t("projinv_reserved")           | tojson }},
+  under_review:   {{ _t("projinv_under_review")       | tojson }},
   contracted:     {{ _t("projinv_contracted")         | tojson }},
+  delivered:      {{ _t("projinv_delivered")          | tojson }},
+  unclassified:   {{ _t("projinv_unclassified")       | tojson }},
   sold:           {{ _t("projinv_sold")               | tojson }},
   units:          {{ _t("projinv_units")              | tojson }},
   dd_phases:      {{ _t("projinv_dd_phases")          | tojson }},

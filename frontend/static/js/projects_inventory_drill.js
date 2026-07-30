@@ -273,7 +273,10 @@
         + '</p>'
       + '</div>'
       + _statusBarHtml(data.buckets, 'h-4')
-      + '<div class="grid grid-cols-3 gap-2 mt-2">' + _legendHtml(data.buckets) + '</div>'
+      // Six legend entries wrap 3×2 inside the panel (2×3 on the narrowest phones);
+      // the row-gap keeps the two rows from reading as one. Flows RTL for free.
+      + '<div class="grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-2.5 mt-2">'
+        + _legendHtml(data.buckets) + '</div>'
       + '<p class="mt-2 text-xs text-neutral-400 dark:text-neutral-500">'
         + _fmtNum(data.total_units) + ' ' + _esc(_s('units', 'units')) + '</p>';
     _scope.classList.remove('hidden');
@@ -303,7 +306,8 @@
         + '</div>'
       + '</div>'
       + _statusBarHtml(row.buckets, 'h-3')
-      + '<div class="grid grid-cols-3 gap-2 mt-2">' + _legendHtml(row.buckets) + '</div>';
+      + '<div class="grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-2.5 mt-2">'
+        + _legendHtml(row.buckets) + '</div>';
 
     btn.addEventListener('click', function () {
       _drillInto({ level: childLevel, id: row.group_id, name: row.group_name });
@@ -329,18 +333,35 @@
   }
 
   // ── Status-bar / legend HTML (shared by scope summary + group rows) ──────────
+  // SIX explicit bucket keys (domain.BUCKET_ORDER), colour-matched 1:1 to the SSR
+  // BUCKET_UI map in projects_inventory/dashboard.html so a drill panel can never
+  // disagree with the card that opened it. under_review = sky (the in-progress hue,
+  // far enough from primary-indigo that a legend dot cannot read as `available`);
+  // delivered = a clearly DARKER success step (it is the second SOLD bucket, and the
+  // config's `emerald` is byte-identical to `success`); unclassified = neutral grey.
   var _SEG_CLS = {
     available: 'bg-primary-500 dark:bg-primary-600',
     reserved: 'bg-warning-400 dark:bg-warning-500',
+    under_review: 'bg-sky-500 dark:bg-sky-600',
     contracted: 'bg-success-500 dark:bg-success-600',
+    delivered: 'bg-success-700 dark:bg-success-800',
+    unclassified: 'bg-neutral-400 dark:bg-neutral-500',
   };
+
+  // An unknown key is painted neutral grey — never green, never an invisible
+  // zero-class segment. Applies to _SEG_CLS, _bucketLabel and _badgeClass alike.
+  var _SEG_CLS_UNKNOWN = 'bg-neutral-400 dark:bg-neutral-500';
+
+  function _segClass(key) {
+    return _SEG_CLS[key] || _SEG_CLS_UNKNOWN;
+  }
 
   function _statusBarHtml(buckets, heightCls) {
     var segs = '';
     for (var i = 0; i < buckets.length; i++) {
       var b = buckets[i];
       if (b.pct > 0) {
-        segs += '<div class="h-full ' + (_SEG_CLS[b.key] || '') + '" style="width:' + b.pct + '%" '
+        segs += '<div class="h-full ' + _segClass(b.key) + '" style="width:' + b.pct + '%" '
           + 'title="' + _esc(_bucketLabel(b.key)) + ': ' + _fmtNum(b.count) + ' (' + _fmtPct(b.pct) + '%)"></div>';
       }
     }
@@ -354,7 +375,7 @@
       var b = buckets[i];
       html += '<div class="min-w-0">'
         + '<div class="flex items-center gap-1.5">'
-          + '<span class="w-2 h-2 rounded-sm shrink-0 ' + (_SEG_CLS[b.key] || '') + '"></span>'
+          + '<span class="w-2 h-2 rounded-sm shrink-0 ' + _segClass(b.key) + '"></span>'
           + '<span class="text-[11px] text-neutral-500 dark:text-neutral-400 truncate" title="'
             + _esc(_bucketLabel(b.key)) + '">' + _esc(_bucketLabel(b.key)) + '</span>'
         + '</div>'
@@ -366,15 +387,30 @@
   }
 
   // ── Label / format helpers ───────────────────────────────────────────────────
+  // Six explicit keys; an unknown key falls through to the RAW key as its label, so a
+  // new backend bucket shows up as itself rather than silently borrowing a neighbour's
+  // name. English fallbacks keep the panel functional in standalone tests.
   function _bucketLabel(key) {
     return { available: _s('available', 'Available'),
              reserved: _s('reserved', 'Reserved'),
-             contracted: _s('contracted', 'Contracted') }[key] || key;
+             under_review: _s('under_review', 'Under Review'),
+             contracted: _s('contracted', 'Contracted'),
+             delivered: _s('delivered', 'Delivered'),
+             unclassified: _s('unclassified', 'Unclassified') }[key] || key;
   }
 
+  // Unit-leaf badge. There is no .badge-sky component class, so under_review and
+  // delivered carry raw utilities on the .badge base — Tailwind scans this file
+  // (content glob frontend/static/js/**/*.js), so they are emitted into app.css.
   function _badgeClass(bucket) {
-    return 'badge ' + ({ available: 'badge-info', reserved: 'badge-warning',
-                         contracted: 'badge-success' }[bucket] || 'badge-neutral');
+    return 'badge ' + ({
+      available: 'badge-info',
+      reserved: 'badge-warning',
+      under_review: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400',
+      contracted: 'badge-success',
+      delivered: 'bg-success-200 text-success-800 dark:bg-success-900/50 dark:text-success-300',
+      unclassified: 'badge-neutral',
+    }[bucket] || 'badge-neutral');
   }
 
   function _headingLabel(childLevel) {
