@@ -121,3 +121,56 @@ def test_development_accepts_session_secret_32_chars() -> None:
     secret = "a" * 32
     s = Settings(**_BASE_SETTINGS, ENVIRONMENT="development", SESSION_SECRET=secret)
     assert s.SESSION_SECRET == secret
+
+
+# ── CORS_ORIGINS validation tests ───────────────────────────────────────────
+
+_VALID_SECRET = "a" * 32
+
+
+def test_production_raises_when_cors_origins_contains_wildcard() -> None:
+    from backend.core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(
+            **_BASE_SETTINGS,
+            ENVIRONMENT="production",
+            SESSION_SECRET=_VALID_SECRET,
+            CORS_ORIGINS=["*"],
+        )
+
+
+def test_production_accepts_concrete_https_origin() -> None:
+    from backend.core.config import Settings
+
+    s = Settings(
+        **_BASE_SETTINGS,
+        ENVIRONMENT="production",
+        SESSION_SECRET=_VALID_SECRET,
+        CORS_ORIGINS=["https://app.example.com"],
+    )
+    assert s.CORS_ORIGINS == ["https://app.example.com"]
+
+
+def test_production_accepts_empty_cors_origins() -> None:
+    from backend.core.config import Settings
+
+    s = Settings(
+        **_BASE_SETTINGS,
+        ENVIRONMENT="production",
+        SESSION_SECRET=_VALID_SECRET,
+        CORS_ORIGINS=[],
+    )
+    assert s.CORS_ORIGINS == []
+
+
+def test_development_accepts_wildcard_cors_origins() -> None:
+    from backend.core.config import Settings
+
+    s = Settings(
+        **_BASE_SETTINGS,
+        ENVIRONMENT="development",
+        SESSION_SECRET=_VALID_SECRET,
+        CORS_ORIGINS=["*"],
+    )
+    assert s.CORS_ORIGINS == ["*"]

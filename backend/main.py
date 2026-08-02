@@ -161,14 +161,23 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 
-_origins = settings.CORS_ORIGINS if settings.CORS_ORIGINS else ["*"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_origins,
-    allow_methods=["GET", "OPTIONS"],
-    allow_headers=["*"],
-    allow_credentials=False,
-)
+
+def cors_kwargs_for(origins: list[str]) -> dict:
+    """Return the CORSMiddleware kwargs for the given CORS_ORIGINS list.
+
+    No wildcard fallback: an empty list means no cross-origin access is
+    granted, not "allow everything". Settings.validate_cors_origins already
+    forbids "*" outright when ENVIRONMENT=production.
+    """
+    return {
+        "allow_origins": origins,
+        "allow_methods": ["GET", "OPTIONS"],
+        "allow_headers": ["*"],
+        "allow_credentials": False,
+    }
+
+
+app.add_middleware(CORSMiddleware, **cors_kwargs_for(settings.CORS_ORIGINS))
 
 app.add_middleware(
     SessionMiddleware,

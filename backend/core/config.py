@@ -130,6 +130,19 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def validate_cors_origins(self) -> "Settings":
+        # Fail-loud in production only: a wildcard origin is a common dev
+        # convenience but grants every website read access to this API's
+        # responses. Non-production environments may still use "*" freely.
+        if self.ENVIRONMENT == "production" and "*" in self.CORS_ORIGINS:
+            raise ValueError(
+                "CORS_ORIGINS must not contain \"*\" when ENVIRONMENT=production. "
+                "List explicit allowed origins instead, e.g. "
+                "CORS_ORIGINS=https://app.example.com"
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_ai_config(self) -> "Settings":
         if self.AI_ENABLED and not self.OPENAI_API_KEY:
             raise ValueError("AI_ENABLED=true but OPENAI_API_KEY is empty")
