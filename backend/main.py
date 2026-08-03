@@ -336,6 +336,21 @@ def legacy_missing_contact() -> RedirectResponse:
     return RedirectResponse(url="/api/v1/data-quality/missing-contact", status_code=301)
 
 
+# ── Root redirect (307 Temporary) ─────────────────────────────────────────────
+# Deliberately 307, not 301 like the legacy shims above:
+#   (1) 307 preserves the request method, so a stray POST to "/" is not silently
+#       downgraded to a GET.
+#   (2) 307 is temporary, so browsers do not permanently cache "/" -> "/login";
+#       the legacy shims are 301 because those old paths really are gone
+#       forever, whereas "/" is the live front door whose behaviour may change
+#       later. Do not "fix" this into consistency with the 301s above.
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/login", status_code=307)
+
+
 # ── Mount routers ─────────────────────────────────────────────────────────────
 
 app.include_router(api_v1_router, prefix="/api/v1")
