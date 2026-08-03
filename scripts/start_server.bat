@@ -4,6 +4,21 @@ setlocal
 :: Navigate to repo root relative to this script's location
 cd /d "%~dp0.."
 
+:: Resolve the virtualenv interpreter explicitly (relative to this script's own
+:: location, not PATH) so this script works whether or not the caller has
+:: activated .venv. Falling through to system Python would fail later with a
+:: confusing "No module named uvicorn" instead of a clear, actionable error.
+set "VENV_PY=%~dp0..\.venv\Scripts\python.exe"
+if not exist "%VENV_PY%" (
+    echo.
+    echo  ERROR: Virtual environment interpreter not found at:
+    echo    %VENV_PY%
+    echo  Create it with: python -m venv .venv
+    echo  Then install dependencies into it before running this script again.
+    echo.
+    exit /b 1
+)
+
 echo ============================================================
 echo  LaVerde ERP AI Engine -- Server Start
 echo  Decision 6.4: kill python, check port, clear cache, start
@@ -57,7 +72,7 @@ echo       Ctrl+C to stop. Close this window to kill the server.
 echo.
 echo ============================================================
 echo.
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+"%VENV_PY%" -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 echo.
 echo ============================================================
