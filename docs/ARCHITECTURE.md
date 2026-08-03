@@ -51,8 +51,7 @@ backend/
 │   │   │       └── schemas.py
 │   │   ├── domain.py      # BASE_DOMAIN, stage ID helpers
 │   │   ├── schemas.py     # Pydantic response models
-│   │   ├── service.py     # CrmService (8 concurrent Odoo calls)
-│   │   └── stage_resolver.py  # stage ID → name (1-hour cache)
+│   │   └── service.py     # CrmService (8 concurrent Odoo calls)
 │   │
 │   ├── customer_service/  # 🚧 Coming Soon
 │   ├── hr/                # 🚧 Coming Soon
@@ -106,9 +105,9 @@ backend/
 │  │(business │ │  (lead scoring)  │ │  (NL chat engine)│ │
 │  │ logic)   │ │                  │ │                  │ │
 │  └──────────┘ └──────────────────┘ └──────────────────┘ │
-│  ┌──────────┐ ┌──────────┐ ┌──────────────────────────┐ │
-│  │  domain  │ │ schemas  │ │  stage_resolver           │ │
-│  └──────────┘ └──────────┘ └──────────────────────────┘ │
+│  ┌──────────┐ ┌──────────┐                              │
+│  │  domain  │ │ schemas  │                              │
+│  └──────────┘ └──────────┘                              │
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐

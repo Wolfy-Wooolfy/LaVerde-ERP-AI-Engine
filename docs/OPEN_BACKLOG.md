@@ -68,23 +68,32 @@ is thin. Not blocking day-to-day; revisit before any board launch.
 Redirect / (root) to the login page — currently returns 404. Frontend-only,
 ~2 min. Bundle with any future frontend touch.
 
-## 8. stage_resolver uptime-<1h latent bug (MEDIUM — real but narrow)
-backend/modules/crm/stage_resolver.py computes cache staleness as
-time.monotonic() - _loaded_at > 3600, and a never-loaded resolver is
-initialized to _loaded_at = 0.0. On Windows time.monotonic() counts from
-system boot, so during the FIRST HOUR after a machine reboot a freshly
-created resolver evaluates as "not stale" and serves its EMPTY cache
-without ever fetching stage names from Odoo. Production impact: if the
-FastAPI app is (re)started within 1h of machine boot, CRM stage names
-render as "Stage 28"-style numeric fallbacks instead of real names until
-uptime passes 1h. Same root cause as the known test flake: the
-test_stage_resolver.py tests fail when the full suite runs within 1h of
-boot and pass otherwise (diagnosed by timestamp correlation; see the
-79e9b15 commit message). One-line fix when scheduled: initialize
-_loaded_at: float | None = None and treat None as an explicit
-never-loaded/needs-load state, instead of relying on the 0.0 sentinel
-against a boot-relative clock. Medium priority — real but narrow; only
-affects app starts within 1h of a reboot.
+## 8. stage_resolver uptime-<1h latent bug — RESOLVED (deleted as dead code)
+StageResolver was dead code from the moment it was introduced in 7945b81
+(Phase 1): nothing in the application ever imported it. Proven by a
+1627-test coverage run (the full suite minus the resolver's own test file)
+that builds the entire FastAPI app and reported
+backend/modules/crm/stage_resolver.py at 0% — missing from line 6, its
+very first import, so the module object was never even created. Its only
+importer in the whole repository was tests/unit/modules/crm/test_stage_resolver.py.
+
+The claimed production symptom ("CRM stage names render as 'Stage 28'-style
+numeric fallbacks") was therefore unreachable. Production CRM stage names
+come from Odoo many2one tuples in modules/crm/service.py
+(stage_name=stage[1] if stage else "No Stage"), whose only fallback is the
+literal "No Stage"; the sole f"Stage {id}" producer anywhere in backend/
+was inside the dead module itself.
+
+The underlying defect was nonetheless genuine, not a test artefact:
+_loaded_at = 0.0 compared against a boot-relative time.monotonic() made a
+freshly built resolver evaluate as "not stale" during the first hour of
+machine uptime, so it served its empty cache. That is the real cause of the
+intermittent test_stage_resolver.py failures within 1h of boot (see the
+79e9b15 commit message) — the tests were reporting a true bug in code no
+caller could reach.
+
+Resolved by deleting the module and its test file in this commit; no other
+source file needed a single change. Nothing to schedule.
 
 ## 9. Manual refresh on SSR pages — dashboard-refresh Phase 3 (MEDIUM-HIGH)
 Predecessor phases are both DONE:

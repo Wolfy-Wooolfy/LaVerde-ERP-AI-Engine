@@ -52,7 +52,7 @@ tests/
 │   └── modules/
 │       ├── ai/           test_client, test_client_extra, test_budget_tracker, test_cache
 │       ├── collections/  test_kpi_service (112-fail file), test_drilldowns, test_routes, test_cache, test_installment_type_names
-│       ├── crm/          test_client, test_service, test_stage_resolver, ai/*, ai/chat/* (incl. test_data_fetcher)
+│       ├── crm/          test_client, test_service, ai/*, ai/chat/* (incl. test_data_fetcher)
 │       ├── customer_accounts/  test_kpi_service_m3s4, test_kpia/kpib_service, test_drilldown_service, test_refunds_detail_service, test_routes
 │       └── hr/           test_kpi_service_{headcount,payroll_risk,department_cost,tenure}, test_dept_staff_service, test_employee_profile_service, test_router_*
 ├── integration/          (188 tests)  — FastAPI TestClient + dependency_overrides, serverless
@@ -145,7 +145,6 @@ Pass in isolation / in run (b); fail only in the full combined run. **One-line e
 | 11 | tests/unit/modules/customer_accounts/test_kpia_service.py |
 | 11 | tests/unit/modules/crm/ai/chat/test_session_manager.py |
 | 9 | tests/unit/modules/customer_accounts/test_refunds_detail_service.py |
-| 6 | tests/unit/modules/crm/test_stage_resolver.py |
 | 6 | tests/unit/modules/crm/ai/test_prioritizer_fetch.py |
 | 5 | tests/unit/modules/ai/test_client.py |
 | 5 | tests/unit/modules/crm/ai/test_prioritizer.py |
@@ -276,7 +275,6 @@ tests/unit/modules/crm/ai/test_prioritizer.py  (5)
 tests/unit/modules/crm/ai/test_prioritizer_fetch.py  (6)
 tests/unit/modules/crm/test_client.py  (12)
 tests/unit/modules/crm/test_service.py  (18)
-tests/unit/modules/crm/test_stage_resolver.py  (6)
 tests/unit/modules/customer_accounts/test_drilldown_service.py  (16)
 tests/unit/modules/customer_accounts/test_kpi_service_m3s4.py  (26)
 tests/unit/modules/customer_accounts/test_kpia_service.py  (11)
