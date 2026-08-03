@@ -136,15 +136,38 @@ window.crmRefresh = async function() {
   try {
     const res = await crmApi.get('/api/v1/dashboard/kpis');
     if (res.ok && res.kpis) {
-      // Update KPI values in DOM
+      // Update KPI values in DOM, counting the selectors that actually matched.
+      // A matched element counts even when the incoming value equals the one on
+      // screen: that metric WAS refreshed, it merely did not move. A selector
+      // that matches nothing means the payload was discarded — no pixel on this
+      // page corresponds to it.
+      let matchedKpis = 0;
       for (const [metric, value] of Object.entries(res.kpis)) {
         const el = document.querySelector(`[data-kpi-value="${metric}"]`);
-        if (el) animateNumber(el, parseInt(el.textContent.replace(/,/g, '')) || 0, value);
+        if (el) {
+          matchedKpis++;
+          animateNumber(el, parseInt(el.textContent.replace(/,/g, '')) || 0, value);
+        }
       }
-      // Update last-updated time
+
+      // Tracked separately from the KPI count: a clock advancing only proves
+      // time passed, not that data was refreshed, so it never justifies a
+      // success message on its own — and it must not tick on a page that did
+      // not refresh.
       const lu = document.getElementById('last-updated-time');
-      if (lu) lu.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-      toast.show('Data refreshed', 'success', 2000);
+      const timestampFound = lu !== null;
+
+      // Gate the success toast on selectors that actually matched. This endpoint
+      // feeds the CRM dashboard only, but the button that calls it lives in the
+      // shared top bar, so on every other page the response updates nothing. A
+      // fluent "Data refreshed" on a page that did not change is worse than no
+      // message at all: it teaches the user to trust a signal that is false.
+      if (matchedKpis > 0) {
+        if (timestampFound) lu.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        toast.show('Data refreshed', 'success', 2000);
+      } else {
+        toast.show('Nothing to refresh on this page', 'info', 2000);
+      }
     }
   } catch (e) {
     toast.show('Failed to refresh data', 'danger');
