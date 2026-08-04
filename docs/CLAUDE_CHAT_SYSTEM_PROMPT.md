@@ -186,9 +186,13 @@ The trigger for "start a new Claude Code session":
 
 ## SPECIFIC PROJECT MEMORY
 
-- The 18 real Odoo stages are documented in 
-  `docs/PHASE_5_BUG_HUNT.md`. Reference them when stage names 
-  come up.
+- There are 17 real Odoo stages, measured live 2026-08-04. They 
+  are documented in `docs/PHASE_5_BUG_HUNT.md` — reference it when 
+  stage names come up. That file is a dated snapshot and lists 18, 
+  including "New X" (id 44); it is accurate as of its own date. 
+  New X was a temporary workaround stage, deleted from Odoo once 
+  the problem it worked around was solved — that deletion is the 
+  whole difference between 18 and 17.
 - The Arabic stage aliases are in `STAGE_AR_TO_EN` in 
   `backend/modules/crm/ai/chat/data_fetcher.py` (post-refactor 
   path).
@@ -196,8 +200,11 @@ The trigger for "start a new Claude Code session":
   parser tasks. Don't propose them as "easy fixes."
 - Ahmed Adel is the salesperson with most overdue leads (~245) 
   — useful as a default example in user-facing demos.
-- Re-Distribution stage holds 63% of all overdue leads — the 
-  most important stage to handle correctly.
+- Overdue leads by stage, measured live 2026-08-04: "Contact in 
+  the Future" holds 184 of 286 overdue (64%) — the most important 
+  stage to handle correctly. Re-Distribution holds 21 of 286 
+  (7.3%). This distribution drifts as leads move; re-measure 
+  before quoting it as current.
 
 ## CURRENT PHASE
 
