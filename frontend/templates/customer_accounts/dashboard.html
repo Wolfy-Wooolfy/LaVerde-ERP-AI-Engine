@@ -270,8 +270,8 @@ window.CA_RD_STRINGS = {
   lang: {{ lang | tojson }},
 };
 </script>
-<script src="/static/js/formatters.js"></script>
-<script src="/static/js/customer_accounts.js"></script>
-<script src="/static/js/ca_drilldown.js"></script>
-<script src="/static/js/ca_refunds_panel.js"></script>
+<script src="{{ static_url('js/formatters.js') }}"></script>
+<script src="{{ static_url('js/customer_accounts.js') }}"></script>
+<script src="{{ static_url('js/ca_drilldown.js') }}"></script>
+<script src="{{ static_url('js/ca_refunds_panel.js') }}"></script>
 {% endblock %}

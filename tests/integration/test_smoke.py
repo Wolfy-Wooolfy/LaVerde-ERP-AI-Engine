@@ -192,6 +192,35 @@ def test_data_quality_hub_linked_contact_badge_renders(authed_client: TestClient
     assert "Walk-in Visitor" in r.text  # fallback-resolved name still shown
 
 
+# ── Static asset fingerprinting (cache busting) ───────────────────────────────
+# One test per historical render path (dashboard pages / auth pages / 403 page):
+# all three resolve to the shared backend.core.templates instance, but each test
+# proves its route actually emits fingerprinted URLs.
+
+
+def test_dashboard_assets_are_fingerprinted(authed_client: TestClient) -> None:
+    r = authed_client.get("/dashboard")
+    body = r.text
+    assert "/static/js/app.js?v=" in body
+    assert "/static/css/app.css?v=" in body
+    assert "/static/vendor/alpine.min.js?v=" in body
+
+
+def test_login_page_assets_fingerprinted() -> None:
+    # Unauthenticated GET — the login render path (no lifespan needed).
+    r = TestClient(app).get("/login")
+    assert r.status_code == 200
+    assert "/static/css/app.css?v=" in r.text
+    assert "/static/vendor/fonts.css?v=" in r.text
+
+
+def test_403_page_assets_fingerprinted(hr_only_client: TestClient) -> None:
+    # hr_only lacks crm → /dashboard renders 403.html (the error render path).
+    r = hr_only_client.get("/dashboard", headers={"Accept": "text/html"})
+    assert r.status_code == 403
+    assert "/static/css/app.css?v=" in r.text
+
+
 # ── CSP header ────────────────────────────────────────────────────────────────
 
 

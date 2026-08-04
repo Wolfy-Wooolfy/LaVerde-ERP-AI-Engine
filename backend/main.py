@@ -200,6 +200,19 @@ async def security_headers_middleware(request: Request, call_next: object) -> Re
     response.headers["Content-Security-Policy"] = settings.CSP_POLICY
     if settings.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Static asset cache policy, keyed on the PRESENCE of the content fingerprint,
+    # not the path: a ?v= URL can never change content under that URL (the hash
+    # changes instead), so it is safe to cache for a year; anything reaching an
+    # asset without a fingerprint (old bookmark, manifest miss) must revalidate on
+    # every use and can therefore never go stale. Fonts are un-fingerprinted by
+    # design (see backend/core/static_manifest.py) and get a bounded 30 days.
+    if request.url.path.startswith("/static/"):
+        if "v" in request.query_params:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif request.url.path.startswith("/static/vendor/fonts/"):
+            response.headers["Cache-Control"] = "public, max-age=2592000"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
     return response
 
 
