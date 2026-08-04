@@ -289,6 +289,99 @@ live-chat verification run, so it is left open rather than folded in blind.
 
 ---
 
+## 12. Five of seven CRM KPI cards never refreshed — RESOLVED (aliases)
+Pressing Refresh on the CRM dashboard updated only 2 of the 7 KPI cards. The
+DOM carries 7 `data-kpi-value` names; GET /api/v1/dashboard/kpis returned 10
+keys; the intersection was only `total_leads` and `followups_today`. Since
+app.js:146 matches payload keys against `[data-kpi-value="<key>"]`, the cards
+Critical Overdue, Overdue Follow-ups, Missing Contact Info, Missing
+Salesperson and Data Quality Issues could never be updated by a refresh. The
+success toast still fired, because 097b48d gates it on "at least one selector
+matched" and two did.
+
+NOT a regression. The two vocabularies diverged in 9286a7b — the single commit
+that created both dashboard.html and dashboard_api.py — and never agreed
+afterwards. Those five cards had never once refreshed in the product's
+history. Neither c5350b2 (New X removal, item 10) nor 097b48d (toast gating)
+caused it; 097b48d concealed it by making a 2-of-7 match look like success.
+The bug is invisible on load because the server-rendered first paint reads the
+correct model fields every time — it shows only if you press Refresh and
+compare. The full suite was green throughout: nothing in it compared the two
+vocabularies.
+
+### Why aliases (option f) and not a rename
+`sparkline_metric` in _kpi_card.html is ONE macro argument feeding FOUR
+attributes — data-sparkline-metric (:41), data-kpi-value (:76), data-kpi-trend
+(:80), data-sparkline (:88). The short names it carries have FOUR consumers,
+not the two originally assumed:
+1. `_METRIC_MAP` in dashboard_api.py — the /sparkline dispatch table.
+2. charts.js:246 — the raw attribute becomes the `?metric=` query value.
+3. charts.js:250 — `[data-kpi-trend="<metric>"]` places the trend badge.
+4. charts.js:273 — a hardcoded literal array
+   `['critical','overdue','missing_contact','data_quality']` choosing the
+   sparkline stroke colour. THE TRAP: no linter, compiler or rename tool
+   would flag it. Missing it turns four red sparklines indigo, silently.
+
+Because data-kpi-value (:76) and data-kpi-trend (:80) are interpolated from
+the SAME variable but read under OPPOSITE vocabularies, no edit to
+dashboard.html alone can satisfy both.
+
+Rejected options, recorded so they are not re-litigated:
+- (a) rename the DOM values to the payload keys — needs three lockstep edits,
+  one of which is the charts.js:273 trap above.
+- (b) rename the 5 payload keys to the short names — external consumers of
+  /api/v1/dashboard/kpis could NOT be enumerated by static inspection (only
+  app.js:137 in-repo). Removing keys on an unverifiable assumption was not
+  acceptable.
+- (c)/(e) a mapping layer inside crmRefresh() — crmRefresh is bound to the
+  shared base.html topbar button and runs on EVERY page, on a timer, and on
+  Ctrl/Cmd+Shift+R. Too broad a blast radius for a CRM-only fix.
+- (d) split the macro argument (a new `kpi_key` param) — the only option that
+  unwelds the shared argument, but a call site omitting `kpi_key` renders
+  data-kpi-value="" and no-ops without complaint: one silent failure mode
+  traded for another of the same class.
+- (f) CHOSEN. /kpis gained `critical`, `overdue`, `missing_contact`,
+  `missing_salesperson`, `data_quality` alongside the existing long keys.
+  Renames nothing, removes nothing, so all four short-name consumers are
+  untouched BY CONSTRUCTION rather than by care. _METRIC_MAP, charts.js,
+  _kpi_card.html, dashboard.html and app.js were not modified at all.
+
+### The guard — tests/unit/core/test_kpi_vocabulary_consistency.py
+No option was safe without it; it ships in the same commit. It extracts every
+`sparkline_metric` literal from dashboard.html (extracted, never hardcoded, so
+an 8th card cannot slip through) and asserts each is present both in the /kpis
+payload key set and in `_METRIC_MAP.keys()`; that each alias reports the same
+number as its long key; that the kpi_card() call count matches the literal
+count; and that the 10 original payload keys still exist. It uses a mini
+FastAPI app with a mocked CrmService — no server, no Odoo, no browser, no
+playwright. It was run BEFORE the aliases were added and failed, naming the
+exact five cards. It would have failed on 9286a7b.
+
+What it CANNOT see — stated here and in the test file itself:
+- charts.js:273's literal array. tests/frontend/*.js are run by hand with
+  `node` and are never collected by pytest, so no Python test can reach it.
+- whether the rendered attribute lands on the right DOM element, or whether
+  crmRefresh() animates it. That needs a browser; the e2e suite is skipped
+  (playwright deliberately not installed) and only counts cards anyway.
+
+### STILL OPEN — deferred, each its own decision
+- **A2 — three payload keys have no card.** `planned_followups`,
+  `no_activity_leads` and `missing_stage_count` are computed and sent on every
+  refresh but no KPI card exists for them; `_METRIC_MAP` likewise carries
+  `planned` and `no_activity` with no card. Adding cards is a product
+  decision, not a bug fix.
+- **A5 — `data-sparkline-metric` (_kpi_card.html:41) is dead.** Emitted on all
+  7 cards, read by nothing (verified by both hyphenated and camelCase
+  `dataset` greps). Harmless; removing it is a separate cleanup.
+- **Sparklines and trend badges are not refreshed at all.**
+  `loadAllSparklines()` is called only from the DOMContentLoaded handler
+  (dashboard.html:590); crmRefresh() never calls it. After a refresh the
+  numbers update but each sparkline and its trend badge stay at page-load
+  values. Deferred deliberately: fixing it costs one extra request per card
+  per refresh, which cuts against item 9's Odoo-load reduction.
+
+---
+
 ## Notes for a fresh session
 - READ-ONLY on Odoo is absolute; ALLOWED_METHODS never gains a write method.
 - Always confirm working dir + local HEAD == origin/main at session start.

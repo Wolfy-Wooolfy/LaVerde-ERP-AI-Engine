@@ -70,6 +70,27 @@ async def dashboard_kpis(
             "missing_contact_count": dq.missing_contact_count,
             "missing_salesperson_count": dq.missing_salesperson_count,
             "missing_stage_count": dq.missing_stage_count,
+            # ── Short-name aliases — additive by design; do NOT "tidy up" ────────────
+            # app.js:146 matches these keys against [data-kpi-value="<key>"]. That
+            # attribute is rendered from the `sparkline_metric` macro argument in
+            # _kpi_card.html, which ALSO feeds data-sparkline, data-kpi-trend and
+            # data-sparkline-metric — so the short names have FOUR consumers, not one:
+            # _METRIC_MAP below, the ?metric= query value (charts.js:246), the
+            # trend-badge selector (charts.js:250), and a hardcoded colour array
+            # (charts.js:273) that no linter or rename tool would flag if it were missed.
+            #
+            # Renaming either vocabulary to match the other therefore breaks the opposite
+            # side. The payload gains names instead: nothing above is renamed, nothing is
+            # removed, and the five keys below duplicate five keys above ON PURPOSE.
+            # Deleting them silently stops five of the seven KPI cards from ever
+            # refreshing — the state that shipped in 9286a7b and went unnoticed until
+            # 2026-08-04, because the first server-rendered paint is always correct.
+            # Guarded by tests/unit/core/test_kpi_vocabulary_consistency.py.
+            "critical": s.critical_overdue,
+            "overdue": s.overdue_followups,
+            "missing_contact": dq.missing_contact_count,
+            "missing_salesperson": dq.missing_salesperson_count,
+            "data_quality": dq.total_data_quality_issues,
         },
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
