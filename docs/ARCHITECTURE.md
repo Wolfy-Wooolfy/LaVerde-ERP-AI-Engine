@@ -202,7 +202,6 @@ Configurable via environment variables:
 ```
 CRM_CRITICAL_STAGE_IDS=28,34,35,37,41
 CRM_CLOSED_EXCLUDED_STAGE_IDS=26,30,31,32,38,42,46
-CRM_DATA_QUALITY_STAGE_IDS=44
 ```
 
 Run `python scripts/diag_stages.py` to re-verify against your Odoo instance.

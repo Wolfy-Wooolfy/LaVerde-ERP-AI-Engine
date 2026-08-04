@@ -33,7 +33,6 @@ def _mock_summary() -> SummaryResponse:
             data_quality_issues=6,
         ),
         data_quality=DataQuality(
-            new_x_count=1,
             missing_stage_count=2,
             missing_contact_count=3,
             missing_salesperson_count=2,

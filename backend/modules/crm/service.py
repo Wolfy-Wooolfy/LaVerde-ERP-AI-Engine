@@ -19,7 +19,6 @@ from backend.modules.crm.domain import (
     build_missing_stage_domain,
     get_closed_excluded_stage_ids,
     get_critical_stage_ids,
-    get_data_quality_stage_ids,
 )
 from backend.modules.crm.schemas import (
     ActivitySummary,
@@ -259,19 +258,17 @@ class CrmService:
     # ── Composite methods (internally parallel) ────────────────────────────────
 
     async def data_quality_summary(self) -> DataQuality:
-        """Run 4 Odoo count queries in parallel."""
-        new_x, missing_stage, missing_contact, missing_sp = await asyncio.gather(
-            self._count_domain([["stage_id", "in", get_data_quality_stage_ids()]]),
+        """Run 3 Odoo count queries in parallel."""
+        missing_stage, missing_contact, missing_sp = await asyncio.gather(
             self._count_domain(self._missing_stage_extra()),
             self._count_domain(self._missing_contact_extra()),
             self._count_domain(self._missing_salesperson_extra()),
         )
         return DataQuality(
-            new_x_count=new_x,
             missing_stage_count=missing_stage,
             missing_contact_count=missing_contact,
             missing_salesperson_count=missing_sp,
-            total_data_quality_issues=new_x + missing_stage + missing_contact + missing_sp,
+            total_data_quality_issues=missing_stage + missing_contact + missing_sp,
         )
 
     def _missing_contact_extra(self) -> list:

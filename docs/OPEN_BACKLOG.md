@@ -118,6 +118,79 @@ pages with no live Odoo data (Settings, Login, 403, no_modules).
 Medium-high priority — includes fixing the false-success toast /
 wrong-data bug on 10 pages.
 
+## 10. "New X Leads" data-quality KPI — RESOLVED (removed as dead code)
+The dashboard shipped a Data Quality mini-card counting leads in Odoo CRM
+stage id 44 ("New X"). That stage no longer exists, so the KPI returned a
+permanent, silent zero while rendering to board members as a clean bill of
+health. Removed end to end in this commit.
+
+Why the stage is gone (product fact, confirmed by Khaled): New X was a
+TEMPORARY stage created to work around a problem that has since been solved.
+Once the problem was fixed the stage was deliberately deleted, and the concept
+is NOT being replaced by any other stage. So there is nothing to re-point the
+KPI at — the measurement itself is obsolete, not merely mis-configured.
+
+Live read-only evidence, measured 2026-08-04:
+- 17 stages exist live. Ids 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+  37, 38, 41, 42, 46. Id 44 is absent.
+- `crm.stage` has NO `active` field (`fields_get(['active'])` returned `{}`),
+  so a stage cannot be archived on this instance. search_read returned the
+  same 17 records under the default context and under
+  `{'active_test': False}`, and the archived-only set was empty. The absence
+  of id 44 is therefore a DELETION, not an archival — it is not coming back
+  on its own.
+- `new_x_count` measured live = 0. Historical values of the identical query:
+  2,923 (2026-05-12) and 2,227 (2026-06-14). The series 2,923 -> 2,227 -> 0
+  is the stage being emptied and then dropped.
+- The other two stage settings were re-verified live and are correct and
+  untouched: all of CRM_CRITICAL_STAGE_IDS (28,34,35,37,41) and all of
+  CRM_CLOSED_EXCLUDED_STAGE_IDS (26,30,31,32,38,42,46) exist.
+
+Because the count was 0, removing it from `total_data_quality_issues` changes
+the "Data Quality Issues" KPI, its /api/v1/dashboard/kpis value, and its
+sparkline series by exactly zero — no visible step, nothing to explain to the
+board. The key was also already inert in the client refresh path: app.js only
+updates elements matching `[data-kpi-value="<metric>"]`, and the Data Quality
+mini-cards carry no such attribute, so `new_x_count` never drove a pixel.
+
+Same failure class as item 8 (StageResolver, 85824aa): code measuring
+something that no longer exists. Difference worth remembering — StageResolver
+was unreachable, so it was invisible; this one ran successfully on every
+dashboard load and published a truthful-looking zero. A KPI that cannot fail
+loudly needs its subject re-verified, not just its code reviewed.
+
+Removed: the CRM_DATA_QUALITY_STAGE_IDS setting and its `data_quality_stage_ids`
+property, `get_data_quality_stage_ids()` in crm/domain.py (no remaining caller),
+the 4th gather leg in `data_quality_summary()`, `DataQuality.new_x_count`, the
+`new_x_count` key in the /kpis payload and in the AI chat `data_quality_full`
+feed, the dashboard card, and the "New X Leads" label in en.json/ar.json. The
+`data_quality_tooltip` string was CORRECTED rather than deleted — it still
+describes the surviving three checks.
+
+Deliberately NOT removed, and still open:
+- `backend/modules/crm/ai/chat/prompts.py` (lines ~235, ~294-295, ~313) still
+  presents "New X" to the LLM as a current pipeline stage, including a
+  dedicated few-shot example. This is the same defect class and SHOULD be
+  fixed, but editing the intent-parser prompt changes AI behaviour and needs a
+  live chat verification run to confirm, so it is deferred to its own commit
+  rather than changed blind. THIS IS THE ONE REMAINING NEW X ITEM.
+- `data_fetcher.py` STAGE_AR_TO_EN keeps `"new x": "New X"`. Its failure mode
+  is honest — `count_leads_by_stage("New X")` finds no crm.stage row and
+  returns `stage_not_found`, not a silent zero — and it is load-bearing for
+  the exact-match guard that stops "New" matching "New X".
+- `marketing_attribution/domain.py` keeps `NEW_STAGE_NAMES = {"New", "New X"}`.
+  Different module, name-based grouping, unreachable but harmless.
+- `tests/mock_odoo/fixtures.py` keeps stage 44. A test double, not a claim
+  about live Odoo.
+- Historical docs (PHASE_5_BUG_HUNT.md, MARKETING_ATTRIBUTION_DISCOVERY_DATA.md,
+  ISSUES_FOUND.md, PHASE_3/5_REPORT.md, MODULE_2_IMPLEMENTATION_DECISIONS.md
+  and the other dated snapshots) are left intact — they are accurate as of
+  their own dates.
+
+Khaled must delete one line from his real .env by hand; see the session
+report. Not urgent: Settings uses `extra="ignore"`, so the leftover line is
+silently ignored and the app does not break.
+
 ---
 
 ## Notes for a fresh session

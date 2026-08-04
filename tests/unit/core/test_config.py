@@ -14,11 +14,9 @@ def test_stage_ids_parsed_correctly() -> None:
         BASIC_AUTH_PASSWORD="pass",
         CRM_CRITICAL_STAGE_IDS="1,2,3",
         CRM_CLOSED_EXCLUDED_STAGE_IDS="4,5",
-        CRM_DATA_QUALITY_STAGE_IDS="6",
     )
     assert s.critical_stage_ids == [1, 2, 3]
     assert s.closed_excluded_stage_ids == [4, 5]
-    assert s.data_quality_stage_ids == [6]
 
 
 def test_invalid_log_level_raises() -> None:

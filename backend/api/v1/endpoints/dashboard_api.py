@@ -70,7 +70,6 @@ async def dashboard_kpis(
             "missing_contact_count": dq.missing_contact_count,
             "missing_salesperson_count": dq.missing_salesperson_count,
             "missing_stage_count": dq.missing_stage_count,
-            "new_x_count": dq.new_x_count,
         },
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }

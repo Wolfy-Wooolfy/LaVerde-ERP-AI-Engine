@@ -45,7 +45,6 @@ def mock_crm():
     )
     crm.data_quality_summary = AsyncMock(
         return_value=DataQuality(
-            new_x_count=5,
             missing_stage_count=2,
             missing_contact_count=20,
             missing_salesperson_count=3,

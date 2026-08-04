@@ -33,11 +33,10 @@
   "Planned Follow-ups": "Planned Follow-ups",
   "No Activity Leads": "No Activity Leads",
   "Data Quality Issues": "Data Quality Issues",
-  "data_quality_tooltip": "Includes leads in 'New X' stage (awaiting classification) + leads missing stage, contact info, or salesperson",
+  "data_quality_tooltip": "Includes leads missing stage, contact info, or salesperson",
   "Missing Contact Info": "Missing Contact Info",
   "Missing Salesperson": "Missing Salesperson",
   "Missing Stage": "Missing Stage",
-  "New X Leads": "New X Leads",
   "Active Today": "Active Today",
 
   "dq_hub_subtitle": "Opportunities that need a data fix, grouped by what's missing.",

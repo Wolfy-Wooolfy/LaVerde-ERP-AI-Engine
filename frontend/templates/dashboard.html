@@ -512,9 +512,8 @@
 <!-- Data Quality summary card -->
 <div class="mt-4 chart-panel">
   <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-4">{{ _t("Data Quality") }}</h3>
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
     {% for label, value, variant, href in [
-        (_t("New X Leads"),         data_quality.new_x_count,               "warning", None),
         (_t("Missing Stage"),       data_quality.missing_stage_count,       "warning", "/data-quality?tab=stage"),
         (_t("Missing Contact Info"),data_quality.missing_contact_count,     "danger",  "/data-quality?tab=phone"),
         (_t("Missing Salesperson"), data_quality.missing_salesperson_count, "warning", "/data-quality?tab=salesperson"),

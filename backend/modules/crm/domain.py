@@ -39,11 +39,6 @@ def get_closed_excluded_stage_ids() -> list[int]:
     return settings.closed_excluded_stage_ids
 
 
-def get_data_quality_stage_ids() -> list[int]:
-    """Stages that flag a lead as a data-quality issue (needs classification)."""
-    return settings.data_quality_stage_ids
-
-
 def build_missing_contact_domain() -> list:
     """Return a domain that matches leads with no phone info whatsoever."""
     domain: list = list(BASE_DOMAIN)

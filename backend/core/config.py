@@ -83,7 +83,6 @@ class Settings(BaseSettings):
     # ── CRM Stage IDs (stored as comma-separated strings for .env compat) ────
     CRM_CRITICAL_STAGE_IDS: str = "28,34,35,37,41"
     CRM_CLOSED_EXCLUDED_STAGE_IDS: str = "26,30,31,32,38,42,46"
-    CRM_DATA_QUALITY_STAGE_IDS: str = "44"
 
     # ── Derived stage ID lists ────────────────────────────────────────────────
     @property
@@ -93,10 +92,6 @@ class Settings(BaseSettings):
     @property
     def closed_excluded_stage_ids(self) -> list[int]:
         return [int(x.strip()) for x in self.CRM_CLOSED_EXCLUDED_STAGE_IDS.split(",") if x.strip()]
-
-    @property
-    def data_quality_stage_ids(self) -> list[int]:
-        return [int(x.strip()) for x in self.CRM_DATA_QUALITY_STAGE_IDS.split(",") if x.strip()]
 
     @field_validator("LOG_LEVEL")
     @classmethod

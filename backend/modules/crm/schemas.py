@@ -47,7 +47,6 @@ class ActivitySummary(BaseModel):
 
 
 class DataQuality(BaseModel):
-    new_x_count: int
     missing_stage_count: int
     missing_contact_count: int
     missing_salesperson_count: int

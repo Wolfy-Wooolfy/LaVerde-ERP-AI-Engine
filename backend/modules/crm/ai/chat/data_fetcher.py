@@ -315,7 +315,6 @@ async def _handle_data_quality_summary(crm: CrmService, filters: dict, _p: Any) 
     dq = await crm.data_quality_summary()
     return {
         "type": "data_quality_full",
-        "new_x_count": dq.new_x_count,
         "missing_stage_count": dq.missing_stage_count,
         "missing_contact_count": dq.missing_contact_count,
         "missing_salesperson_count": dq.missing_salesperson_count,

@@ -416,7 +416,7 @@ async def test_summary_fires_parallel_odoo_calls(mock_client: MagicMock) -> None
     svc = CrmService(client=mock_client)
 
     await svc.summary()
-    # summary fires activity + dq(4) + total + critical + 3 overdue + matrix = 11 calls
+    # summary fires activity + dq(3) + total + critical + 3 overdue + matrix = 10 calls
     assert mock_client.execute_kw.call_count >= 8
 
 
