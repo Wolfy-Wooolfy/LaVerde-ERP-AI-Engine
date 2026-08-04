@@ -15,7 +15,6 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -37,6 +36,7 @@ from backend.core.responses import error_response as _core_error_response
 from backend.core.limiter import limiter
 from backend.core.logging import setup_logging
 from backend.core.metrics import get_uptime, metrics, set_start_time
+from backend.core.templates import templates as _err_templates
 from backend.shared.ai.exceptions import AIServiceError, BudgetExceededError
 from backend.modules.crm.service import CrmService
 
@@ -281,9 +281,6 @@ async def budget_exceeded_handler(request: Request, exc: BudgetExceededError) ->
 @app.exception_handler(AIServiceError)
 async def ai_service_handler(request: Request, exc: AIServiceError) -> JSONResponse:
     return _error_response(request, 502, "AI_SERVICE_ERROR", "AI service error")
-
-
-_err_templates = Jinja2Templates(directory="frontend/templates")
 
 
 @app.exception_handler(403)

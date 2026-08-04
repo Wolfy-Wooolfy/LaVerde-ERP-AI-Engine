@@ -4,12 +4,12 @@ import asyncio
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from loguru import logger
 
 from backend.api.deps import get_crm_service, get_current_user_html, require_admin_html, require_module_html
 from backend.core.config import settings
 from backend.core.i18n import detect_lang, load_translations, make_translator
+from backend.core.templates import templates
 from backend.modules.crm.service import CrmService
 from backend.modules.hr.services.kpi_service import (
     get_department_cost,
@@ -55,7 +55,6 @@ from backend.modules.projects_inventory.services.data_quality_service import (
 )
 
 router = APIRouter(tags=["ui"])
-templates = Jinja2Templates(directory="frontend/templates")
 
 # Load translations once at module import time (fast, idempotent)
 load_translations()

@@ -2,14 +2,13 @@
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 
 from backend.api.deps import get_current_user_html
 from backend.core.i18n import detect_lang, load_translations, make_translator
 from backend.core.limiter import limiter
+from backend.core.templates import templates
 
 router = APIRouter(tags=["auth"])
-templates = Jinja2Templates(directory="frontend/templates")
 
 load_translations()
 
