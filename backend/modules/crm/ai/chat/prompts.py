@@ -232,7 +232,7 @@ EGYPTIAN REAL ESTATE CONTEXT:
 - "مندوب" / "مندوبين" also means sales employee (legacy term — map same as above)
 - "فريق" = team
 - "متأخر" / "تأخر" / "overdue" = overdue leads
-- "مرحلة" / "stage" = pipeline stage (New, New X, Follow up, Reservation, Interested, Lost, Re-Distribution, Contact, No Answer, Unqualified, etc.)
+- "مرحلة" / "stage" = pipeline stage (New, Follow up, Reservation, Interested, Lost, Re-Distribution, Contact in the Future, No Answer, Unqualified, etc.)
 - "معاينة" / "معاين" = site visit — customer interest in visiting property
 - "اتصال" / "رن" / "phone" = phone attempt in chatter
 - "بيانات مفقودة" / "ناقصة" = missing contact data
@@ -291,8 +291,8 @@ Output: {{"intent":"leads_with_phone_attempt_signal","filters":{{}},"response_fo
 Input:  "which leads had phone calls with no answer?"
 Output: {{"intent":"leads_with_phone_attempt_signal","filters":{{}},"response_format":"list","confidence":0.92}}
 
-Input:  "كم lead في مرحلة New X؟"
-Output: {{"intent":"count_by_stage","filters":{{"stage":"New X"}},"response_format":"number","confidence":0.95}}
+Input:  "كم lead في مرحلة Contact in the Future؟"
+Output: {{"intent":"count_by_stage","filters":{{"stage":"Contact in the Future"}},"response_format":"number","confidence":0.95}}
 
 Input:  "كم lead في مرحلة إعادة التوزيع؟"
 Output: {{"intent":"count_by_stage","filters":{{"stage":"Re-Distribution"}},"response_format":"number","confidence":0.95}}
@@ -310,9 +310,8 @@ Real stages in this Odoo instance — ONLY use these stage names:
 - اهتمام / مهتم → Interested
 - خسارة / خسر → Lost
 - جديد → New
-- New X → New X  (two-word stage name — include the X)
 - إعادة التوزيع / اعادة التوزيع / توزيع → Re-Distribution
-- Contact / اتصال → Contact
+- Contact in the Future / التواصل في المستقبل → Contact in the Future
 - No Answer / مردش / لا رد → No Answer
 - Unqualified / غير مؤهل → Unqualified
 

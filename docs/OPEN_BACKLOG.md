@@ -191,6 +191,102 @@ Khaled must delete one line from his real .env by hand; see the session
 report. Not urgent: Settings uses `extra="ignore"`, so the leftover line is
 silently ignored and the app does not break.
 
+**UPDATE:** the deferred `prompts.py` sub-item above is now CLOSED — see item 11.
+The other three "deliberately NOT removed" entries (data_fetcher.py,
+marketing_attribution/domain.py, tests/mock_odoo/fixtures.py) stand unchanged.
+
+---
+
+## 11. Dead stage names in the intent-parser prompt — RESOLVED (New X + Contact)
+
+Closes the one remaining New X item deferred from item 10, and fixes a second
+dead stage name of the same class found during that work.
+
+Live read-only discovery 2026-08-04 measured 17 crm.stage rows. Neither
+"New X" nor "Contact" is among them. The 17: New, Lost, No Answer,
+Wrong Number, Follow up, Interested, Contact in the Future, Re-Distribution,
+Unqualified, Unavailable Request, Cancel Reservation, Bought Out,
+Cancel Contract, Draft Reservation, Initial Reservation, Reservation,
+Down Payment Confirm & Contracted. crm.stage has no `active` field, so an
+absent stage is deleted, not archived.
+
+### (a) New X — CLOSED
+`backend/modules/crm/ai/chat/prompts.py` no longer presents "New X" to the LLM.
+Four references removed: the vocabulary list (line ~235), the dedicated
+few-shot example (lines ~294-295), and the STAGE NAME MAPPING entry
+`- New X → New X  (two-word stage name — include the X)` (line ~313). The
+few-shot slot was REPLACED rather than deleted, because it was carrying a
+multi-word-stage-name demonstration; see (b).
+
+### (b) Contact → Contact in the Future — the second defect, worse than New X
+The STAGE NAME MAPPING block is headed "Real stages in this Odoo instance —
+ONLY use these stage names", and it listed `- Contact / اتصال → Contact`.
+"Contact" is not a stage. The real stage is "Contact in the Future".
+
+Worse than New X for two reasons:
+
+1. **It teaches truncation.** "Contact" is a PREFIX of a real stage, not an
+   unrelated dead string. It trains the model to emit the first word of a
+   multi-word stage name — the single failure mode the downstream matcher
+   cannot absorb.
+2. **The two stage intents disagreed about whether it exists.**
+   `count_by_stage` resolves through `CrmService.count_leads_by_stage`, which
+   is EXACT case-insensitive match (`crm/service.py`, `s["name"].strip().lower()
+   == target`) → "Contact" finds nothing → `stage_not_found`. But
+   `list_overdue_by_stage` filters by SUBSTRING (`data_fetcher.py`,
+   `stage_filter in r.stage_name.lower()`) → "contact" DOES match
+   "Contact in the Future" → a real list comes back. Same user word, one
+   intent says the stage does not exist and the other answers it. New X at
+   least failed consistently.
+
+Fixed by pointing the mapping at the real stage and by re-pointing the freed
+few-shot slot at it: the example now demonstrates a FOUR-token stage name
+(`"كم lead في مرحلة Contact in the Future؟"` → `{"stage":"Contact in the
+Future"}`), upgrading the multi-word lesson the New X example used to carry
+from 2 tokens to 4, on the stage most exposed to first-word truncation.
+
+The bare Arabic alias `اتصال` was DROPPED, not re-pointed. Line ~237 of the
+same prompt already assigns `اتصال` to phone-attempt-in-chatter detection, so
+the file was giving one Arabic word two contradictory jobs. Replacement alias
+is `التواصل في المستقبل`. A bare `تواصل` was rejected too: FALLBACK_FOLLOWUPS
+and SUGGESTED_QUESTIONS contain "اقترح عليّ 3 عملاء أتواصل معاهم النهارده",
+and those strings are re-parsed through `parse_intent` by
+`response_builder.py`, so a bare `تواصل` stage alias would compete with the
+`اقترح`/`النهارده` → recommendation rule on the system's own canned
+follow-ups. `متابعة مستقبلية` was rejected because `متابعة` already maps to
+Follow up.
+
+### Verification status — READ THIS BEFORE TRUSTING THE GREEN SUITE
+No test imports, reads, or asserts anything about `INTENT_PARSING_SYSTEM_PROMPT`.
+The four tests that import this module take `ALLOWED_INTENTS`,
+`CONVERSATIONAL_INTENTS`, `SUGGESTED_QUESTIONS`, `_TERMINOLOGY_RULES` only;
+`test_intent_parser.py` drives `parse_intent` with a mock client and asserts on
+canned JSON it supplies itself, so the system prompt reaches a mock and is
+discarded unexamined. The suite signature is identical whether this edit is
+right or wrong — it proves only the absence of collateral breakage. Correctness
+rests on Khaled's live chat run.
+
+Operational note for any future edit to this prompt: it is a module-level
+f-string built at import time, and `IntentCache` is keyed on
+`sha256(locale:question)` with the prompt NOT in the key. A full server restart
+is required — it both reloads the constant and clears the cache (IntentCache is
+in-memory only and, unlike AICache, does not persist to logs/ai_cache.json).
+
+### STILL OPEN — coverage gap, deliberately not fixed here
+The STAGE NAME MAPPING table names 8 of the 17 live stages. **9 live stages are
+absent from it entirely:** Wrong Number, Unavailable Request, Cancel
+Reservation, Bought Out, Cancel Contract, Draft Reservation, Initial
+Reservation, Down Payment Confirm & Contracted, and — as an Arabic mapping —
+any alias beyond the one added above.
+
+This is a DIFFERENT and lower-severity class than items (a) and (b): a missing
+entry is a coverage gap, whereas New X and Contact were false claims about
+live Odoo. Questions about the 9 still work when the user types the exact
+English name (it passes through `_normalise_stage` unchanged to an exact
+match); what is missing is Arabic-alias coverage and the model's awareness
+that they exist. Expanding the table is a scope increase and needs its own
+live-chat verification run, so it is left open rather than folded in blind.
+
 ---
 
 ## Notes for a fresh session
