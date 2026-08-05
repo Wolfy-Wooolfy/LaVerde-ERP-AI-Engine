@@ -7,7 +7,14 @@
         icon="users",            # users | alert | clock | check | x | activity
         sparkline_metric="total_leads",
         href="/dashboard"
-   ) }} #}
+   ) }}
+
+   `sparkline_metric` no longer draws a sparkline: the fabricated mini-charts and
+   trend badges were removed. It KEPT ITS NAME deliberately — it is the sole source
+   of data-kpi-value, the attribute app.js:146 matches to refresh the KPI number,
+   and renaming it would have been a second, unrelated risk in the same commit.
+   Every kpi_card() call MUST pass it, or that card renders data-kpi-value="" and
+   never refreshes. Guarded by tests/unit/core/test_kpi_vocabulary_consistency.py. #}
 
 {% macro kpi_card(label, value, variant="default", icon=none, sparkline_metric=none, href=none, tooltip=none) %}
 {% set border_colors = {
@@ -38,7 +45,6 @@
 {% set tag = "a" if href else "div" %}
 <{{ tag }} {% if href %}href="{{ href }}"{% endif %}
   class="kpi-card border {{ border_colors.get(variant, border_colors.default) }} group flex flex-col overflow-hidden"
-  {% if sparkline_metric %}data-sparkline-metric="{{ sparkline_metric }}"{% endif %}
 >
   <div class="flex items-start {% if icon %}justify-between{% endif %} mb-3">
     <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide leading-tight flex items-center gap-1"
@@ -71,22 +77,9 @@
     {% endif %}
   </div>
 
-  <div class="flex items-end justify-between">
-    <p class="text-3xl font-bold tabular {{ value_color.get(variant, value_color.default) }}"
-       data-kpi-value="{{ sparkline_metric or '' }}">
-      {% if value is not defined or value is none %}—{% elif value is number %}{{ value | int }}{% else %}{{ value }}{% endif %}
-    </p>
-    <span class="text-xs text-neutral-400 dark:text-neutral-500 font-mono"
-          data-kpi-trend="{{ sparkline_metric or '' }}">
-      {# Trend populated by charts.js after sparkline fetch #}
-    </span>
-  </div>
-
-  {# Mini sparkline canvas #}
-  {% if sparkline_metric %}
-  <div class="mt-3 h-10 -mx-1">
-    <canvas data-sparkline="{{ sparkline_metric }}" class="w-full h-full"></canvas>
-  </div>
-  {% endif %}
+  <p class="text-3xl font-bold tabular {{ value_color.get(variant, value_color.default) }}"
+     data-kpi-value="{{ sparkline_metric or '' }}">
+    {% if value is not defined or value is none %}—{% elif value is number %}{{ value | int }}{% else %}{{ value }}{% endif %}
+  </p>
 </{{ tag }}>
 {% endmacro %}

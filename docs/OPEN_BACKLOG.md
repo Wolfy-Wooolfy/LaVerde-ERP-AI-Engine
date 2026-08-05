@@ -367,18 +367,121 @@ What it CANNOT see — stated here and in the test file itself:
 ### STILL OPEN — deferred, each its own decision
 - **A2 — three payload keys have no card.** `planned_followups`,
   `no_activity_leads` and `missing_stage_count` are computed and sent on every
-  refresh but no KPI card exists for them; `_METRIC_MAP` likewise carries
-  `planned` and `no_activity` with no card. Adding cards is a product
-  decision, not a bug fix.
-- **A5 — `data-sparkline-metric` (_kpi_card.html:41) is dead.** Emitted on all
-  7 cards, read by nothing (verified by both hyphenated and camelCase
-  `dataset` greps). Harmless; removing it is a separate cleanup.
-- **Sparklines and trend badges are not refreshed at all.**
-  `loadAllSparklines()` is called only from the DOMContentLoaded handler
-  (dashboard.html:590); crmRefresh() never calls it. After a refresh the
-  numbers update but each sparkline and its trend badge stay at page-load
-  values. Deferred deliberately: fixing it costs one extra request per card
-  per refresh, which cuts against item 9's Odoo-load reduction.
+  refresh but no KPI card exists for them. (`_METRIC_MAP` likewise carried
+  `planned` and `no_activity` with no card; it was deleted in item 13.) Adding
+  cards is a product decision, not a bug fix. STILL OPEN.
+- **A5 — `data-sparkline-metric` is dead. — RESOLVED in item 13.** Removed from
+  _kpi_card.html with the rest of the sparkline feature. It was emitted on all 7
+  cards and read by nothing.
+- **Sparklines and trend badges are not refreshed at all. — RESOLVED in item 13,
+  BY REMOVAL, not by making them refresh.** The premise of this entry was wrong:
+  it treated a stale fabrication as a refresh bug. The series was never measured,
+  so there was nothing to keep current. Read item 13 before re-opening this.
+
+### Caution for whoever edits this section next
+Item 12 chose aliases specifically because the short names had FOUR consumers.
+After item 13 they have ONE — `data-kpi-value` → app.js:146. The safety that came
+from redundancy is gone; the only remaining guard is
+tests/unit/core/test_kpi_vocabulary_consistency.py.
+
+---
+
+## 13. CRM dashboard sparklines and trend badges — RESOLVED (removed as fabricated data)
+Every KPI card carried a 7-point mini-chart and a red/green percentage badge.
+Neither was data. `_synthetic_sparkline()` built the series as
+`int(current × (1 ± 0.15))` with `random.Random(current)` — seeded on the current
+value itself — and no Odoo call anywhere in that path read a historical state.
+`_trend_pct()` then derived the badge from that fabricated series, making the
+percentage a deterministic function of one number and nothing else, and
+mathematically bounded to roughly **−13.0% .. +17.6%** regardless of what the
+business actually did. Two cards holding the same number rendered an identical
+chart and an identical percentage. `_day_labels()` supplied genuine calendar
+dates as the axis for those invented values, which is the detail that made the
+payload most convincing.
+
+### Why the refresh was NOT fixed
+The known defect (item 12, STILL OPEN) was that `loadAllSparklines()` ran only
+from DOMContentLoaded, so the charts and badges froze at page-load values while
+the numbers beside them updated. Making them refresh was **deliberately
+rejected**: a fabricated quantity that updates in step with a real one looks MORE
+like a live measurement, which deepens the false credibility rather than removing
+it. A stationary fake is less harmful than an animated one. The entry framed a
+fabrication as a staleness bug; the fabrication was the bug.
+
+### The rule this enforces
+This project is a read-only intelligence layer over Odoo: **every number on
+screen must trace to Odoo.** A locally-generated quantity rendered in the visual
+grammar of a measurement — a percentage, red or green, beside a real KPI — is not
+acceptable, refreshed or not. If a real trend is ever wanted it needs periodic KPI
+snapshots. That is a separate product decision and a separate build, not a fix.
+
+### The endpoint went too — and why that is not inconsistent with item 12
+`GET /api/v1/dashboard/sparkline` was removed with its frontend, along with
+`_METRIC_MAP` (its only consumer), `_synthetic_sparkline`, `_trend_pct`,
+`_day_labels`, `_SPARKLINE_VARIANCE` and the two imports that served only them.
+
+Item 12 rejected option (b) — renaming /kpis payload keys — one day earlier, on
+the grounds that external consumers could not be enumerated by static inspection.
+The same objection was raised here and answered. **The symmetry breaks on one
+fact: the /kpis keys carry real Odoo numbers; /sparkline did not.** An unknown
+consumer of /kpis receives correct data, so deleting a key would break something
+that works. An unknown consumer of /sparkline was ALREADY broken — charting
+seeded noise under genuine calendar labels. Removal converts a confident wrong
+answer into a loud 404, which is the better failure. The precautionary principle
+points at removal here, not retention.
+
+Second reason: as a JSON route the fabrication was worse than on the dashboard,
+not better. On the card it at least sat beside a real number inside a UI a human
+could learn to distrust; as an API it shipped with no visual context at all, and
+the only marker that it was synthetic was the word "synthetic" in an OpenAPI
+`summary=` string no client ever reads.
+
+Odoo cost of the removal is near zero — `service.summary()` is cache-backed, so
+the seven per-load sparkline requests were mostly cache hits. What actually goes
+away is seven HTTP round-trips and their rate-limit budget per dashboard load.
+
+### What survived, and why it had to
+`sparkline_metric` (the macro argument) and `data-kpi-value` were **not** touched.
+That one argument is the sole source of `data-kpi-value`, which app.js:146 matches
+to refresh the seven KPI numbers — the exact mechanism repaired in 85db80e after
+five of seven cards had never refreshed since 9286a7b. Removing the argument, the
+seven call-site literals, or the attribute would have silently broken all seven
+refreshes again. The argument keeps its now-inaccurate NAME on purpose: renaming
+it would have been a second, unrelated risk inside a removal commit. The five
+short-name aliases in /kpis, `/kpis` itself, `/heatmap`, `crmRefresh()`, and the
+three real Chart.js charts (activity donut, salesperson bar, stage bar — all real
+Odoo data) are all untouched.
+
+Closing charts.js:273 as a side effect: the hardcoded literal array
+`['critical','overdue','missing_contact','data_quality']` lived inside
+`drawSparkline()` and went with it. Item 12 named it THE TRAP — unreachable from
+any pytest test, invisible to every linter and rename tool. **That blind spot no
+longer exists.**
+
+### Comments were rewritten, not just code deleted
+Two comment blocks described the short names as having FOUR consumers. After this
+commit they have ONE. Leaving them would have told the next reader that a rename
+still breaks charts.js — it would not — while understating how load-bearing the
+survivor now is. A false comment is more dangerous than dead code, because dead
+code cannot mislead a decision. Rewritten: the alias block in dashboard_api.py
+and the module docstring of tests/unit/core/test_kpi_vocabulary_consistency.py,
+whose "WHAT THIS TEST CANNOT GUARD" item 1 (the charts.js:273 blind spot) was
+deleted because this commit closes it.
+
+### Test impact
+`test_every_card_metric_is_a_known_sparkline_metric` was deleted with
+`_METRIC_MAP`. Not vestigial — **unwritable**: the failure it guarded (an unknown
+`?metric=` yielding `ok:false`, a blank canvas and a blank badge) can no longer
+occur, because there is no `?metric=`, no canvas and no badge. The other four
+tests in that file survive byte-for-byte and are the ones that were always
+load-bearing. Suite: 1645 → 1644 passed, 0 failed, 6 skipped, 9 deselected.
+
+Same failure class as items 8 (StageResolver) and 10 (New X): code presenting
+something that does not exist. The distinguishing feature here — worth
+remembering — is that this one was not merely wrong, it was **manufactured**, and
+it was manufactured in the visual grammar of a measurement. Items 8 and 10 were
+found by asking "is this still true?"; this one needed "where does this number
+come from?"
 
 ---
 

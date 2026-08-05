@@ -2,15 +2,11 @@
 
 WHAT THIS GUARDS
 ----------------
-frontend/templates/components/_kpi_card.html feeds ONE macro argument,
-`sparkline_metric`, into FOUR attributes — data-sparkline-metric (:41),
-data-kpi-value (:76), data-kpi-trend (:80) and data-sparkline (:88). Two
-consumers then read that single vocabulary with two different expectations:
-
-  * app.js:146 matches ``[data-kpi-value="<key>"]`` against the KEYS OF THE
-    /api/v1/dashboard/kpis PAYLOAD.
-  * _METRIC_MAP in dashboard_api.py and charts.js (:239 :246 :250 :273) read
-    the SHORT NAMES — "critical", "overdue", "missing_contact", ...
+frontend/templates/components/_kpi_card.html renders ONE macro argument,
+`sparkline_metric`, into ONE attribute — data-kpi-value (:81). app.js:146
+matches that attribute against the KEYS OF THE /api/v1/dashboard/kpis PAYLOAD.
+The card literals are SHORT NAMES — "critical", "overdue", "missing_contact",
+... — and the payload originally carried only long ones.
 
 The two vocabularies diverged in 9286a7b, the commit that created both files,
 and stayed divergent. Only `total_leads` and `followups_today` were spelled the
@@ -23,19 +19,23 @@ correct and nothing compared the two vocabularies.
 
 THIS TEST WOULD HAVE FAILED ON 9286a7b. That is its entire purpose.
 
+WHY IT MATTERS MORE NOW THAN WHEN IT WAS WRITTEN
+------------------------------------------------
+`sparkline_metric` used to feed FOUR attributes, and the short names had FOUR
+consumers: _METRIC_MAP, the ?metric= query value, the trend-badge selector, and
+a hardcoded colour array in charts.js. All four were removed along with the
+fabricated sparklines and trend badges. data-kpi-value is the only survivor, so
+this file is now the ONLY thing standing between a renamed literal and five KPI
+cards silently never refreshing again. Nothing else reads these names; nothing
+else will break loudly.
+
 WHAT THIS TEST CANNOT GUARD
 ---------------------------
-1. charts.js:273 — ``['critical','overdue','missing_contact','data_quality']``
-   is a bare literal array inside the JS function that picks the sparkline
-   stroke colour. It is unreachable from Python, and tests/frontend/*.js are
-   run by hand with `node` (never collected by pytest), so NOTHING in the
-   pytest suite can see it. Renaming a short name without editing that array
-   silently turns four red sparklines indigo, and no test anywhere fails.
-2. Whether the rendered ``data-kpi-value`` attribute actually reaches the right
+1. Whether the rendered ``data-kpi-value`` attribute actually reaches the right
    DOM element, and whether crmRefresh() then animates it. That needs a
    browser. The e2e suite is skipped (playwright deliberately not installed)
    and only counts cards in any case.
-3. app.js:146 itself. This asserts the two NAME SETS are compatible; it cannot
+2. app.js:146 itself. This asserts the two NAME SETS are compatible; it cannot
    assert the JavaScript consuming them is correct.
 
 So: this guards the vocabulary contract. Not the rendering, not the JS.
@@ -49,7 +49,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.api.deps import get_crm_service, get_current_user
-from backend.api.v1.endpoints.dashboard_api import _METRIC_MAP
 from backend.api.v1.endpoints.dashboard_api import router as dashboard_api_router
 from backend.core.templates import templates
 from backend.modules.crm.schemas import (
@@ -157,17 +156,6 @@ def test_every_card_metric_is_reachable_in_kpis_payload(kpis_payload: dict) -> N
         f"KPI cards whose data-kpi-value matches no /kpis key: {unreachable}. "
         f"app.js:146 will silently skip them and the card will never refresh. "
         f"Payload keys available: {sorted(kpis_payload)}"
-    )
-
-
-def test_every_card_metric_is_a_known_sparkline_metric() -> None:
-    """(ii) Requirement B3(ii). The same literal is also the ?metric= query
-    value; an unknown one makes /sparkline return HTTP 200 with ok:false, which
-    charts.js:247 discards silently — blank canvas, blank trend badge, no error."""
-    unknown = sorted(set(_card_metrics()) - set(_METRIC_MAP))
-    assert not unknown, (
-        f"KPI cards whose sparkline_metric is not in _METRIC_MAP: {unknown}. "
-        f"Known metrics: {sorted(_METRIC_MAP)}"
     )
 
 

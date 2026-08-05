@@ -157,10 +157,18 @@ Last item (href=none) is the current page.
   value=summary.total_leads,
   variant="default",          # default|danger|warning|success|info
   icon="users",               # users|alert|clock|check|phone|user-x|activity
-  sparkline_metric="total_leads",   # fetches from /api/v1/dashboard/sparkline
+  sparkline_metric="total_leads",   # REQUIRED — see below
   href="/dashboard"           # optional click destination
 ) }}
 ```
+
+`sparkline_metric` no longer draws a sparkline. The mini-charts and trend badges
+were removed because they were fabricated, not measured (OPEN_BACKLOG item 13).
+The argument kept its name on purpose: it is the sole source of `data-kpi-value`,
+the attribute `app.js:146` matches to refresh the KPI number. **Every `kpi_card()`
+call must pass it** — omit it and the card renders `data-kpi-value=""`, which
+matches nothing and silently never refreshes. Guarded by
+`tests/unit/core/test_kpi_vocabulary_consistency.py`.
 
 ---
 
