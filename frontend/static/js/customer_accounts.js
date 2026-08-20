@@ -187,10 +187,13 @@
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
 
-  function fetchAllKPIs() {
+  // `manual` is true ONLY for a user-initiated refresh; it adds ?refresh=1 so the
+  // server skips its cache (see the note above crmWithRefresh in api.js). The
+  // hourly timer and the visibilitychange handler call this with no argument.
+  function fetchAllKPIs(manual) {
     var t0 = performance.now();
     return Promise.all(KPI_ENDPOINTS.map(function (url) {
-      return fetch(url, { headers: { Accept: 'application/json' } })
+      return fetch(crmWithRefresh(url, manual), { headers: { Accept: 'application/json' } })
         .then(function (r) { return r.json(); });
     })).then(function (results) {
       var elapsed = Math.round(performance.now() - t0);
@@ -319,8 +322,11 @@
   }
 
   function init() {
+    // Wrapped, never `onclick = window.customerAccountsRefresh`: a bare reference
+    // makes the browser pass the MouseEvent as the first argument, so `manual`
+    // would be truthy by accident here and falsy everywhere else it is called.
     var topbarBtn = document.getElementById('refresh-btn');
-    if (topbarBtn) topbarBtn.onclick = window.customerAccountsRefresh;
+    if (topbarBtn) topbarBtn.onclick = function () { customerAccountsRefresh(true); };
 
     _wireKpiBDrilldown();
     _wireRefundsDrilldown();
@@ -347,10 +353,10 @@
     });
   }
 
-  window.customerAccountsRefresh = function () {
+  window.customerAccountsRefresh = function (manual) {
     stopAutoRefresh();
     stopHeartbeat();
-    fetchAllKPIs().then(function () {
+    fetchAllKPIs(manual).then(function () {
       startAutoRefresh();
       startHeartbeat();
     });

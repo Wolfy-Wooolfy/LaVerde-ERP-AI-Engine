@@ -2,6 +2,10 @@
 
 {% block title %}{{ _t("va_title") }} — LaVerde ERP AI Engine{% endblock %}
 {% block page_title %}{{ _t("va_title") }}{% endblock %}
+{# Server-rendered: these figures arrived with this page's GET and there is no
+   client-side data path to re-run, so the topbar Refresh button reloads the page
+   with ?refresh=1 (cache-bypassed) instead of calling the CRM-only crmRefresh(). #}
+{% block refresh_mode %}reload{% endblock %}
 
 {# Format a monetary EGP value as "X.XX bn EGP". The precise value rides along as a
    title tooltip wherever this is used. Realized = contracted value, never cash. #}

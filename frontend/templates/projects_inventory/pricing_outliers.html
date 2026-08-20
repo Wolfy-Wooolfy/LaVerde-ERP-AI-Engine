@@ -2,6 +2,10 @@
 
 {% block title %}{{ _t("po_title") }} — LaVerde ERP AI Engine{% endblock %}
 {% block page_title %}{{ _t("po_title") }}{% endblock %}
+{# Server-rendered: these figures arrived with this page's GET and there is no
+   client-side data path to re-run, so the topbar Refresh button reloads the page
+   with ?refresh=1 (cache-bypassed) instead of calling the CRM-only crmRefresh(). #}
+{% block refresh_mode %}reload{% endblock %}
 
 {% block content %}
 <div class="p-4 md:p-6 space-y-6 max-w-screen-2xl mx-auto">

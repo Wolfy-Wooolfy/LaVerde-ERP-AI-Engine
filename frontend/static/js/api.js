@@ -4,6 +4,30 @@
 
 'use strict';
 
+// ── Manual-refresh URL seam ───────────────────────────────────────────────────
+// The ONE place that turns a URL into a cache-bypassing URL. backend/main.py:233
+// reads `?refresh=1` on a GET as "skip every in-memory cache read for this
+// request", so this must be reachable ONLY from a user-initiated refresh: an
+// automatic timer that sent it would defeat the cache on every tick and put Odoo
+// load straight back where Phase 1 (79e9b15) found it — silently, because the
+// pages would still render perfectly. Hence `manual` is an explicit argument
+// with no truthy default, and every automatic caller passes nothing at all.
+//
+// URLSearchParams.set — never append, never string concatenation — is what makes
+// this both param-preserving and idempotent. The SSR pages carry real state in
+// their query strings (window, tab, months, campaign_id, start_month, end_month),
+// so a concatenated "?refresh=1" would corrupt them; and the reload lands on a
+// URL that already has refresh=1, so a second application must not stack.
+//
+// Relative in, relative out; absolute in, absolute out — the SSR reload feeds it
+// location.href and assigns the result straight back.
+window.crmWithRefresh = function (url, manual) {
+  if (!manual) return url;
+  var u = new URL(url, window.location.origin);
+  u.searchParams.set('refresh', '1');
+  return /^[a-z][a-z0-9+.-]*:/i.test(url) ? u.href : u.pathname + u.search + u.hash;
+};
+
 window.crmApi = {
   _retries: 2,
   _retryDelay: 1000,

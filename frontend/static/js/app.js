@@ -128,13 +128,17 @@ window.toast = {
 };
 
 // ── Data refresh ──────────────────────────────────────────────────────────────
-window.crmRefresh = async function() {
+// `manual` is true ONLY for a user-initiated refresh. It is threaded to
+// crmWithRefresh (api.js) and decides whether this request carries ?refresh=1
+// and so bypasses the server-side cache. The hourly autoRefresh above calls
+// crmRefresh() with no argument on purpose — see the note in api.js.
+window.crmRefresh = async function(manual) {
   const refreshIcon = document.getElementById('refresh-icon');
   if (refreshIcon) refreshIcon.classList.add('animate-spin');
   loadingBar.show();
 
   try {
-    const res = await crmApi.get('/api/v1/dashboard/kpis');
+    const res = await crmApi.get(crmWithRefresh('/api/v1/dashboard/kpis', manual));
     if (res.ok && res.kpis) {
       // Update KPI values in DOM, counting the selectors that actually matched.
       // A matched element counts even when the incoming value equals the one on
@@ -177,6 +181,50 @@ window.crmRefresh = async function() {
   }
 };
 
+// ── Manual refresh entry point ────────────────────────────────────────────────
+// The single place a click or keystroke enters the refresh machinery, and the
+// only place that decides between the two strategies.
+//
+// Client-fetch pages (CRM dashboard) re-request their own data and repaint in
+// place. Server-rendered pages have no client data path at all — their figures
+// arrived with the page GET — so the only way to refresh them is to fetch the
+// page again with the cache bypassed.
+//
+// Which one applies is declared by the page, never inferred: base.html renders
+// data-refresh-mode from a Jinja block defaulting to "fetch", and the ten SSR
+// templates override it to "reload". Sniffing the DOM instead (e.g. "is there a
+// [data-kpi-value] here?") would rebuild exactly the silent coupling documented
+// at dashboard_api.py:42-63, where a rename nothing could see broke five cards.
+//
+// Collections and Customer Accounts replace #refresh-btn.onclick with their own
+// handlers, so this function is not reached on those two pages.
+window.crmManualRefresh = function() {
+  const declared = document.querySelector('[data-refresh-mode]');
+  if (declared && declared.getAttribute('data-refresh-mode') === 'reload') {
+    window.location.href = crmWithRefresh(window.location.href, true);
+    return;
+  }
+  crmRefresh(true);
+};
+
+// ── Drop ?refresh=1 once the page has used it ─────────────────────────────────
+// The reload above leaves refresh=1 in the address bar. Left there it is
+// inherited by F5, by a bookmark, and by any link the user copies to a
+// colleague — turning one deliberate bypass into a permanent one for everybody
+// who receives it, against the cache that keeps Odoo load survivable.
+//
+// replaceState, never pushState: pushState would add a history entry, so Back
+// would land on the refreshing URL and re-arm it. Runs at parse time rather
+// than on DOMContentLoaded so the URL is already clean if the user reloads
+// early, and runs on every page because a stale link can be opened anywhere.
+(function stripRefreshParam() {
+  if (!window.history || typeof history.replaceState !== 'function') return;
+  const current = new URL(window.location.href);
+  if (!current.searchParams.has('refresh')) return;
+  current.searchParams.delete('refresh');
+  history.replaceState(null, '', current.pathname + current.search + current.hash);
+}());
+
 // ── Number animation ──────────────────────────────────────────────────────────
 function animateNumber(el, from, to) {
   const duration = 600;
@@ -215,10 +263,10 @@ window.exportTableCSV = function(tableId) {
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
-  // Cmd/Ctrl+Shift+R → refresh
+  // Cmd/Ctrl+Shift+R → refresh (a keystroke is a human, so: manual)
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'R') {
     e.preventDefault();
-    crmRefresh();
+    crmManualRefresh();
   }
 });
 

@@ -34,7 +34,7 @@
             class="text-neutral-300 font-medium">—</span>
     </div>
     <button id="ca-refresh-btn"
-      onclick="customerAccountsRefresh()"
+      onclick="customerAccountsRefresh(true)"
       class="btn btn-secondary btn-sm">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -190,7 +190,7 @@
           d="M6 18L18 6M6 6l12 12"/>
   </svg>
   <span>{{ _t("Error loading data") }}</span>
-  <button onclick="customerAccountsRefresh()"
+  <button onclick="customerAccountsRefresh(true)"
           class="ms-2 underline text-danger-600 dark:text-danger-400 text-xs">
     {{ _t("Try again") }}
   </button>
