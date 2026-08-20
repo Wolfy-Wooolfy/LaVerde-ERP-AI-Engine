@@ -552,3 +552,120 @@ def test_the_swallowing_catch_is_never_silent() -> None:
             f"{name}: the swallow log drops the error object — a message with no "
             f"stack is barely better than silence"
         )
+
+
+# ── the manual-refresh affordance ─────────────────────────────────────────────
+
+
+def test_the_affordance_helper_is_defined_once_in_app_js() -> None:
+    """One implementation, reachable from the page bundles.
+
+    It must hang off `window`: collections.js and customer_accounts.js are
+    separate classic scripts and cannot see app.js's lexical scope. `loadingBar`
+    is the counter-example living in that same file — a top-level `const`, which
+    is script-scoped, NOT a window property. Anything writing
+    `window.loadingBar` is reading undefined and silently doing nothing.
+    """
+    app = _strip_comments(_js("app.js"))
+    assert re.search(r"window\.crmRefreshFeedback\s*=\s*\{", app), (
+        "window.crmRefreshFeedback is gone — the dashboards have no way to show "
+        "that a slow manual refresh is running"
+    )
+    for name in _CLIENT_FETCH_BUNDLES:
+        src = _strip_comments(_js(name))
+        assert "crmRefreshFeedback = {" not in src, (
+            f"{name} defines its own copy of the affordance — it must use app.js's"
+        )
+        assert "window.loadingBar" not in src, (
+            f"{name} reads window.loadingBar, which is undefined. loadingBar is a "
+            f"top-level `const` in app.js: script-scoped, never a window property."
+        )
+    assert "window.loadingBar" not in app, (
+        "app.js assigns/reads window.loadingBar — loadingBar is a lexical const; "
+        "the shared helper closes over it instead"
+    )
+
+
+def test_the_affordance_covers_both_the_bar_and_the_icon_and_guards_the_dom() -> None:
+    """start and stop must each touch both surfaces, and never assume the
+    elements exist — these scripts run on pages where either may be absent, and
+    a throw would abort the caller's .then() and take the timer restart with it.
+    """
+    app = _strip_comments(_js("app.js"))
+    start = _brace_body(app, "start() {")
+    stop = _brace_body(app, "stop() {")
+
+    assert "loadingBar.show()" in start, "the affordance no longer shows the loading bar"
+    assert "classList.add('animate-spin')" in start, "the affordance no longer spins the icon"
+    assert "loadingBar.complete()" in stop, "the affordance no longer completes the loading bar"
+    assert "classList.remove('animate-spin')" in stop, "the affordance no longer stops the spin"
+
+    for label, body in (("start", start), ("stop", stop)):
+        assert re.search(r"if\s*\(\s*icon\s*\)", body), (
+            f"crmRefreshFeedback.{label} dereferences #refresh-icon unguarded. On a "
+            f"page without it this throws, and in stop() that would also skip the "
+            f"timer restart chained after it."
+        )
+
+
+def test_crm_refresh_uses_the_shared_affordance() -> None:
+    """One implementation means crmRefresh must consume it too, and must still
+    clear it in a `finally` so a thrown request cannot leave the icon spinning
+    forever."""
+    app = _strip_comments(_js("app.js"))
+    assert "crmRefreshFeedback.start()" in app, "crmRefresh no longer starts the shared affordance"
+    assert re.search(r"finally\s*\{\s*crmRefreshFeedback\.stop\(\);\s*\}", app), (
+        "crmRefresh no longer stops the shared affordance in a finally block — a "
+        "failed request would leave the refresh icon spinning indefinitely"
+    )
+    # The old inline duplicate must be gone, or there are two implementations
+    # again and only one of them is under test.
+    assert "refreshIcon" not in app, (
+        "app.js still carries the old inline refreshIcon handling alongside the "
+        "shared helper — that is the duplication this extraction removed"
+    )
+
+
+def test_the_dashboards_show_the_affordance_only_when_manual() -> None:
+    """The whole point of the manual flag, applied to the spinner.
+
+    The hourly timer, the visibilitychange re-fetch and the initial page load
+    all run unattended. A loading bar appearing on its own once an hour is a
+    regression, not a feature — so both calls must sit behind `if (manual)`.
+    """
+    for name in _CLIENT_FETCH_BUNDLES:
+        src = _strip_comments(_js(name))
+
+        for call in ("crmRefreshFeedback.start()", "crmRefreshFeedback.stop()"):
+            assert call in src, f"{name}: {call} is missing — a slow manual refresh shows nothing"
+            for match in re.finditer(re.escape(call), src):
+                window = src[max(0, match.start() - 60) : match.start()]
+                assert re.search(r"if\s*\(\s*manual\s*\)\s*$", window.rstrip()), (
+                    f"{name}: {call} is not guarded by `if (manual)`. An automatic "
+                    f"refetch would flash the loading bar with nobody watching."
+                )
+
+        # And the stop must be chained onto restartTimersAfter, whose promise
+        # never rejects — otherwise a failed refresh leaves the icon spinning
+        # and the button looking permanently busy.
+        assert re.search(
+            r"restartTimersAfter\(fetchAllKPIs\(manual\)\)\s*\.then\(", src
+        ), (
+            f"{name}: the affordance stop is not chained onto restartTimersAfter's "
+            f"non-rejecting promise, so a failed manual refresh can leave the icon "
+            f"spinning with no way to clear it"
+        )
+
+
+def _brace_body(src: str, opener: str) -> str:
+    """Isolate a brace-balanced block starting at `opener`."""
+    start = src.index(opener)
+    depth = 0
+    for i in range(start + len(opener) - 1, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : i + 1]
+    raise AssertionError(f"unbalanced braces after {opener!r}")

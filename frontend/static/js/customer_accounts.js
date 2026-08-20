@@ -381,7 +381,17 @@
   window.customerAccountsRefresh = function (manual) {
     stopAutoRefresh();
     stopHeartbeat();
-    restartTimersAfter(fetchAllKPIs(manual));
+    // Affordance ONLY when a human asked. This refresh is slow by design — it
+    // carries ?refresh=1 and goes to Odoo — but the hourly timer, the
+    // visibilitychange re-fetch and the initial load all reach this same
+    // function's siblings unattended. A loading bar appearing on its own once
+    // an hour is a regression, not a feature.
+    if (manual) crmRefreshFeedback.start();
+    // restartTimersAfter never rejects, so this .then runs on both outcomes:
+    // the spinner always stops and a failed refresh stays clickable.
+    restartTimersAfter(fetchAllKPIs(manual)).then(function () {
+      if (manual) crmRefreshFeedback.stop();
+    });
   };
 
   document.addEventListener('DOMContentLoaded', init);

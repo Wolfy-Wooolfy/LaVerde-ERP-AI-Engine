@@ -83,6 +83,37 @@ const loadingBar = {
   },
 };
 
+// ── Manual-refresh affordance ─────────────────────────────────────────────────
+// One implementation of "a refresh is running", shared by crmRefresh and by the
+// two dashboard bundles that fetch their own KPIs.
+//
+// It exists because a manual refresh is now SLOW BY DESIGN: it carries
+// ?refresh=1, so the server skips its cache and goes to Odoo. Measured on
+// /collections/dashboard, a cached fetch takes ~20ms and the bypassed one took
+// 3401ms — 3.4 seconds during which the page was completely static and told the
+// user nothing.
+//
+// Exposed on `window` because collections.js and customer_accounts.js are
+// separate classic scripts. `loadingBar` deliberately is NOT: it is a top-level
+// `const`, a script-scoped lexical binding that this object closes over. There
+// is no `window.loadingBar` and nothing outside app.js can reach it directly.
+//
+// Every DOM lookup is guarded and re-done per call — these run on pages where
+// #loading-bar or #refresh-icon may be absent, and a node captured once could
+// outlive the element actually on screen.
+window.crmRefreshFeedback = {
+  start() {
+    loadingBar.show();
+    const icon = document.getElementById('refresh-icon');
+    if (icon) icon.classList.add('animate-spin');
+  },
+  stop() {
+    loadingBar.complete();
+    const icon = document.getElementById('refresh-icon');
+    if (icon) icon.classList.remove('animate-spin');
+  },
+};
+
 // ── Toast manager ─────────────────────────────────────────────────────────────
 window.toast = {
   _id: 0,
@@ -133,9 +164,12 @@ window.toast = {
 // and so bypasses the server-side cache. The hourly autoRefresh above calls
 // crmRefresh() with no argument on purpose — see the note in api.js.
 window.crmRefresh = async function(manual) {
-  const refreshIcon = document.getElementById('refresh-icon');
-  if (refreshIcon) refreshIcon.classList.add('animate-spin');
-  loadingBar.show();
+  // Unconditional, including on the hourly automatic tick. That is the
+  // behaviour this page has always had; it is inconsistent with the two
+  // dashboards below, which show the affordance only when `manual`. Logged in
+  // docs/OPEN_BACKLOG.md rather than changed here — it is a third page, and
+  // altering it would need browser verification this change has not had.
+  crmRefreshFeedback.start();
 
   try {
     const res = await crmApi.get(crmWithRefresh('/api/v1/dashboard/kpis', manual));
@@ -176,8 +210,7 @@ window.crmRefresh = async function(manual) {
   } catch (e) {
     toast.show('Failed to refresh data', 'danger');
   } finally {
-    loadingBar.complete();
-    if (refreshIcon) refreshIcon.classList.remove('animate-spin');
+    crmRefreshFeedback.stop();
   }
 };
 

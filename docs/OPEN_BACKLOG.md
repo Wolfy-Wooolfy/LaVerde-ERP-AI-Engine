@@ -485,6 +485,41 @@ come from?"
 
 ---
 
+## 14. CRM dashboard shows the loading bar on its automatic refresh (LOW)
+Found while extracting the shared refresh affordance on 2026-08-20.
+
+crmRefresh (app.js) calls crmRefreshFeedback.start() unconditionally, so the
+global loading bar sweeps and the topbar icon spins on the HOURLY AUTOMATIC
+tick as well as on a click. It has behaved this way since the affordance was
+written; the extraction preserved it rather than changing it.
+
+The two client-fetch dashboards deliberately do the opposite: collections.js
+and customer_accounts.js gate both calls behind `if (manual)`, because an
+indicator that appears with nobody watching trains the user to ignore it.
+So the CRM dashboard is now the only page in the app that flashes a loading
+bar unprompted.
+
+Severity: LOW. One unprompted loading bar per hour, per open CRM dashboard
+tab. No data is wrong and nothing is lost — the bar is cosmetic. It is
+listed because it is now an inconsistency between three pages that are meant
+to share one affordance, not because it misleads.
+
+Fix, one line, in app.js's crmRefresh:
+    crmRefreshFeedback.start();   ->   if (manual) crmRefreshFeedback.start();
+and the matching guard on the stop() in its finally block. The `manual`
+parameter is already threaded in and already correct; nothing else changes.
+
+Deliberately NOT done in the affordance commit: the CRM dashboard is a third
+page, otherwise untouched by that change, and altering what it shows would
+need its own browser verification before the branch can be pushed.
+Guard to add alongside the fix:
+tests/unit/core/test_refresh_wiring.py already asserts the `if (manual)`
+pattern for the two dashboards in
+test_the_dashboards_show_the_affordance_only_when_manual — extend it to app.js
+rather than writing a new test.
+
+---
+
 ## Notes for a fresh session
 - READ-ONLY on Odoo is absolute; ALLOWED_METHODS never gains a write method.
 - Always confirm working dir + local HEAD == origin/main at session start.
