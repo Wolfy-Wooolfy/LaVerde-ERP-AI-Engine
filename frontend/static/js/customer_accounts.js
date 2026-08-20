@@ -223,7 +223,19 @@
 
   function startAutoRefresh() {
     if (_autoRefreshInterval) return;
-    _autoRefreshInterval = setInterval(fetchAllKPIs, 3600000);
+    // Wrapped, never `setInterval(fetchAllKPIs, ...)`. A bare reference hands the
+    // callback whatever the host chooses to pass: Firefox historically passed an
+    // interval-lateness argument, which would land in `manual`, be truthy, and
+    // put ?refresh=1 on every hourly tick of every open tab — permanently
+    // defeating the cache Phase 1 (79e9b15) exists to protect. Legacy-only on
+    // current browsers, but this was the one shape in this file where a
+    // host-supplied argument could reach `manual` at all.
+    //
+    // The explicit call also routes the tick through restartTimersAfter, so a
+    // failed hourly fetch no longer leaves an unhandled rejection behind.
+    _autoRefreshInterval = setInterval(function () {
+      restartTimersAfter(fetchAllKPIs());
+    }, 3600000);
   }
 
   function stopAutoRefresh() {
@@ -279,13 +291,14 @@
     }
   }
 
-  // Every fetchAllKPIs caller funnels through here — the manual button, the
-  // visibilitychange re-fetch and the initial load alike.
+  // Every fetchAllKPIs caller funnels through here. All FOUR of them: the manual
+  // refresh button, the visibilitychange re-fetch, the initial page load, and
+  // the hourly auto-refresh tick in startAutoRefresh.
   //
   // fetchAllKPIs re-throws after showing the error banner. A caller that only
   // chained .then() therefore lost BOTH timers for the life of the page on any
-  // failure, and left an unhandled rejection behind. The initial load was the
-  // worst of the three: the timers had never started, so there was no auto
+  // failure, and left an unhandled rejection behind. The initial load is the
+  // worst of the four: the timers had never started, so there was no auto
   // refresh to recover on and no heartbeat, on a page the user had not clicked
   // anything on yet.
   function restartTimersAfter(promise) {
@@ -364,7 +377,7 @@
         stopAutoRefresh();
         // The heartbeat now restarts with the auto-refresh rather than
         // synchronously ahead of it — a delay equal to one cached fetch
-        // (~20ms), in exchange for one restart path shared by all three
+        // (~20ms), in exchange for one restart path shared by all four
         // callers and no unhandled rejection on a failed re-focus.
         restartTimersAfter(fetchAllKPIs());
       }

@@ -228,21 +228,33 @@ def test_automatic_refresh_paths_pass_no_manual_flag() -> None:
 
     for name in _CLIENT_FETCH_BUNDLES:
         src = _strip_comments(_js(name))
-        assert re.search(r"setInterval\(\s*fetchAllKPIs\s*,", src), (
-            f"{name}: the hourly timer no longer passes fetchAllKPIs as a bare "
-            f"reference — check it is not wrapped in a call that supplies `true`"
-        )
-        # Property, not shape. This assertion used to pin the literal text
-        # `fetchAllKPIs().then(startAutoRefresh)`. On 2026-08-20 every caller was
-        # rerouted through restartTimersAfter() so that a failed fetch could no
-        # longer kill both timers, which changed that text at all three call
-        # sites. The PROPERTY this test exists to guard — automatic paths never
-        # request a cache bypass — is unaffected, so it is now asserted directly
-        # and will survive the next reshaping too.
+        # PROPERTY, NOT SHAPE — and this block replaced two shape assertions that
+        # both died on 2026-08-20, when all four fetchAllKPIs callers were routed
+        # through restartTimersAfter so a failed fetch could not kill the timers.
+        #
+        # The first pinned the literal `fetchAllKPIs().then(startAutoRefresh)` of
+        # the visibilitychange handler. Routing rewrote that text.
+        #
+        # The second required the hourly timer to pass a BARE function reference:
+        # `setInterval(fetchAllKPIs, ...)`. That one is worth remembering, because
+        # the shape it mandated was itself the hazard. A bare reference hands the
+        # callback whatever the host chooses to pass — Firefox historically passed
+        # an interval-lateness argument — which would land in `manual`, be truthy,
+        # and put ?refresh=1 on every tick of every open tab. The assertion was
+        # therefore deleted rather than loosened: there is no version of it that
+        # permits the safe shape without also permitting the unsafe one. It had
+        # also made the timer invisible as a caller, which is how it stayed an
+        # unguarded fourth one through two commits.
+        #
+        # Neither property was lost. Both are now carried by the extraction below
+        # — the tick calls fetchAllKPIs() explicitly, so it appears here as an
+        # empty argument and a `true` would still be caught — together with the
+        # setInterval/setTimeout guard in
+        # test_every_fetch_caller_routes_through_the_timer_restart_helper.
         #
         # Every call must pass either nothing (automatic) or the bare identifier
-        # `manual` (forwarding). A literal `true` anywhere here is the
-        # regression: it would bypass the cache on an unattended hourly tick.
+        # `manual` (forwarding). A literal `true` anywhere here is the regression:
+        # it would bypass the cache on an unattended hourly tick.
         calls = re.findall(r"(?<!function )fetchAllKPIs\(([^)]*)\)", src)
         assert calls, f"{name}: extracted no fetchAllKPIs call sites — the file moved"
         bad = [a.strip() for a in calls if a.strip() not in ("", "manual")]
@@ -252,8 +264,9 @@ def test_automatic_refresh_paths_pass_no_manual_flag() -> None:
             f"a literal. A hardcoded `true` bypasses the cache on every hourly tick."
         )
         assert any(a.strip() == "" for a in calls), (
-            f"{name}: no argument-less fetchAllKPIs call left — the automatic paths "
-            f"(initial load, visibilitychange) have gone or now pass a flag"
+            f"{name}: no argument-less fetchAllKPIs call left — the three automatic "
+            f"paths (initial load, visibilitychange, hourly tick) have gone or now "
+            f"pass a flag"
         )
         assert any(a.strip() == "manual" for a in calls), (
             f"{name}: nothing forwards `manual` to fetchAllKPIs, so the manual "
@@ -463,8 +476,9 @@ def test_every_fetch_caller_routes_through_the_timer_restart_helper() -> None:
 
     fetchAllKPIs re-throws after showing the error banner, so `.then(restart)`
     skips the restart on failure AND leaves an unhandled rejection. Both
-    dashboards had that shape at all three call sites: the manual button, the
-    visibilitychange re-fetch, and the initial page load.
+    dashboards had that shape at three call sites — the manual button, the
+    visibilitychange re-fetch and the initial page load — and a FOURTH that hid
+    behind a bare function reference: setInterval(fetchAllKPIs, 3600000).
 
     The initial load was the severe one. Its timers had never started, so a
     single failed first fetch left the page with no auto-refresh and no
@@ -488,10 +502,50 @@ def test_every_fetch_caller_routes_through_the_timer_restart_helper() -> None:
             f"defect reached through the dashboard object"
         )
 
+        # A bare reference handed to a timer is how the fourth caller hid for two
+        # commits: it is not a call, so the derived check below cannot see it, and
+        # the callback then receives whatever the host passes. Named separately
+        # from the catch-all so this regression fails with its own message.
+        assert not re.search(r"set(?:Interval|Timeout)\(\s*fetchAllKPIs\b", src), (
+            f"{name}: a timer takes a bare fetchAllKPIs reference. It bypasses "
+            f"restartTimersAfter (unhandled rejection once an hour), and the host "
+            f"may pass the callback an argument that lands in `manual` and puts "
+            f"?refresh=1 on every tick. Wrap it: setInterval(function () "
+            f"{{ restartTimersAfter(fetchAllKPIs()); }}, ...)."
+        )
+
+        # Derived, not counted: EVERY call of fetchAllKPIs must sit immediately
+        # inside restartTimersAfter(...). This is what makes the test's name true
+        # for callers that do not exist yet. The (?<!function ) lookbehind keeps
+        # the declaration itself out of the call set.
+        for match in re.finditer(r"(?<!function )fetchAllKPIs\s*\(", src):
+            preceding = src[: match.start()].rstrip()
+            assert preceding.endswith("restartTimersAfter("), (
+                f"{name}: fetchAllKPIs is called at offset {match.start()} without "
+                f"restartTimersAfter around it — ...{preceding[-70:]!r}. That caller "
+                f"skips the timer restart on failure and leaks an unhandled rejection."
+            )
+
+        # And every BARE mention must be the documented export, so nothing can be
+        # smuggled past the call check by passing the function around.
+        for match in re.finditer(r"fetchAllKPIs\b(?!\s*\()", src):
+            preceding = src[: match.start()].rstrip()
+            assert preceding.endswith("fetchAll:") or preceding.endswith("function"), (
+                f"{name}: fetchAllKPIs is referenced without being called at offset "
+                f"{match.start()} — ...{preceding[-70:]!r}. The only permitted bare "
+                f"reference is the `fetchAll:` dashboard export."
+            )
+
+        # Exact, not >=. A floor cannot detect an added-but-unrouted caller, which
+        # is the entire defect this guard exists to close — the hourly tick sat
+        # unrouted while `>= 3` stayed green. A legitimate fifth caller failing
+        # here IS the review gate, not brittleness: update the count and confirm
+        # the new caller is routed.
         callers = re.findall(r"(?<!function )restartTimersAfter\(", src)
-        assert len(callers) >= 3, (
-            f"{name}: only {len(callers)} restartTimersAfter call site(s); all three "
-            f"(manual refresh, visibilitychange, initial load) must go through it"
+        assert len(callers) == 4, (
+            f"{name}: {len(callers)} restartTimersAfter call sites, expected 4 "
+            f"(manual refresh, visibilitychange, initial load, hourly tick). If you "
+            f"added a caller, route it through the helper and raise this number."
         )
 
 
