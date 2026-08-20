@@ -500,6 +500,29 @@
     }
   }
 
+  // Every fetchAllKPIs caller funnels through here — the manual button, the
+  // visibilitychange re-fetch and the initial load alike.
+  //
+  // fetchAllKPIs re-throws after showing the error banner. A caller that only
+  // chained .then() therefore lost BOTH timers for the life of the page on any
+  // failure, and left an unhandled rejection behind. The initial load was the
+  // worst of the three: the timers had never started, so there was no auto
+  // refresh to recover on and no heartbeat, on a page the user had not clicked
+  // anything on yet.
+  function restartTimersAfter(promise) {
+    return promise.catch(function (err) {
+      // Swallowed so the restart below runs on both outcomes — but never
+      // silently. fetchAllKPIs wraps the render functions too, so a genuine
+      // coding error inside renderSection1..4 arrives here having already been
+      // mis-reported to the user as a connection error; without this line it
+      // would then vanish with no trace anywhere.
+      console.error('[Collections] refresh failed; restarting timers', err);
+    }).then(function () {
+      startAutoRefresh();
+      startHeartbeat();
+    });
+  }
+
   // ── Dark canvas activation (Pillar 1) ──────────────────────────────────────
 
   function evaluateCanvas() {
@@ -548,8 +571,11 @@
         stopHeartbeat();
       } else {
         stopAutoRefresh();
-        fetchAllKPIs().then(startAutoRefresh);
-        startHeartbeat();
+        // The heartbeat now restarts with the auto-refresh rather than
+        // synchronously ahead of it — a delay equal to one cached fetch
+        // (~20ms), in exchange for one restart path shared by all three
+        // callers and no unhandled rejection on a failed re-focus.
+        restartTimersAfter(fetchAllKPIs());
       }
     });
 
@@ -557,19 +583,13 @@
       get state() { return _lastFetchData; },
       fetchAll: fetchAllKPIs
     };
-    window.collectionsDashboard.fetchAll().then(function () {
-      startAutoRefresh();
-      startHeartbeat();
-    });
+    restartTimersAfter(window.collectionsDashboard.fetchAll());
   }
 
   window.collectionsRefresh = function (manual) {
     stopAutoRefresh();
     stopHeartbeat();
-    fetchAllKPIs(manual).then(function () {
-      startAutoRefresh();
-      startHeartbeat();
-    });
+    restartTimersAfter(fetchAllKPIs(manual));
   };
 
   document.addEventListener('DOMContentLoaded', init);

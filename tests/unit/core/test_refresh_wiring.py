@@ -232,9 +232,32 @@ def test_automatic_refresh_paths_pass_no_manual_flag() -> None:
             f"{name}: the hourly timer no longer passes fetchAllKPIs as a bare "
             f"reference — check it is not wrapped in a call that supplies `true`"
         )
-        assert re.search(r"fetchAllKPIs\(\s*\)\s*\.then\(\s*startAutoRefresh\s*\)", src), (
-            f"{name}: the visibilitychange handler no longer calls fetchAllKPIs() "
-            f"with no argument"
+        # Property, not shape. This assertion used to pin the literal text
+        # `fetchAllKPIs().then(startAutoRefresh)`. On 2026-08-20 every caller was
+        # rerouted through restartTimersAfter() so that a failed fetch could no
+        # longer kill both timers, which changed that text at all three call
+        # sites. The PROPERTY this test exists to guard — automatic paths never
+        # request a cache bypass — is unaffected, so it is now asserted directly
+        # and will survive the next reshaping too.
+        #
+        # Every call must pass either nothing (automatic) or the bare identifier
+        # `manual` (forwarding). A literal `true` anywhere here is the
+        # regression: it would bypass the cache on an unattended hourly tick.
+        calls = re.findall(r"(?<!function )fetchAllKPIs\(([^)]*)\)", src)
+        assert calls, f"{name}: extracted no fetchAllKPIs call sites — the file moved"
+        bad = [a.strip() for a in calls if a.strip() not in ("", "manual")]
+        assert not bad, (
+            f"{name}: fetchAllKPIs called with {bad} — an automatic path must pass "
+            f"nothing and a forwarding path must pass the `manual` parameter, never "
+            f"a literal. A hardcoded `true` bypasses the cache on every hourly tick."
+        )
+        assert any(a.strip() == "" for a in calls), (
+            f"{name}: no argument-less fetchAllKPIs call left — the automatic paths "
+            f"(initial load, visibilitychange) have gone or now pass a flag"
+        )
+        assert any(a.strip() == "manual" for a in calls), (
+            f"{name}: nothing forwards `manual` to fetchAllKPIs, so the manual "
+            f"refresh can no longer bypass the cache"
         )
 
 
@@ -416,3 +439,116 @@ def test_every_base_page_declares_a_refresh_strategy() -> None:
         f"GET), _CLIENT_FETCH_TEMPLATES (refreshes in place) or _NO_DATA_TEMPLATES."
     )
     assert not stale, f"listed templates that no longer exist: {stale}"
+
+
+# ── a failed fetch must not kill the page's timers ────────────────────────────
+
+
+def _restart_helper_body(src: str) -> str:
+    """Isolate restartTimersAfter's body, brace-balanced from its declaration."""
+    start = src.index("function restartTimersAfter")
+    depth = 0
+    for i in range(start, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : i + 1]
+    raise AssertionError("restartTimersAfter body is unbalanced — could not isolate it")
+
+
+def test_every_fetch_caller_routes_through_the_timer_restart_helper() -> None:
+    """No caller may consume fetchAllKPIs's promise directly.
+
+    fetchAllKPIs re-throws after showing the error banner, so `.then(restart)`
+    skips the restart on failure AND leaves an unhandled rejection. Both
+    dashboards had that shape at all three call sites: the manual button, the
+    visibilitychange re-fetch, and the initial page load.
+
+    The initial load was the severe one. Its timers had never started, so a
+    single failed first fetch left the page with no auto-refresh and no
+    heartbeat permanently — with no manual click available to recover, because
+    the user had not interacted with the page at all.
+    """
+    for name in _CLIENT_FETCH_BUNDLES:
+        src = _strip_comments(_js(name))
+
+        assert "function restartTimersAfter" in src, (
+            f"{name}: restartTimersAfter is gone — the one place that guarantees "
+            f"both timers restart whatever the fetch did"
+        )
+        assert not re.search(r"fetchAllKPIs\([^)]*\)\s*\.then\(", src), (
+            f"{name}: a caller chains .then() straight onto fetchAllKPIs again. "
+            f"That skips the restart on failure and leaves an unhandled rejection "
+            f"— route it through restartTimersAfter() instead."
+        )
+        assert not re.search(r"fetchAll\(\s*\)\s*\.then\(", src), (
+            f"{name}: a caller chains .then() onto the exposed fetchAll() — same "
+            f"defect reached through the dashboard object"
+        )
+
+        callers = re.findall(r"(?<!function )restartTimersAfter\(", src)
+        assert len(callers) >= 3, (
+            f"{name}: only {len(callers)} restartTimersAfter call site(s); all three "
+            f"(manual refresh, visibilitychange, initial load) must go through it"
+        )
+
+
+def test_the_restart_helper_restarts_both_timers_on_every_outcome() -> None:
+    """The rejection is swallowed so ONE restart path serves both outcomes.
+
+    Swallowing is what makes a single `.then()` reachable after a failure; the
+    alternative — .then(onOk, onErr) — duplicates the restart body and lets the
+    two copies drift.
+    """
+    for name in _CLIENT_FETCH_BUNDLES:
+        body = _restart_helper_body(_strip_comments(_js(name)))
+
+        assert ".catch(" in body, (
+            f"{name}: restartTimersAfter no longer catches. The rejection escapes "
+            f"and the restart never runs on a failed fetch."
+        )
+        assert ".then(" in body, f"{name}: restartTimersAfter no longer chains a restart"
+
+        catch_at, then_at = body.index(".catch("), body.rindex(".then(")
+        assert catch_at < then_at, (
+            f"{name}: the .then() restart runs BEFORE the .catch(), so it is still "
+            f"skipped when the fetch rejects"
+        )
+        restart = body[then_at:]
+        for fn in ("startAutoRefresh()", "startHeartbeat()"):
+            assert fn in restart, (
+                f"{name}: {fn} is not in the post-catch restart, so a failed fetch "
+                f"still leaves that timer dead for the life of the page"
+            )
+
+
+def test_the_swallowing_catch_is_never_silent() -> None:
+    """A swallowed rejection must still reach the console.
+
+    fetchAllKPIs wraps the render functions, not just the network calls. A
+    genuine coding error inside renderSection1..4 / renderKpiA..C is caught
+    there, mis-reported to the user as a connection error, and re-thrown — so
+    without a log here it would be swallowed with no trace in any surface a
+    developer looks at.
+    """
+    for name, prefix in (
+        ("collections.js", "[Collections]"),
+        ("customer_accounts.js", "[CustomerAccounts]"),
+    ):
+        body = _restart_helper_body(_strip_comments(_js(name)))
+        catch_body = body[body.index(".catch(") : body.rindex(".then(")]
+
+        assert "console.error(" in catch_body, (
+            f"{name}: restartTimersAfter swallows the rejection without logging it. "
+            f"A real bug in the render path would disappear entirely."
+        )
+        assert prefix in catch_body, (
+            f"{name}: the swallow log carries no {prefix} module prefix, so it "
+            f"cannot be attributed in a console shared by every page script"
+        )
+        assert re.search(r"console\.error\([^)]*,\s*err\s*\)", catch_body), (
+            f"{name}: the swallow log drops the error object — a message with no "
+            f"stack is barely better than silence"
+        )
