@@ -20,7 +20,7 @@
       </p>
     </div>
     <button id="bs-refresh-btn"
-      @click="load()"
+      @click="load(true)"
       :disabled="loading"
       class="btn btn-secondary btn-sm shrink-0">
       <svg class="w-3.5 h-3.5" :class="loading && 'animate-spin-slow'"
@@ -44,7 +44,7 @@
               d="M6 18L18 6M6 6l12 12"/>
       </svg>
       <span>{{ _t("bs_error") }}</span>
-      <button @click="load()"
+      <button @click="load(true)"
               class="ms-2 underline text-danger-600 dark:text-danger-400 text-xs">
         {{ _t("bs_try_again") }}
       </button>

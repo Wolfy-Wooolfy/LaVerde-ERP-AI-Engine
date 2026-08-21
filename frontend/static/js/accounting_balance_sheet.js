@@ -22,13 +22,24 @@ function balanceSheetPage() {
     init() {
       // Collections-style: the topbar refresh button refetches this page's data.
       var topbar = document.getElementById('refresh-btn');
-      if (topbar) topbar.onclick = () => this.load();
+      if (topbar) topbar.onclick = () => this.load(true);
       this.load();
     },
 
-    async load() {
+    // `manual` is true ONLY for a user-initiated refresh: the topbar button, the
+    // header button, and the error-banner retry. It gates the shared affordance
+    // in app.js (global loading bar + spinning topbar #refresh-icon) so the
+    // initial load on init() stays silent — the same rule collections.js and
+    // customer_accounts.js follow for their timers.
+    //
+    // Deliberately NOT threaded to crmWithRefresh. Every other manual refresh in
+    // the app adds ?refresh=1 to bypass a server cache; this endpoint is
+    // Cache-Control: no-store and uncached by design (accounting.py:75-78), so
+    // the parameter would imply a cache that does not exist.
+    async load(manual) {
       this.loading = true;
       this.error = false;
+      if (manual) window.crmRefreshFeedback.start();
       try {
         this.data = await window.crmApi.get('/api/v1/accounting/balance-sheet');
       } catch (e) {
@@ -38,6 +49,9 @@ function balanceSheetPage() {
         this.error = true;
       } finally {
         this.loading = false;
+        // In the finally, so a failed refresh clears the spinner too and the
+        // button is immediately clickable again.
+        if (manual) window.crmRefreshFeedback.stop();
       }
     },
 

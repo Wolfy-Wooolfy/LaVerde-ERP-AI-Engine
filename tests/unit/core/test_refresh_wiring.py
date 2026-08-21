@@ -77,7 +77,20 @@ def _strip_comments(js: str) -> str:
 
 # The two page bundles that fetch their own KPIs client-side. The CRM dashboard
 # is handled by app.js itself; the balance sheet is excluded (uncached route).
+#
+# Deliberately NOT widened to include the balance sheet. Several tests below use
+# this constant to assert timer-driven properties — most sharply, exactly four
+# restartTimersAfter call sites per bundle. The balance sheet has no timers at
+# all by design (no polling, no cache, no storage: see its own docstring), so it
+# is not a dashboard of that kind, and adding it here would fail those tests for
+# the right reason but the wrong cause.
 _CLIENT_FETCH_BUNDLES = ("collections.js", "customer_accounts.js")
+
+# Every bundle that owns a user-initiated refresh and must therefore show the
+# shared affordance while it runs. This is the one property the balance sheet
+# genuinely shares with the two dashboards, so it gets its own constant rather
+# than a widened _CLIENT_FETCH_BUNDLES.
+_MANUAL_AFFORDANCE_BUNDLES = _CLIENT_FETCH_BUNDLES + ("accounting_balance_sheet.js",)
 
 # Pages whose data arrives with the page GET and which therefore opt in to the
 # reload strategy. Hardcoded ON PURPOSE — this list IS the scope decision, and
@@ -681,27 +694,48 @@ def test_crm_refresh_uses_the_shared_affordance() -> None:
 
 
 def test_the_dashboards_show_the_affordance_only_when_manual() -> None:
-    """The whole point of the manual flag, applied to the spinner.
+    r"""The whole point of the manual flag, applied to the spinner.
 
-    The hourly timer, the visibilitychange re-fetch and the initial page load
-    all run unattended. A loading bar appearing on its own once an hour is a
-    regression, not a feature — so both calls must sit behind `if (manual)`.
+    Raw docstring: it quotes the regex below, and `\.` in a normal string is an
+    invalid escape — a SyntaxWarning today, a SyntaxError in a later Python.
+
+    On the two dashboards the hourly timer, the visibilitychange re-fetch and
+    the initial page load all run unattended; on the balance sheet it is the
+    init() load. A loading bar appearing with nobody watching is a regression,
+    not a feature — so every call must sit behind `if (manual)`.
+
+    The `(?:window\.)?` prefix is optional on purpose. The balance sheet reaches
+    cross-script globals as `window.crmApi` / `window.crmRefreshFeedback`, which
+    is that file's own established idiom, while the two dashboards use the bare
+    identifier. The property under test is the gate, not the spelling — and
+    because the prefix sits inside the match, the `if (manual)` check still
+    inspects the text immediately before the whole expression either way.
     """
-    for name in _CLIENT_FETCH_BUNDLES:
+    for name in _MANUAL_AFFORDANCE_BUNDLES:
         src = _strip_comments(_js(name))
 
-        for call in ("crmRefreshFeedback.start()", "crmRefreshFeedback.stop()"):
-            assert call in src, f"{name}: {call} is missing — a slow manual refresh shows nothing"
-            for match in re.finditer(re.escape(call), src):
+        for method in ("start", "stop"):
+            pattern = r"(?:window\.)?crmRefreshFeedback\." + method + r"\(\)"
+            found = list(re.finditer(pattern, src))
+            assert found, (
+                f"{name}: crmRefreshFeedback.{method}() is missing — a slow manual "
+                f"refresh shows nothing while it runs"
+            )
+            for match in found:
                 window = src[max(0, match.start() - 60) : match.start()]
                 assert re.search(r"if\s*\(\s*manual\s*\)\s*$", window.rstrip()), (
-                    f"{name}: {call} is not guarded by `if (manual)`. An automatic "
-                    f"refetch would flash the loading bar with nobody watching."
+                    f"{name}: crmRefreshFeedback.{method}() is not guarded by "
+                    f"`if (manual)`. An automatic refetch would flash the loading "
+                    f"bar with nobody watching."
                 )
 
-        # And the stop must be chained onto restartTimersAfter, whose promise
-        # never rejects — otherwise a failed refresh leaves the icon spinning
-        # and the button looking permanently busy.
+    # Timer-specific, so this half stays on the two timer-driven dashboards: the
+    # stop must be chained onto restartTimersAfter, whose promise never rejects —
+    # otherwise a failed refresh leaves the icon spinning and the button looking
+    # permanently busy. The balance sheet has no timers and clears the affordance
+    # in its own `finally`, which the next test pins.
+    for name in _CLIENT_FETCH_BUNDLES:
+        src = _strip_comments(_js(name))
         assert re.search(
             r"restartTimersAfter\(fetchAllKPIs\(manual\)\)\s*\.then\(", src
         ), (
@@ -709,6 +743,45 @@ def test_the_dashboards_show_the_affordance_only_when_manual() -> None:
             f"non-rejecting promise, so a failed manual refresh can leave the icon "
             f"spinning with no way to clear it"
         )
+
+
+def test_balance_sheet_clears_the_affordance_in_a_finally() -> None:
+    """The balance sheet has no restartTimersAfter to hang its stop on, so the
+    equivalent guarantee is the `finally` it already had: a refresh that throws
+    must still clear the spinner and leave the button immediately clickable."""
+    src = _strip_comments(_js("accounting_balance_sheet.js"))
+    tail = src[src.index("} finally {") :]
+    assert "crmRefreshFeedback.stop()" in tail, (
+        "accounting_balance_sheet.js stops the affordance outside its finally "
+        "block — a request that throws would leave the topbar icon spinning with "
+        "no way for the user to clear it"
+    )
+
+
+def test_balance_sheet_does_not_reach_for_the_cache_bypass() -> None:
+    """The one manual refresh in the app that must NOT send ?refresh=1.
+
+    Every other manual path routes its URL through crmWithRefresh so the server
+    skips its in-memory cache. GET /api/v1/accounting/balance-sheet has no cache
+    to skip: it is computed fresh on every call and served Cache-Control:
+    no-store (accounting.py:75-78, balance_sheet_service.py:164). The parameter
+    would advertise a cache that does not exist, and invite someone to build one.
+
+    Unlike its neighbours this guard cannot be shown failing against the code as
+    first written — the balance sheet never had the parameter. It is here to stop
+    a future "make this consistent with the other two" edit, which is the
+    plausible mistake on this page.
+    """
+    src = _strip_comments(_js("accounting_balance_sheet.js"))
+    assert "crmWithRefresh" not in src, (
+        "accounting_balance_sheet.js routes its URL through crmWithRefresh. That "
+        "endpoint is uncached by design, so ?refresh=1 implies a cache that does "
+        "not exist — see the note above load()."
+    )
+    assert "refresh=1" not in src, (
+        "accounting_balance_sheet.js sends refresh=1 to an endpoint that is "
+        "Cache-Control: no-store and has no cache to bypass"
+    )
 
 
 def _brace_body(src: str, opener: str) -> str:
